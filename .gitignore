@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+
+# 生成/本地文件（如需把生成资源也纳入版本库，请删除下面两行）
+# assets/maps/
+# assets/role/
+
+# 临时测试产物（无头 Chrome / CDP 脚本 / 截图）
+_*.mjs
+_*.png
+_*.log
+*.log
+test/

@@ -1,0 +1,26 @@
+{
+  "name": "fanqing-fuming-rpg",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "《国殇之血色狼烟》网页移植版（纯前端 ES Module）+ 模块化内容编辑器",
+  "scripts": {
+    "start": "python serve.py 8000",
+    "dev": "vite",
+    "build:assets": "python build_assets.py .. assets",
+    "check": "node tools/check-arch.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node tools/check-arch.mjs && tsc --noEmit && vitest run",
+    "test:node": "node test/run.mjs",
+    "test:vitest": "vitest run",
+    "test:e2e": "playwright test",
+    "e2e": "playwright test",
+    "e2e:cdp": "node tools/e2e.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  }
+}

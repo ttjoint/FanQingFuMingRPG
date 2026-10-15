@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>国殇之血色狼烟 · 网页移植版</title>
+<style>
+  html,body{margin:0;background:#111;overflow:hidden;font-family:"Microsoft YaHei",sans-serif}
+  #wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  canvas{image-rendering:pixelated;background:#000;box-shadow:0 0 24px #000}
+  #hint{position:fixed;left:8px;top:6px;color:#9a9a9a;font-size:11px;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:3px}
+  #load{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#ccc;background:#000;z-index:9}
+</style>
+</head>
+<body>
+<div id="load">加载资源中…</div>
+<div id="wrap"><canvas id="cv" width="640" height="480"></canvas></div>
+<div id="hint">左键=跑/攻击(按住跟随鼠标)　右键=走/对话/开商店　1~9=用物品　Q/E=换技能　物品栏:左键拿起 右键使用/装备　Tab=背包　F5=存读档　F10=设置音量　F1=记事 F4=任务</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
