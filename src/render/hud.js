@@ -3,7 +3,7 @@ import { G } from "../core/state.js";
 import { VW, VH, ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { itemByName, skillByName } from "../core/registry.js";
-import { HOTBAR_X0, HOTBAR_DX, HOTBAR_Y, HOTBAR_W, HOTBAR_H } from "../core/layout.js";
+import { HOTBAR_X0, HOTBAR_DX, HOTBAR_Y, HOTBAR_W, HOTBAR_H, FN_BUTTONS, FN_BUTTON_Y, FN_BUTTON_SIZE } from "../core/layout.js";
 
 export function drawHUD() {
   const st = G.stats, Y = VH - 100;
@@ -18,15 +18,23 @@ export function drawHUD() {
   bar(44, Y + 48, 159, 7, st.hp, st.hpMax, "#c0392b");
   bar(259, Y + 48, 159, 7, st.mp, st.mpMax || 1, "#2d7fd0");
   bar(475, Y + 48, 159, 7, st.exp, st.expNext || 1, "#c9a227");
-  ctx.font = "11px 'Microsoft YaHei',SimHei,sans-serif";
-  ctx.fillStyle = "#ffe9a8";
-  ctx.fillText(`${st.hp} / ${st.hpMax}`, 48, Y + 45);
-  ctx.fillText(`${Math.round(st.mp)} / ${st.mpMax}`, 263, Y + 45);
-  ctx.fillText(`${st.exp} / ${st.expNext}`, 479, Y + 45);
-  ctx.fillStyle = "#ffd75e"; ctx.font = "11px 'Microsoft YaHei',SimHei,sans-serif";
-  // 等级写在中间的装饰框内（playerpanel.ini levelLbl 363,70），金钱值写在烘培的“金钱”字样下方
-  ctx.fillText("等级 " + st.level, 363, Y + 81);
-  ctx.fillText(String(st.money), 418, Y + 91);
+  ctx.font = "9px 'Microsoft YaHei',SimHei,sans-serif";
+  // 数值写在栏内部（居中、带描边，保证叠在彩色条上仍可读）
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const barText = (x, w, y, h, t) => {
+    ctx.lineWidth = 2; ctx.strokeStyle = "rgba(0,0,0,0.85)"; ctx.strokeText(t, x + w / 2, y + h / 2 + 0.5);
+    ctx.fillStyle = "#ffffff"; ctx.fillText(t, x + w / 2, y + h / 2 + 0.5);
+  };
+  barText(44, 159, Y + 48, 7, `${st.hp} / ${st.hpMax}`);
+  barText(259, 159, Y + 48, 7, `${Math.round(st.mp)} / ${st.mpMax}`);
+  barText(475, 159, Y + 48, 7, `${st.exp} / ${st.expNext}`);
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#ffd75e"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
+  // 等级：居中写在中间的小格内（playerpanel.ini levelLbl 363,70）；金钱：居中写在“金钱”字样下方（moneyLbl 418,80）
+  ctx.textAlign = "center";
+  ctx.fillText("等级" + st.level, 362, Y + 82);
+  ctx.fillText(String(st.money), 417, Y + 92);
+  ctx.textAlign = "left";
   // 技能图标按钮 (playerpanel.ini skillButton 7,10)
   const sk = skillByName(G.skill);
   const bt = getImg("assets/ui/button.png");
@@ -39,6 +47,11 @@ export function drawHUD() {
   // 装备（playerpanel.ini weaponButtons：Shi1=492 Wu=530 Jia=566 Shi2=603, y=12）
   for (const [k, x] of [["Shi1", 492], ["Wu", 530], ["Jia", 566], ["Shi2", 603]])
     drawItemSlot(G.equip[k], x, Y + 12, 35, 35);
+  // 右下角功能按钮：属性 / 记事 / 荣辱 / 任务 / 菜单
+  for (const b of FN_BUTTONS) {
+    const im = getImg("assets/ui/" + b.img + ".png");
+    if (im) ctx.drawImage(im, b.x, Y + FN_BUTTON_Y, FN_BUTTON_SIZE, FN_BUTTON_SIZE);
+  }
 }
 
 export function drawItemSlot(entry, x, y, w, h) {

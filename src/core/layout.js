@@ -34,6 +34,22 @@ export function shopCloseBtn() { return { x: SHOP_BOX.x + 78, y: SHOP_BOX.y + 27
 // 快捷栏 1~9 在 userpanel.bmp 上的真实格子（首格 x=6，间距 37，宽 35）
 export const HOTBAR_X0 = 6, HOTBAR_DX = 37, HOTBAR_Y = 61, HOTBAR_W = 35, HOTBAR_H = 35;
 
+// 右下角功能按钮（playerpanel.ini：property/note/rr/mission/menu，各 34x34，y=61）
+export const FN_BUTTONS = [
+  { k: "attr", img: "属性", x: 454 },
+  { k: "note", img: "记事", x: 491 },
+  { k: "honor", img: "荣辱", x: 528 },
+  { k: "mission", img: "任务", x: 565 },
+  { k: "menu", img: "菜单", x: 602 },
+];
+export const FN_BUTTON_Y = 61, FN_BUTTON_SIZE = 34;
+export function fnButtonAt(sx, sy) {
+  const Y = VH - 100;
+  for (const b of FN_BUTTONS)
+    if (sx >= b.x && sx < b.x + FN_BUTTON_SIZE && sy >= Y + FN_BUTTON_Y && sy < Y + FN_BUTTON_Y + FN_BUTTON_SIZE) return b.k;
+  return null;
+}
+
 export function insideShop(x, y) { return x >= SHOP_BOX.x && x < SHOP_BOX.x + SHOP_BOX.w && y >= SHOP_BOX.y && y < SHOP_BOX.y + SHOP_BOX.h; }
 export function insideShopClose(x, y) { const b = shopCloseBtn(); return x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h; }
 export function insideDialog(x, y) { return x >= 90 && x < 460 && y >= 15 && y < 365; }   // 头像 + dlgpanel

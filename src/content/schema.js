@@ -67,6 +67,22 @@ export function normalizeSkill(sk) {
   return o;
 }
 
+// ---- 装饰物模板（跨地图共享，按贴图源矩形为键）----
+// 同一张贴图在不同地图里是同一个模板：地基线/单一深度只编辑一次，所有实例共享。
+// 键 = "sx,sy,sw,sh"。
+export function decorSpriteKey(s) { return s[0] + "," + s[1] + "," + s[2] + "," + s[3]; }
+export function normalizeDecorTemplates(t) {
+  const out = {};
+  for (const k in (t || {})) {
+    const v = t[k]; if (!v || typeof v !== "object") continue;
+    const o = {};
+    if (v.single) o.single = true;
+    if (Array.isArray(v.line) && v.line.length) o.line = v.line.map(p => [num(p[0], 0), num(p[1], 0)]);
+    if (Object.keys(o).length) out[k] = o;
+  }
+  return out;
+}
+
 // ---- Config ----
 export const DEFAULT_CONFIG = {
   player: { hpMax: 200, mpMax: 100, expNext: 500, level: 1, money: 500, moral: 0, honor: 0, attack: 20, defence: 5, hit: 30 },

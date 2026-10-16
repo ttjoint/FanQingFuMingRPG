@@ -7,11 +7,12 @@ import { h, clear, deep } from "./dom.js";
 import { injectStyle } from "./style.js";
 import { renderForm, renderListEditor } from "./fields.js";
 import { mountMapEditor } from "./map-editor.js";
+import { modeControl, makeLineEditor, decorState } from "./decor-line.js";
 import { applyPatch, diffContent } from "../content/contentdb.js";
 import { attachLegacyViews } from "../content/mapDoc.js";
 import { buildMapData } from "../world/map.js";
 import { createRegistry } from "../content/registry.js";
-import { validateContent } from "../content/schema.js";
+import { validateContent, decorSpriteKey } from "../content/schema.js";
 import { getRuntime } from "../runtime/context.js";
 import {
   loadPack, savePack, activeId, DEFAULT_VERSION, createPack, setActive,
@@ -23,6 +24,15 @@ let root = null, ED = null, dirty = false, curTab = "maps";
 let mainEl, sideEl, statusEl, mapEditor = null;
 
 const mark = () => { dirty = true; };
+
+// 资源覆盆（上传替换）解析：assets 路径 → dataURL（若有覆盆），否则原路径。供表单图片预览用。
+const assetSrc = p => (ED && ED.images && ED.images[p]) || p;
+const roleSrc = model => {
+  const m = String(model || "").replace(/\.pmg$/, "");
+  const ch = A.chars && A.chars[m]; if (!ch) return null;
+  const blocks = ch.stand || ch.walk; const b = blocks && blocks[0] && blocks[0];
+  return (b && b.length) ? assetSrc("assets/role/" + b[0].replace(/\.bmp$/, ".png")) : null;
+};
 
 // ---------- Project ----------
 // base: 默认版本 ContentDB；pack: 内容包（补丁）。
@@ -114,7 +124,7 @@ function toast(msg) {
 }
 
 // ---------- 外壳 ----------
-const TABS = [["maps", "地图"], ["scripts", "脚本"], ["npcs", "NPC"], ["items", "物品"], ["skills", "技能"], ["config", "升级数值"], ["game", "标题结局"], ["assets", "图片素材"]];
+const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["items", "物品"], ["skills", "技能"], ["config", "升级数值"], ["game", "标题结局"], ["assets", "图片素材"]];
 let navEl;
 
 function buildShell() {
@@ -146,8 +156,8 @@ function selectTab(k) {
   if (mapEditor) { mapEditor.destroy(); mapEditor = null; }
   curTab = k; renderNav();
   clear(mainEl); clear(sideEl);
-  if (k !== "maps") sideEl.style.display = "none"; else sideEl.style.display = "";
-  ({ maps: tabMaps, scripts: tabScripts, npcs: tabNpcs, items: tabItems, skills: tabSkills, config: tabConfig, game: tabGame, assets: tabAssets })[k]();
+  if (k !== "maps" && k !== "decor") sideEl.style.display = "none"; else sideEl.style.display = "";
+  ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, items: tabItems, skills: tabSkills, config: tabConfig, game: tabGame, assets: tabAssets })[k]();
 }
 
 // ---------- 地图 ----------
@@ -166,8 +176,73 @@ function tabMaps() {
     scriptNames: Object.keys(ED.content.scripts || {}),
     models: Object.keys(A.chars || {}),
     images: ED.images,
+    decorTemplates: ED.content.decorTemplates,
     onChange: () => mark(),
   });
+}
+
+// ---------- 装饰物模板（跨地图共享，按贴图源矩形）----------
+const rfield = (label, ctl) => h("div", { class: "ed-row" }, h("label", null, label), ctl);
+const rnum = (val, on) => { const i = h("input", { type: "number", value: val }); i.oninput = () => on(Number(i.value) || 0); return i; };
+const rhint = t => h("div", { class: "ed-hint" }, t);
+let decorSelKey = null;
+
+// 同一贴图源矩形 = 同一模板（跨地图共用）。遍历 ED.maps 本体，不依赖 mapsManifest（更健壮）。
+function collectTemplates() {
+  const map = new Map();
+  for (const name of Object.keys(ED.maps || {})) {
+    const m = ED.maps[name]; if (!m || !m.objects) continue;
+    for (const o of m.objects) {
+      if (!o || !Array.isArray(o.sprite)) continue;
+      const k = decorSpriteKey(o.sprite);
+      let e = map.get(k);
+      if (!e) { e = { key: k, sprite: o.sprite, tiles: o.tiles, count: 0, maps: new Set() }; map.set(k, e); }
+      e.count++; e.maps.add(name);
+      if ((!e.tiles || !e.tiles.length) && o.tiles && o.tiles.length) e.tiles = o.tiles;
+    }
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count || (a.sprite[2] * a.sprite[3]) - (b.sprite[2] * b.sprite[3]));
+}
+function tplOf(key, create) { const t = ED.content.decorTemplates || (ED.content.decorTemplates = {}); let v = t[key]; if (!v && create) v = t[key] = {}; return v || {}; }
+
+function tabDecor() {
+  const all = collectTemplates();
+  mainEl.append(h("h3", null, "装饰物模板（共 " + all.length + "，跨地图同一贴图共用）"));
+  mainEl.append(rhint("同一张贴图在不同地图里是同一个模板：地基线 / 深度模式只编辑一次，所有实例共享。手画：拖黄线控制点、空白处单击加点、右键删点；黄线可越出贴图（拖到下方即让青线覆盖整幅 → 完全遮蔽）。"));
+  const tbl = h("table", { class: "ed-table" });
+  const head = h("tr"); for (const l of ["贴图", "出现", "地图", "模式"]) head.append(h("th", null, l));
+  tbl.append(h("thead", null, head));
+  const body = h("tbody"); tbl.append(body); mainEl.append(tbl);
+  if (!all.length) mainEl.append(rhint("（未找到装饰物：请确认地图数据已加载）"));
+
+  const modeLabel = t => { const st = decorState(t); return st === "single" ? "单一" : (st === "line" ? "手画" : "自动"); };
+  const renderRows = () => {
+    for (const x of all) {
+      const tr = [...body.children].find(t => t.dataset.k === x.key);
+      if (tr) tr.children[3].textContent = modeLabel(tplOf(x.key, false));
+    }
+  };
+  const renderSide = () => {
+    clear(sideEl);
+    const cur = all.find(x => x.key === decorSelKey);
+    if (!cur) { sideEl.append(rhint("选择左侧一个模板")); return; }
+    const s = cur.sprite, tiles = cur.tiles, tpl = tplOf(cur.key, true);
+    sideEl.append(h("h3", null, "模板 " + s[2] + "×" + s[3]));
+    sideEl.append(rhint("出现 " + cur.count + " 处：" + [...cur.maps].join("、")));
+    sideEl.append(rfield("深度模式", modeControl(s, tiles, tpl, 64, () => { mark(); renderSide(); renderRows(); })));
+    if (decorState(tpl) === "line") sideEl.append(h("div", { class: "ed-row" }, h("button", { class: "ed-btn", onclick: () => { delete tpl.line; mark(); renderSide(); renderRows(); } }, "恢复自动地基线")));
+    sideEl.append(h("h3", null, "地基线 / 头顶线"));
+    sideEl.append(makeLineEditor(s, tiles, tpl, 64, sideEl.clientWidth - 30, () => { mark(); renderRows(); }));
+    sideEl.append(rhint("黄=地基线（可越出贴图）；青=头顶最高线（其上→覆盖层，永远遮挡玩家）"));
+  };
+  for (const x of all) {
+    const tr = h("tr", { class: decorSelKey === x.key ? "on" : "", onclick: () => { decorSelKey = x.key; for (const t of body.children) t.classList.toggle("on", t.dataset.k === x.key); renderSide(); } });
+    tr.dataset.k = x.key;
+    tr.append(h("td", null, x.sprite[2] + "×" + x.sprite[3]), h("td", null, String(x.count)), h("td", null, [...x.maps].join("、")), h("td", null, modeLabel(tplOf(x.key, false))));
+    body.append(tr);
+  }
+  if (!decorSelKey || !all.some(x => x.key === decorSelKey)) decorSelKey = all.length ? all[0].key : null;
+  renderSide();
 }
 
 // ---------- 脚本 ----------
@@ -210,7 +285,8 @@ const NPC_SCHEMA_FIELDS = [
 function npcSchema() {
   return NPC_SCHEMA_FIELDS.map(f => {
     const o = /** @type {any} */ ({ ...f });
-    if (f.k === "model") o.list = Object.keys(A.chars || {});
+    if (f.k === "model") { o.list = Object.keys(A.chars || {}); o.img = n => roleSrc(n.model); }
+    if (f.k === "portrait") o.img = n => n.portrait ? assetSrc("assets/face/" + n.portrait.replace(/\.bmp$/, ".png")) : null;
     if (f.k === "script") o.list = Object.keys(ED.content.scripts || {});
     if (f.k === "drops") o.items = ED.items.map(x => x.name);
     if (f.k === "skills") { o.options = ED.skills.map(x => x.name); o.addLabel = "＋ 添加技能"; }
@@ -225,15 +301,15 @@ const ITEM_SCHEMA = [
   { k: "mp", label: "精力+", type: "number" }, { k: "attack", label: "攻击+", type: "number" },
   { k: "defence", label: "防御+", type: "number" }, { k: "attrA", label: "命中+", type: "number" },
   { k: "attrB", label: "属性B", type: "number" }, { k: "attrC", label: "属性C", type: "number" },
-  { k: "icon", label: "图标", type: "text" }, { k: "desc", label: "说明", type: "textarea", rows: 2 },
+  { k: "icon", label: "图标", type: "text", img: it => it.icon ? assetSrc("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png")) : null }, { k: "desc", label: "说明", type: "textarea", rows: 2 },
 ];
 const SKILL_SCHEMA = [
   { k: "name", label: "名称", type: "text" },
   { k: "type", label: "类型", type: "select", numeric: true, options: [[0, "治疗(自身)"], [1, "攻击"]] },
   { k: "range", label: "射程", type: "number" }, { k: "mp", label: "耗精力", type: "number" },
   { k: "power", label: "威力", type: "number" }, { k: "reqLevel", label: "需求等级", type: "number" },
-  { k: "sound", label: "音效", type: "text" }, { k: "icon", label: "图标", type: "text" },
-  { k: "frames", label: "特效帧(每行一个)", type: "lines", rows: 5 }, { k: "desc", label: "说明", type: "textarea", rows: 2 },
+  { k: "sound", label: "音效", type: "text" }, { k: "icon", label: "图标", type: "text", img: sk => sk.icon ? assetSrc("assets/skill_icons/" + sk.icon.replace(/\.bmp$/, ".png")) : null },
+  { k: "frames", label: "特效帧(每行一个)", type: "lines", rows: 5, img: sk => (sk.frames && sk.frames[0]) ? assetSrc("assets/skill/" + sk.frames[0].replace(/\.bmp$/, ".png")) : null }, { k: "desc", label: "说明", type: "textarea", rows: 2 },
 ];
 
 function tabNpcs() {

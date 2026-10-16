@@ -13,6 +13,8 @@ import { getImg, preloadChar } from "../core/assets.js";
 import { renderNpcPanel } from "./npc-panel.js";
 import { createHistory } from "./history.js";
 import { createSelection } from "./selection.js";
+import { makeLineEditor, modeControl, decorState } from "./decor-line.js";
+import { decorSpriteKey } from "../content/schema.js";
 import { attachLegacyViews } from "../content/mapDoc.js";
 
 const LAYERS = [
@@ -48,6 +50,9 @@ export function mountMapEditor(main, side, opts) {
   const scriptNames = opts.scriptNames || [];
   const models = opts.models || [];
   const images = opts.images || {};
+  // 跨地图共享的装饰物模板（按贴图源矩形）：地基线/深度模式只存一份
+  const decorTpls = opts.decorTemplates || (opts.decorTemplates = {});
+  const tplOf = s => { const k = decorSpriteKey(s); return decorTpls[k] || (decorTpls[k] = {}); };
 
   let cur = opts.current || names[0];
   let raw = maps[cur];
@@ -619,14 +624,7 @@ export function mountMapEditor(main, side, opts) {
     };
     return pcv;
   }
-  function objImagePreview(s, maxW) {
-    const sc = Math.min(3, maxW / s[2], 160 / s[3]);
-    const c = h("canvas", { class: "ed-objcanvas" });
-    c.width = Math.max(1, Math.round(s[2] * sc)); c.height = Math.max(1, Math.round(s[3] * sc));
-    const cx = c.getContext("2d"); cx.imageSmoothingEnabled = false;
-    cx.drawImage(A.obj, s[0], s[1], s[2], s[3], 0, 0, c.width, c.height);
-    return c;
-  }
+  // 对象精灵的逐列 alpha 底边、地基线编辑等已抽到 ./decor-line.js
   function tilePreview(sx, sy, scale) {
     const a = A.atlas;
     return h("div", { class: "ed-tileimg", style: "width:" + TILE_W * scale + "px;height:" + TILE_H * scale + "px;background-image:url(assets/atlas.png);background-repeat:no-repeat;background-size:" + (a.width * scale) + "px " + (a.height * scale) + "px;background-position:" + (-sx * scale) + "px " + (-sy * scale) + "px" });
@@ -716,8 +714,13 @@ export function mountMapEditor(main, side, opts) {
     side.append(field("X", numIn(s[4], v => { moveObjectTo(o, v, s[5]); mark(); draw(); })));
     side.append(field("Y", numIn(s[5], v => { moveObjectTo(o, s[4], v); mark(); draw(); })));
     side.append(field("深度层", numIn(o.layer || 0, v => { o.layer = Math.max(0, v); mark(); draw(); })));
-    side.append(h3("图片"));
-    side.append(objImagePreview(s, side.clientWidth - 30));
+    side.append(field("深度微调", numIn(o.bias || 0, v => { o.bias = Number(v) || 0; mark(); draw(); })));
+    side.append(hint("排序键 = 地基线在玩家所在 x 处的 y + 深度层×100000 + 深度微调。数值越大越晚绘制（越靠前）"));
+    side.append(field("深度模式", modeControl(s, o.tiles, tplOf(s), TILE_W, (rebuild) => { mark(); if (rebuild) buildSide(); draw(); })));
+    if (decorState(tplOf(s)) === "line") side.append(h("div", { class: "ed-row" }, btn("恢复自动地基线", "", () => { delete tplOf(s).line; mark(); buildSide(); draw(); })));
+    side.append(h3("图片（拖控制点/空白加点/右键删点；黄线可越出贴图）"));
+    side.append(makeLineEditor(s, o.tiles, tplOf(s), TILE_W, side.clientWidth - 30, () => { mark(); draw(); }));
+    side.append(hint("黄线=地基线（同一贴图跨地图共用模板；可越出贴图）；青线=头顶最高线（其上→覆盖层，永远遮挡玩家）"));
     side.append(h3("更换类别"));
     side.append(makeObjPalette(side.clientWidth - 24, 52, 4, paletteIndexOf(s), i => { setObjectTemplate(o, palette[i]); mark(); buildSide(); draw(); }));
     side.append(h("div", { class: "ed-row" }, btn("删除装饰", "danger", () => { raw.objects.splice(sel.index, 1); clearSel(); mark(); buildSide(); draw(); })));
@@ -796,6 +799,33 @@ export function mountMapEditor(main, side, opts) {
       side.append(h("div", { class: "ed-row" }, btn("清除入口", "danger", () => { raw.entry = null; clearSel(); mark(); buildSide(); draw(); })));
     }
   }
+  // 装饰物缩略图（截取对象精灵区域）
+  function objThumb(s, size) {
+    const sc = Math.min(size / s[2], size / s[3]);
+    const c = h("canvas"); c.width = Math.max(1, Math.round(s[2] * sc)); c.height = Math.max(1, Math.round(s[3] * sc));
+    const cx = c.getContext("2d"); cx.imageSmoothingEnabled = false;
+    try { cx.drawImage(A.obj, s[0], s[1], s[2], s[3], 0, 0, c.width, c.height); } catch (e) { }
+    return c;
+  }
+
+  // 当前地图的装饰物列表（点选即选中，右侧可编辑其深度模式/地基线）
+  function decorList() {
+    side.append(h3("装饰物列表 (" + raw.objects.length + ")"));
+    if (!raw.objects.length) { side.append(hint("本图没有装饰物")); return; }
+    const grid = h("div", { class: "ed-thumbgrid" });
+    raw.objects.forEach((o, i) => {
+      const s = o.sprite;
+      const tpl = tplOf(s);
+      const st = decorState(tpl);
+      const cell = h("div", { class: "ed-thumbcell" + (sel && sel.type === "object" && sel.index === i ? " on" : ""), onclick: () => { setSel({ type: "object", index: i }); buildSide(); draw(); } });
+      cell.append(objThumb(s, 52));
+      cell.append(h("span", null, "#" + (i + 1)));
+      cell.append(h("span", { class: "dim" }, s[2] + "×" + s[3] + " · " + (st === "single" ? "单一" : (st === "line" ? "手画" : "自动"))));
+      grid.append(cell);
+    });
+    side.append(grid);
+  }
+
   function unitList() {
     side.append(h3("单位列表 (" + raw.spawns.length + ")"));
     const grid = h("div", { class: "ed-thumbgrid" });
@@ -833,6 +863,7 @@ export function mountMapEditor(main, side, opts) {
     else if (layer === "unit" && sel && (sel.type === "spawn" || sel.type === "entry")) { unitSection(); shown = true; }
     if (!shown) mapProps();
     if (layer === "unit") unitList();
+    else if (layer === "decor") decorList();
   }
 
   // ---------- 启动 ----------

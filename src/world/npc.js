@@ -1,9 +1,9 @@
 // NPC 创建与 AI（闲逛 / 追击 / 攻击）。运行时上下文 ctx 由调用方注入。
 import { cellCenter, worldToCell, walkable, dirFromVec, randomPointInCell, overlapsUnit } from "../core/utils.js";
 import { preloadChar } from "../core/assets.js";
-import { findPath, pathToWorld } from "./pathfinding.js";
-import { setAnim, moveEntity, updateMove } from "../systems/motion.js";
-import { rollHit, dealDamage } from "../systems/combat.js";
+import { findPathPoints } from "./pathfinding.js";
+import { setAnim, moveEntity, updateMove, actionDuration, unitAhead } from "../systems/motion.js";
+import { rollHit, dealDamage, HIT_FRACTION } from "../systems/combat.js";
 import { resolveNpc } from "../content/contentdb.js";
 import { attachAll } from "../engine/ecs.js";
 import { UNIT_COMPONENTS } from "../runtime/components.js";
@@ -75,38 +75,71 @@ export function wanderIdle(ctx, n, dt) {
   for (let k = 0; k < 4 && overlapsUnit(n, dest.x, dest.y); k++) dest = randomPointInCell(tr, tc);
   if (overlapsUnit(n, dest.x, dest.y)) return;   // 目标格已被其它单位占据，换下次再游荡
   if (Math.hypot(dest.x - n.x, dest.y - n.y) < 12) return;
-  const path = findPath(ctx, c.row, c.col, tr, tc);
-  if (path && path.length) {
-    const pts = pathToWorld(path);
-    pts[pts.length - 1] = dest;
-    n.path = pts; n.speed = n.speed || 45;
-  }
+  const pts = findPathPoints(ctx, c.row, c.col, tr, tc, null, { x: n.x, y: n.y }, dest);
+  if (pts && pts.length) { n.path = pts; n.speed = n.speed || 45; }
 }
 
 export function npcAI(ctx, n, dt) {
   const g = ctx.state, CFG = ctx.config;
-  if (n.dead || !g.player || g.player.dead) return;
+  if (n.dead) return;
   const p = g.player;
   n.attackCD -= dt;
   if (n.dmgT > 0) n.dmgT -= dt;
+
+  // 挥砍“提交”：一旦出手就把这一刀播完。**不因目标移动/离开近战/死亡而中断**（后摇完整）。
+  if (n.atkT > 0) {
+    n.atkT -= dt; n.swingT = (n.swingT || 0) + dt;
+    if (n.atkT <= 0) n.animSpeed = 1;   // 挥砍结束，恢复正常速度
+    setAnim(n, "fight");
+    if (p && !p.dead && n.hitPending && n.swingT >= (n.swingTotal || 0) * HIT_FRACTION) {
+      n.hitPending = false;
+      const nhit = CFG.combat.npcHitBase + Math.min(CFG.combat.npcHitPerLevel, n.level || 10);
+      // 原版：NPC 的 role+0x64 != 0，掷骰会平方（17 → 89）；玩家为 0，不平方。
+      if (rollHit(nhit, true)) {
+        g.stats.hp -= dealDamage(n.atk, 0, g.stats.defence);
+        if (g.stats.hp <= 0) {
+          g.stats.hp = 0;
+          p.dead = true;
+          if (p.atkT > 0) p.pendingDie = true;   // 玩家也在挥砍：先播完这一刀再倒地
+          else { p.action = "die"; p.frame = 0; p.ft = 0; }
+        }
+      }
+    }
+    return;
+  }
+
+  if (!p || p.dead) return;
   const d = Math.hypot(p.x - n.x, p.y - n.y);
   if (!n.attackable) { wanderIdle(ctx, n, dt); return; }
   if (!n.aggro && n.aggressive && d < CFG.combat.npcAggro) n.aggro = true;
   if (!n.aggro) { wanderIdle(ctx, n, dt); return; }
   if (g.dialog || g.script) { setAnim(n, "stand"); return; }
   if (d > CFG.combat.npcMelee) {
-    moveEntity(n, p.x, p.y, n.runSpeed || 70, true);
+    // 追击也走 A*（绕开墙与其它单位）；不可达时才直走。
+    const tgt = worldToCell(p.x, p.y), cc = worldToCell(n.x, n.y);
+    const needReplan = !n.path || !n.path.length || n.chaseTarget !== p || !n.chaseCell || n.chaseCell.row !== tgt.row || n.chaseCell.col !== tgt.col;
+    n.repathT = Math.max(0, (n.repathT || 0) - dt);
+    const ahead = n.path && n.path.length && n.repathT <= 0 && unitAhead(n, n.path[0].x, n.path[0].y, 90);
+    if (needReplan || ahead) {
+      const pts = findPathPoints(ctx, cc.row, cc.col, tgt.row, tgt.col, { avoidUnits: true, mover: n }, { x: n.x, y: n.y });
+      n.path = (pts && pts.length) ? pts : null;
+      n.chaseCell = tgt; n.chaseTarget = p;
+      n.repathT = 0.35;
+    }
+    if (n.path && n.path.length) updateMove(n, dt);
+    else moveEntity(n, p.x, p.y, n.runSpeed || 70, true);
     setAnim(n, "walk");
   } else {
-    setAnim(n, "fight"); n.dir = dirFromVec(p.x - n.x, p.y - n.y);
+    n.path = null;   // 进入近战：停步，下次追击重新规划
+    n.dir = dirFromVec(p.x - n.x, p.y - n.y);   // 未挥砍时才转向（一旦出手方向锁定）
     if (n.attackCD <= 0) {
-      n.attackCD = CFG.combat.npcAttackCD;
-      const nhit = CFG.combat.npcHitBase + Math.min(CFG.combat.npcHitPerLevel, n.level || 10);
-      // 原版：NPC 的 role+0x64 != 0，掷骰会平方（17 → 89）；玩家为 0，不平方。
-      if (rollHit(nhit, true)) {
-        g.stats.hp -= dealDamage(n.atk, 0, g.stats.defence);
-        if (g.stats.hp <= 0) { g.stats.hp = 0; g.player.dead = true; g.player.action = "die"; g.player.frame = 0; g.player.ft = 0; }
-      }
-    }
+      const dur = actionDuration(n, "fight", ctx.assets.chars);
+      const interval = Math.max(0.3, CFG.combat.npcAttackCD);   // 攻击间隔
+      n.atkT = interval; n.swingTotal = interval; n.swingT = 0;
+      n.action = "fight"; n.frame = 0; n.ft = 0;   // 动画从首帧开始，与挥砍计时同步
+      n.animSpeed = dur / interval;                 // 动画配合间隔加减速
+      n.hitPending = true;
+      n.attackCD = interval;
+    } else setAnim(n, "fight");
   }
 }

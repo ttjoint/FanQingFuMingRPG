@@ -1,6 +1,6 @@
 // ContentDB：内容定义的规范模型（Record<id, Def>），由旧 assets 数据构建，
 // 也可由打包补丁（patch）覆盖。构建脚本、运行时、编辑器共用这一份结构。
-import { CONTENT_VERSION, normalizeNpc, normalizeItem, normalizeSkill, normalizeConfig, normalizeMapDoc } from "./schema.js";
+import { CONTENT_VERSION, normalizeNpc, normalizeItem, normalizeSkill, normalizeConfig, normalizeMapDoc, normalizeDecorTemplates } from "./schema.js";
 
 const deep = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
 export const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -20,6 +20,7 @@ export function buildContentDB(assets, mapDocs) {
     npcs, npcOrder, items, itemOrder, skills, skillOrder, scripts,
     game: deep(assets.game) || {}, transitions: deep(assets.transitions) || {}, mapsIndex: deep(assets.mapsIndex) || {},
     mapsManifest: (assets.mapsManifest || []).slice(), mapDocs: docs,
+    decorTemplates: normalizeDecorTemplates(assets.decorTemplates || {}),   // 跨地图共享的装饰物模板
   };
 }
 
@@ -32,6 +33,7 @@ export function contentToLegacy(content) {
     scripts: content.scripts,
     config: content.config, game: content.game,
     transitions: content.transitions, mapsIndex: content.mapsIndex, mapsManifest: content.mapsManifest,
+    decorTemplates: content.decorTemplates || {},
   };
 }
 
@@ -52,6 +54,15 @@ export function diffContent(base, next) {
   tableDiff("skills", "removedSkills", base.skills, next.skills, next.skillOrder);
   tableDiff("scripts", "removedScripts", base.scripts, next.scripts, Object.keys(next.scripts));
   for (const k of ["config", "game", "mapsIndex", "transitions"]) if (!eq(base[k], next[k])) patch.content[k] = deep(next[k]);
+  // 装饰物模板（按贴图键）：只存非空且变化的条目
+  {
+    const b = base.decorTemplates || {}, n = next.decorTemplates || {};
+    const mod = {}, removed = [];
+    for (const k in n) { const v = normalizeDecorTemplates({ x: n[k] }).x; if (!v) continue; if (!eq(b[k], v)) mod[k] = v; }
+    for (const k in b) if (!(k in n) || !normalizeDecorTemplates({ x: n[k] }).x) removed.push(k);
+    if (Object.keys(mod).length) patch.content.decorTemplates = mod;
+    if (removed.length) patch.content.removedDecorTemplates = removed;
+  }
   for (const id in next.mapDocs) if (!eq(base.mapDocs[id], next.mapDocs[id])) patch.maps[id] = deep(next.mapDocs[id]);
   patch.removedMaps = Object.keys(base.mapDocs).filter(id => !(id in next.mapDocs));
   if (!Object.keys(patch.content).length) delete patch.content;
@@ -74,6 +85,13 @@ export function applyPatch(base, patch) {
   applyTable("skills", "removedSkills", out.skillOrder);
   applyTable("scripts", "removedScripts", null);
   for (const k of ["config", "game", "mapsIndex", "transitions"]) if (c[k] !== undefined) out[k] = deep(c[k]);
+  {
+    if (!out.decorTemplates) out.decorTemplates = {};
+    const mod = c.decorTemplates || {};
+    for (const k in mod) out.decorTemplates[k] = deep(mod[k]);
+    for (const k of (c.removedDecorTemplates || [])) delete out.decorTemplates[k];
+    out.decorTemplates = normalizeDecorTemplates(out.decorTemplates);
+  }
   out.config = normalizeConfig(out.config);
   for (const id in (patch.maps || {})) out.mapDocs[id] = normalizeMapDoc(patch.maps[id]);
   for (const id of (patch.removedMaps || [])) delete out.mapDocs[id];

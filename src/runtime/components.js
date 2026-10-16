@@ -8,7 +8,7 @@ export const Stats = defineComponent("stats", { hp: 0, hpMax: 0, atk: 0, def: 0,
 export const Motion = defineComponent("motion", { path: null, speed: 45, runSpeed: 70, running: false, target: null, moveGoal: null, stuckT: 0, pickup: null });
 export const AI = defineComponent("behavior", { ai: 0, aggro: false, aggressive: false, attackCD: 0, wanderT: 0, dieT: 0, dmgT: 0, talkT: 0 });
 export const Combat = defineComponent("combat", { attackable: false, atkT: 0, dead: false });
-export const Collider = defineComponent("collider", { radiusX: 16 });
+export const Collider = defineComponent("collider", { radiusX: 0 });   // 0 = 用 UNIT_RX 默认（不要在这里写死，否则会覆盖默认半径）
 export const Loot = defineComponent("loot", { drops: [] });
 
 // 单位（玩家 / NPC）共用的组件集合。

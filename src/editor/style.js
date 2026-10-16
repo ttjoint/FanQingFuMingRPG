@@ -76,6 +76,10 @@ table.ed-table tr.on td{background:#2b3a52;color:#fff}
 .ed-tileimg.on{border-color:#f0d060}
 .ed-objwrap{max-height:230px;overflow:auto;padding:3px;border:1px solid #2c3038;border-radius:3px;background:#0c0e11}
 .ed-objcanvas{display:block;cursor:pointer;image-rendering:pixelated}
+/* ---- 表单图片字段预览 ---- */
+.ed-imgwrap{display:flex;align-items:center;gap:8px;margin:-2px 0 6px 104px}
+.ed-fieldimg{max-width:56px;max-height:56px;image-rendering:pixelated;background:#0c0e11;border:1px solid #2c3038;border-radius:3px;object-fit:contain}
+.ed-imghint{color:#6b727c;font-size:11px}
 `;
 
 export function injectStyle() {

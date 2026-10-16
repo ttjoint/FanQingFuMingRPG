@@ -1,8 +1,10 @@
 // 存读档（localStorage）。ctx 由调用方注入。
 import { VW, VH } from "../core/constants.js";
-import { loadMap } from "../world/map.js";
+import { loadMap, setPlayer } from "../world/map.js";
 import { placeFree } from "../world/npc.js";
 import { preloadChar } from "../core/assets.js";
+import { worldToCell } from "../core/utils.js";
+import { nearestWalkable } from "../world/pathfinding.js";
 import { reindex } from "./inventory.js";
 import { closeShop } from "./shop.js";
 import { playSound } from "./audio.js";
@@ -98,10 +100,18 @@ export function deserializeGame(ctx, d) {
   G.factions = d.factions || []; G.love = d.love || {}; G.vips = d.vips || {}; G.cursor = null;
   reindex(G);
   loadMap(ctx, d.currentMap);
+  if (!G.map) throw new Error("地图「" + d.currentMap + "」不存在（可能已被编辑器删除/改名）");   // 避免读档后黑屏
   const snaps = d.npcs || [];
   G.npcs = snaps.map(s => npcFromSave(ctx, s));
   G.ground = d.ground ? JSON.parse(JSON.stringify(d.ground)) : [];
   for (const n of G.npcs) preloadChar(n.model);
+  // 从标题菜单读档时主角对象还不存在（本次会话未开局）：按存档坐标创建主角。
+  // 否则没有玩家 → cameraSystem 不运行 → 相机停在 (0,0)，地图被画到屏幕外 → 画面全黑。
+  if (d.player && !G.player) {
+    const c = worldToCell(d.player.x, d.player.y);
+    const t = nearestWalkable(ctx, c.row, c.col) || c;
+    setPlayer(ctx, t.row, t.col, d.player.dir || 0);
+  }
   if (d.player && G.player) {
     G.player.x = d.player.x; G.player.y = d.player.y; G.player.dir = d.player.dir || 0;
     G.player.path = null; G.player.target = null; G.player.pickup = null; G.player.action = "stand"; G.player.dead = false;

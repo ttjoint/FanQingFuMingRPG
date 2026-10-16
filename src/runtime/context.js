@@ -52,6 +52,7 @@ export function createRuntime() {
       A.npcsData = legacy.npcs; A.items = legacy.items; A.skills = legacy.skills;
       A.scripts = legacy.scripts; A.game = legacy.game; A.transitions = legacy.transitions;
       A.mapsIndex = legacy.mapsIndex; A.config = legacy.config;
+      A.decorTemplates = legacy.decorTemplates || {};   // 跨地图共享的装饰物模板（手画地基线/单一深度）
       setConfig(A.config);
 
       A.mapsManifest = content.mapsManifest;

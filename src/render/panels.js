@@ -22,7 +22,7 @@ export function drawPanels() {
   ctx.fillStyle = "rgba(20,16,12,0.95)"; ctx.fillRect(x, y, w, h);
   ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2); ctx.lineWidth = 1;
   ctx.fillStyle = "#f0d060"; ctx.font = "bold 15px sans-serif";
-  const title = G.panel === "mission" ? "任务" : G.panel === "note" ? "记事" : "包裹";
+  const title = ({ mission: "任务", note: "记事", attr: "属性", honor: "荣辱" })[G.panel] || "包裹";
   ctx.fillText(title, x + 14, y + 24);
   ctx.font = "13px sans-serif"; ctx.fillStyle = "#e8dcc0";
   let ty = y + 50;
@@ -35,6 +35,21 @@ export function drawPanels() {
     }
   } else if (G.panel === "note") {
     G.notes.forEach(n => { ty += wrapText(n, x + 14, ty, w - 28, 18) * 18 + 8; });
+  } else if (G.panel === "attr") {
+    const st = G.stats;
+    const line = t => { ctx.fillText(t, x + 14, ty); ty += 26; };
+    line(`等级：${st.level}　　经验：${st.exp} / ${st.expNext}`);
+    line(`体力：${st.hp} / ${st.hpMax}　　精力：${Math.round(st.mp)} / ${st.mpMax}`);
+    line(`攻击：${st.attack}　　防御：${st.defence}　　命中：${st.hit}`);
+    line(`银两：${st.money}　　道德：${st.moral}　　声望：${st.honor}`);
+    line(`技能：${G.skills.join("、")}`);
+  } else if (G.panel === "honor") {
+    const st = G.stats;
+    const line = t => { ctx.fillText(t, x + 14, ty); ty += 26; };
+    line(`声望：${st.honor}　　道德：${st.moral}`);
+    line("门派 / 势力：" + (G.factions.length ? G.factions.join("、") : "（无）"));
+    const loves = Object.keys(G.love).filter(k => G.love[k]);
+    line("情缘：" + (loves.length ? loves.map(k => k + "(" + G.love[k] + ")").join("、") : "（无）"));
   } else {
     ctx.fillStyle = "#9fd0ff"; ctx.fillText("技能：" + G.skills.join("、"), x + 14, y + 50);
   }

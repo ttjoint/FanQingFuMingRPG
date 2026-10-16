@@ -1,6 +1,6 @@
 // 主渲染：世界（地形 + 对象 + 角色 + 掉落物 + 特效）与所有 UI 的叠加顺序。
 import { G, A } from "../core/state.js";
-import { VW, VH, ctx } from "../core/constants.js";
+import { VW, VH, ctx, BUILD } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { itemByName } from "../core/registry.js";
 import { drawHUD, drawCursorItem } from "./hud.js";
@@ -45,19 +45,9 @@ export function anchorOf(im, name) {
   ANCHOR[name] = a; return a;
 }
 
-// 深度排序键：角色的脚底 y。若角色正站在某个建筑/树木的“地基矩形”上（例如门口的格子上），
-// 则把它的排序提到该对象之后，使角色显在墙体前面；其他情况（在建筑后面/旁边）保持原样，
-// 因此不会像“整体切分”那样把本来该遮挡角色的屋顶/墙抬到角色前面。
+// 深度排序键：角色的脚底 y。装饰物的覆盖层（ROOF_TOP）永远在角色之上，这里无需再提升。
 export function entitySortY(e) {
-  let y = e.y;
-  const objs = G.map.objects;
-  for (let i = 0; i < objs.length; i++) {
-    const f = objs[i].foot;
-    if (f && e.x >= f.x0 - 2 && e.x <= f.x1 + 2 && e.y >= f.y0 - 2 && e.y <= f.y1 + 2) {
-      if (objs[i].sortY + 0.5 > y) y = objs[i].sortY + 0.5;
-    }
-  }
-  return y;
+  return e.y;
 }
 
 export function render() {
@@ -78,7 +68,7 @@ export function render() {
   const camX = Math.round(cam.x), camY = Math.round(cam.y);
   ctx.drawImage(m.terrain, m.minX - camX, m.minY - camY);
 
-  // 收集可绘制对象（含玩家/NPC/掉落物），按 sortY 排序
+  // 收集可绘制对象（含玩家/NPC/掉落物），按 sortY 排序（对象已拆成逐格块/覆盖层块）。
   const list = [];
   for (const o of m.objects) {
     const s = o.sprite;
@@ -92,7 +82,31 @@ export function render() {
   for (const it of list) {
     if (it.sprite) {
       const s = it.sprite;   // [sx0, sy0, sw, sh, dxa, dya]
-      ctx.drawImage(A.obj, s[0], s[1], s[2], s[3], s[4] - camX, s[5] - camY, s[2], s[3]);
+      if (it.polygon) {      // 沿蓝线（斜线）精确裁剪 → 细腻的斜边遮蔽
+        ctx.save();
+        ctx.beginPath();
+        const p0 = it.polygon[0];
+        ctx.moveTo(p0[0] - camX, p0[1] - camY);
+        for (let k = 1; k < it.polygon.length; k++) { const p = it.polygon[k]; ctx.lineTo(p[0] - camX, p[1] - camY); }
+        ctx.closePath(); ctx.clip();
+        ctx.drawImage(A.obj, s[0], s[1], s[2], s[3], s[4] - camX, s[5] - camY, s[2], s[3]);
+        ctx.restore();
+      } else {
+        ctx.drawImage(A.obj, s[0], s[1], s[2], s[3], s[4] - camX, s[5] - camY, s[2], s[3]);
+      }
+      // 调试：半透明显示覆盖层/基座多边形（按 P 切换）
+      if (it.polygon && typeof window !== "undefined" && window.__POLY_DEBUG__) {
+        ctx.save();
+        ctx.beginPath();
+        const q0 = it.polygon[0]; ctx.moveTo(q0[0] - camX, q0[1] - camY);
+        for (let k = 1; k < it.polygon.length; k++) { const q = it.polygon[k]; ctx.lineTo(q[0] - camX, q[1] - camY); }
+        ctx.closePath();
+        ctx.fillStyle = it.roof ? "rgba(80,170,255,0.10)" : "rgba(245,215,90,0.10)";   // 蓝=覆盖层，黄=基座
+        ctx.fill();
+        ctx.strokeStyle = it.roof ? "rgba(140,210,255,0.9)" : "rgba(255,230,130,0.9)";
+        ctx.lineWidth = 1; ctx.stroke();
+        ctx.restore();
+      }
     }
     else if (it.ent) drawEntity(it.ent, camX, camY);
     else if (it.npc) drawEntity(it.npc, camX, camY);
@@ -104,6 +118,11 @@ export function render() {
     if (im) ctx.drawImage(im, Math.round(e.x - camX - im.width / 2), Math.round(e.y - camY - im.height / 2));
   }
   drawHUD(); drawDialog(); drawPanels(); drawPack(); drawShop(); drawSavePanel(); drawSettingsPanel(); drawTip(); drawCursorItem(); drawTooltip();
+  if (typeof window !== "undefined" && window.__POLY_DEBUG__) {
+    ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(6, 26, 236, 18);
+    ctx.fillStyle = "#8fd0ff"; ctx.font = "12px sans-serif"; ctx.textAlign = "left";
+    ctx.fillText("多边形调试（P 关闭）：蓝=覆盖层 黄=基座 ｜ " + BUILD, 10, 39);
+  }
   if ((G.player && G.player.dead) || G.gameOver) {
     ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(0, 0, VW, VH);
     ctx.fillStyle = "#c0392b"; ctx.font = "bold 30px sans-serif"; ctx.textAlign = "center";

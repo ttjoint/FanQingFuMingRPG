@@ -55,7 +55,8 @@ export function renderStrList(host, obj, f, onChange) {
 
 export function renderForm(host, schema, obj, onChange) {
   clear(host);
-  const flag = f => { if (onChange) onChange(f); };
+  const refreshers = [];
+  const flag = f => { if (onChange) onChange(f); for (const r of refreshers) r(); };
   for (const f of schema) {
     const lab = h("label", null, f.label || f.k);
     let ctl;
@@ -113,6 +114,21 @@ export function renderForm(host, schema, obj, onChange) {
       host.append(dl);
     }
     host.append(h("div", { class: "ed-row" }, lab, ctl));
+    // 图片字段：若有 f.img(obj)，在控件下方显示预览（随输入/选择实时刷新）
+    if (typeof f.img === "function") {
+      const im = h("img", { class: "ed-fieldimg" });
+      const ph = h("span", { class: "ed-imghint" }, "（无图片）");
+      const wrap = h("div", { class: "ed-imgwrap" }, im, ph);
+      const refresh = () => {
+        const s = f.img(obj);
+        if (s) { im.src = s; im.style.display = ""; ph.style.display = "none"; }
+        else { im.removeAttribute("src"); im.style.display = "none"; ph.style.display = ""; }
+      };
+      im.onerror = () => { im.style.opacity = "0.15"; };
+      im.onload = () => { im.style.opacity = "1"; };
+      refreshers.push(refresh); refresh();
+      host.append(wrap);
+    }
   }
 }
 
@@ -121,11 +137,12 @@ export function renderListEditor(host, opts) {
   const { list, schema, columns, makeNew } = opts;
   let sel = opts.sel != null ? opts.sel : 0;
   const redraw = () => {
+    sel = opts.sel != null ? opts.sel : 0;   // 每次重绘都从 opts 同步选中项（行点击/新建/删除后才会切换）
     clear(host);
     host.append(h("div", { class: "ed-tools" },
-      h("button", { class: "ed-btn", onclick: () => { list.push(makeNew()); opts.sel = list.length - 1; opts.onStructural && opts.onStructural(); } }, "＋ 新建"),
-      h("button", { class: "ed-btn", onclick: () => { if (sel == null || !list[sel]) return; list.splice(sel + 1, 0, JSON.parse(JSON.stringify(list[sel]))); opts.sel = sel + 1; opts.onStructural && opts.onStructural(); } }, "复制"),
-      h("button", { class: "ed-btn danger", onclick: () => { if (sel == null || !list[sel]) return; list.splice(sel, 1); opts.sel = Math.max(0, sel - 1); opts.onStructural && opts.onStructural(); } }, "删除"),
+      h("button", { class: "ed-btn", onclick: () => { list.push(makeNew()); opts.sel = list.length - 1; opts.onStructural && opts.onStructural(); redraw(); } }, "＋ 新建"),
+      h("button", { class: "ed-btn", onclick: () => { if (sel == null || !list[sel]) return; list.splice(sel + 1, 0, JSON.parse(JSON.stringify(list[sel]))); opts.sel = sel + 1; opts.onStructural && opts.onStructural(); redraw(); } }, "复制"),
+      h("button", { class: "ed-btn danger", onclick: () => { if (sel == null || !list[sel]) return; list.splice(sel, 1); opts.sel = Math.max(0, sel - 1); opts.onStructural && opts.onStructural(); redraw(); } }, "删除"),
     ));
     const tbl = h("table", { class: "ed-table" });
     const head = h("tr");

@@ -1,12 +1,29 @@
 // 实体移动与逐帧动画推进。
-import { worldToCell, walkable, dirFromVec, overlapsUnit } from "../core/utils.js";
+import { worldToCell, walkable, dirFromVec, overlappingUnit, unitRadii, eachUnit } from "../core/utils.js";
 
 export function setAnim(e, a) { if (e.action !== a) { e.action = a; e.frame = 0; e.ft = 0; } }
 
-// 目标点能否站立：地形可行走 + 不与其它单位重叠。
+// 目标点能否站立：仅看地形可行走（单位之间不再硬阻挡——改由 separationSystem 每帧软推开，
+// 否则两个迎面移动的单位会互相卡死、原地踏步）。
 function canStand(e, x, y) {
   const c = worldToCell(x, y);
-  return walkable(c.row, c.col) && !overlapsUnit(e, x, y);
+  return walkable(c.row, c.col);
+}
+
+// 前方“近处有单位挡路”检测（用于触发重规划：绕过对方所在格，而不是被推着划弧）。
+export function unitAhead(e, tx, ty, reach) {
+  const dx = tx - e.x, dy = ty - e.y, d = Math.hypot(dx, dy);
+  if (d < 1) return false;
+  const ux = dx / d, uy = dy / d, a = unitRadii(e), R = reach || 60;
+  let hit = false;
+  eachUnit(u => {
+    if (hit || u === e || u.dead) return;
+    const ox = u.x - e.x, oy = u.y - e.y;
+    const fwd = ox * ux + oy * uy;
+    if (fwd <= 0 || fwd > R) return;
+    if (Math.abs(ox * (-uy) + oy * ux) < a.rx + unitRadii(u).rx) hit = true;
+  });
+  return hit;
 }
 
 // 走一步：整步被挡时沿单轴滑动（绕开挡路的单位 / 贴住墙角），返回实际位移向量或 null。
@@ -33,23 +50,32 @@ export function moveEntity(e, tx, ty, speed, collide) {
   return !!delta;
 }
 
+// 终点被其它单位占据、且已经贴到“碰撞接触距离”时，视为“到达”并结束该段路径。
+// 否则（只看 d<2 的格心）移动方会永远挤不到终点，被 separation 反复推回 → 原地踏步。
+function arrivedAtOccupied(e, wp) {
+  const o = overlappingUnit(e, wp.x, wp.y);
+  if (!o) return false;
+  const a = unitRadii(e), b = unitRadii(o);
+  return Math.hypot(o.x - e.x, o.y - e.y) <= Math.max(a.rx + b.rx, a.ry + b.ry) + 8;
+}
+
 export function updateMove(e, dt) {
   if (e.path && e.path.length) {
     const wp = e.path[0];
     const d = Math.hypot(wp.x - e.x, wp.y - e.y);
-    if (d < 2) { e.path.shift(); if (!e.path.length) e.path = null; e.stuckT = 0; }
+    if (d < 2 || (e.path.length === 1 && !e.target && arrivedAtOccupied(e, wp))) {   // 追击目标时不用“到达被占据点”提前停
+      e.path.shift(); if (!e.path.length) e.path = null; e.stuckT = 0;
+    }
     else {
       e.dir = dirFromVec(wp.x - e.x, wp.y - e.y);
       const moved = moveEntity(e, wp.x, wp.y, e.speed || 90, true);
-      setAnim(e, (e.speed || 90) > 100 ? "run" : "walk");
-      if (!moved) {
+      if (moved) { setAnim(e, (e.speed || 90) > 100 ? "run" : "walk"); e.stuckT = 0; }
+      else {
         e.stuckT = (e.stuckT || 0) + dt;
-        // 终点被其它单位占据（且已走到近旁），或原地卡住过久：结束这条路径，避免原地踏步。
-        if ((e.path.length === 1 && d < 48 && overlapsUnit(e, wp.x, wp.y)) || e.stuckT > 0.4) {
-          e.path = null; e.stuckT = 0;
-          if (e.target) e.target = null;
-        }
-      } else e.stuckT = 0;
+        if (e.stuckT > 0.12) setAnim(e, "stand");   // 顶住时不再原地播放跑动动画
+        // 被墙/地形卡住过久：放弃这条路径，避免原地踏步。
+        if (e.stuckT > 0.4) { e.path = null; e.stuckT = 0; if (e.target) e.target = null; }
+      }
     }
     return true;
   }
@@ -60,7 +86,7 @@ export function updateAnim(e, dt, chars) {
   const ch = chars && chars[e.model]; if (!ch) return;
   const blocks = ch[e.action] || ch.stand || ch.walk; if (!blocks) return;
   const block = blocks[e.dir % blocks.length] || blocks[0]; if (!block || !block.length) return;
-  e.ft += dt;
+  e.ft += dt * (e.animSpeed || 1);   // e.animSpeed：动画配合攻击间隔的加减速
   const fps = animFps(e.action);
   if (e.ft > 1 / fps) {
     e.ft = 0;

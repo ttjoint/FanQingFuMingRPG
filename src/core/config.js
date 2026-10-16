@@ -3,7 +3,7 @@
 export const DEFAULT_CONFIG = {
   player: { hpMax: 200, mpMax: 100, expNext: 500, level: 1, money: 500, moral: 0, honor: 0, attack: 20, defence: 5, hit: 30 },
   levelUp: { expMul: 1.5, expAdd: 200, hpMax: 40, mpMax: 20, attack: 5, defence: 3, hit: 3, maxLevel: 99, healOnLevel: true },
-  combat: { rangeMin: 40, attackCD: 0.9, mpDrainRun: 1.6, npcAttackCD: 1.1, npcAggro: 260, npcMelee: 46, npcHitBase: 20, npcHitPerLevel: 60 },
+  combat: { rangeMin: 50, attackCD: 0.9, mpDrainRun: 1.6, npcAttackCD: 1.1, npcAggro: 260, npcMelee: 50, npcHitBase: 20, npcHitPerLevel: 60 },
 };
 
 const deep = o => JSON.parse(JSON.stringify(o));

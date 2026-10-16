@@ -76,6 +76,15 @@
 - ✅ **Playwright E2E**（`e2e/game.spec.js`）：自动起静态服务器，覆盖引导/玩法/编辑器/补丁/IDB。
 - ⏳ 可选深化：UI 组件化（Preact/Lit）、脚本编辑器（Monaco/CodeMirror）。
 
+## 🔄 寻路与规模（RTS 预备）
+
+- ✅ **路径平滑**（`engine/grid.js` 的 `lineOfSight` / `smoothPath`）：修正网格 A\* 的階梯/折线，直线可达时只留极少路点。
+- ✅ **流场**（`engine/flowfield.js`）：从目标集做 Dijkstra 得到代价场，多单位共享（RTS「百单位涌向同一目标」）。
+- ✅ **空间哈希**（`engine/spatialhash.js`）：单位近邻查询从 O(n²) 降到 O(n·k)，已用于分离系统。
+- ⏳ 可选深化：游戏逻辑里引入**共享流场移动**（把一批单位的目标合并为一次流场）、
+  **分帧预算寻路**（把 A\* 分摊到多帧）、**分层寻路 HPA\***（大图）、
+  以及更强的本地避让（RVO/ORCA）以替代当前软分离。
+
 ## 约定
 
 - 原版 `assets/` 永远只读；改动只进“内容包”。

@@ -67,6 +67,25 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     return !!(p && p.length && p.every(pt => G.map.flags[pt.row * w + pt.col] === 1));
   })).toBe(true);
 
+  // 按住鼠标持续跟随：屏幕光标不动、相机跟随玩家时，玩家应持续朝光标当前世界坐标前进（不会中途停）
+  expect(await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const gp = await import("/src/systems/gameplay.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    G.npcs = []; G.dialog = null; G.script = null; G.stats.mp = 999;
+    G.player.path = null; G.player.target = null;
+    G.cam.x = G.player.x - 320; G.cam.y = G.player.y - 240;      // 相机对准玩家（内部画布 640x480）
+    G.mouse.sx = 320 + 150; G.mouse.sy = 240;                    // 光标在屏幕中心右侧（屏幕坐标不变）
+    G.hold = 0; G.holdCell = null; G.holdTarget = null;
+    const x0 = G.player.x;
+    for (let i = 0; i < 60; i++) { gp.playerSystem(rt, 1 / 60); gp.cameraSystem(rt, 1 / 60); }
+    const x1 = G.player.x;
+    for (let i = 0; i < 60; i++) { gp.playerSystem(rt, 1 / 60); gp.cameraSystem(rt, 1 / 60); }
+    const x2 = G.player.x;
+    G.hold = null;
+    return x1 > x0 + 50 && x2 > x1 + 50;                          // 两个区间都在前进，未中途停
+  })).toBe(true);
+
   // 战斗击杀
   expect(await page.evaluate(async () => {
     const { getRuntime } = await import("/src/runtime/context.js");
@@ -77,8 +96,326 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     if (!enemy) { enemy = makeNPC(A.npcsData.find(n => n.attack > 0), 0, 0); enemy.x = G.player.x; enemy.y = G.player.y + 30; G.npcs.push(enemy); }
     G.player.x = enemy.x; G.player.y = enemy.y + 30; G.player.target = enemy;
     G.stats.hit = 100; G.stats.attack = 9999;
-    for (let i = 0; i < 120 && !enemy.dead; i++) c.playerAttackTarget(rt);
+    for (let i = 0; i < 120 && !enemy.dead; i++) c.playerAttackTarget(rt, 1 / 60);
     return enemy.dead === true;
+  })).toBe(true);
+
+  // 追击饶墙：敌人在墙后时，玩家应绕行且不踩入阻挡格
+  expect(await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const u = await import("/src/core/utils.js");
+    const pf = await import("/src/world/pathfinding.js");
+    const c = await import("/src/systems/combat.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const G = window.__GAME__.G, A = window.__GAME__.A, rt = getRuntime();
+    const w = G.map.width, flags = G.map.flags;
+    const walk = (r, col) => r >= 0 && col >= 0 && r < w && col < w && flags[r * w + col] === 1;
+    const cells = [];
+    for (let r = 0; r < w; r++) for (let col = 0; col < w; col++) if (walk(r, col)) cells.push([r, col]);
+    const lineBlocked = (a, b) => { const s = Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1])); for (let i = 1; i < s; i++) { const r = Math.round(a[0] + (b[0] - a[0]) * i / s), col = Math.round(a[1] + (b[1] - a[1]) * i / s); if (!walk(r, col)) return true; } return false; };
+    let a = null, b = null;
+    for (let k = 0; k < 40000 && !a; k++) {
+      const p = cells[(Math.random() * cells.length) | 0], q = cells[(Math.random() * cells.length) | 0];
+      if (p[0] === q[0] && p[1] === q[1]) continue;
+      if (!lineBlocked(p, q)) continue;
+      if (pf.findPath(rt, p[0], p[1], q[0], q[1])) { a = p; b = q; }
+    }
+    if (!a) return false;
+    G.npcs = [];
+    const ca = u.cellCenter(a[0], a[1]), cb = u.cellCenter(b[0], b[1]);
+    const enemy = makeNPC(A.npcsData.find(n => n.attack > 0), b[0], b[1]); enemy.x = cb.x; enemy.y = cb.y; G.npcs.push(enemy);
+    G.player.x = ca.x; G.player.y = ca.y; G.player.path = null; G.player.target = enemy; G.player.running = true;
+    const d0 = Math.hypot(enemy.x - G.player.x, enemy.y - G.player.y);
+    let blockedSteps = 0, minD = d0;
+    for (let i = 0; i < 900; i++) {
+      c.playerAttackTarget(rt, 1 / 60);
+      const pc = u.worldToCell(G.player.x, G.player.y);
+      if (!walk(pc.row, pc.col)) blockedSteps++;
+      minD = Math.min(minD, Math.hypot(enemy.x - G.player.x, enemy.y - G.player.y));
+    }
+    return blockedSteps === 0 && minD <= 60;
+  })).toBe(true);
+
+  // 挥砍中段结算：起手不应立即掉血，命中应在动画中段发生
+  const swing = await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const c = await import("/src/systems/combat.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const G = window.__GAME__.G, A = window.__GAME__.A, rt = getRuntime();
+    G.npcs = [];
+    const enemy = makeNPC(A.npcsData.find(n => n.attack > 0), 0, 0);
+    enemy.x = G.player.x; enemy.y = G.player.y + 30; enemy.hp = 100000; enemy.hpMax = 100000;
+    G.npcs.push(enemy);
+    G.player.x = enemy.x; G.player.y = enemy.y + 30; G.player.target = enemy;
+    G.player.atkT = 0; G.player.attackCD = 0; G.stats.hit = 100; G.stats.attack = 50;
+    const hp0 = enemy.hp;
+    c.playerAttackTarget(rt, 1 / 60);                 // 起手一帧
+    const startHp = enemy.hp;
+    let hitFrame = -1;
+    for (let i = 0; i < 120 && hitFrame < 0; i++) { c.playerAttackTarget(rt, 1 / 60); if (enemy.hp < hp0) hitFrame = i + 1; }
+    return { startHp, hp0, hitFrame };
+  });
+  expect(swing.startHp).toBe(swing.hp0);              // 起手未结算
+  expect(swing.hitFrame).toBeGreaterThanOrEqual(5);   // 不是瞬间生效
+  expect(swing.hitFrame).toBeLessThanOrEqual(45);     // 在动画中段（非播完后）
+
+  // 攻击间隔一致 + 动画配合间隔加减速
+  const atk = await page.evaluate(async () => {
+    const G = window.__GAME__.G, A = window.__GAME__.A;
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const c = await import("/src/systems/combat.js");
+    const motion = await import("/src/systems/motion.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const rt = getRuntime(), chars = A.chars;
+    G.npcs = [];
+    const e = makeNPC(A.npcsData.find(n => n.attack > 0), 0, 0);
+    e.x = G.player.x; e.y = G.player.y + 30; e.hp = 1e6; e.hpMax = 1e6; e.def = 0; G.npcs.push(e);
+    G.player.x = e.x; G.player.y = e.y + 30; G.player.target = e; G.player.atkT = 0; G.player.attackCD = 0;
+    G.stats.hit = 100; G.stats.attack = 10;
+    const hits = []; let last = e.hp; let anim = 0;
+    for (let i = 0; i < 400 && hits.length < 4; i++) {
+      c.playerAttackTarget(rt, 1 / 60);
+      motion.updateAnim(G.player, 1 / 60, chars); motion.updateAnim(e, 1 / 60, chars);
+      if (G.player.atkT > 0) anim = Math.max(anim, G.player.animSpeed || 1);
+      if (e.hp < last) { hits.push(i); last = e.hp; }
+    }
+    const gaps = hits.slice(1).map((h, i) => h - hits[i]);
+    const dur = motion.actionDuration(G.player, "fight", chars);
+    return { gaps, anim, expectAnim: dur / rt.config.combat.attackCD, interval: rt.config.combat.attackCD };
+  });
+  expect(Math.max(...atk.gaps) - Math.min(...atk.gaps)).toBeLessThanOrEqual(1);      // 间隔稳定
+  expect(Math.abs(atk.gaps[0] - Math.round(atk.interval * 60))).toBeLessThanOrEqual(3);
+  expect(Math.abs(atk.anim - atk.expectAnim)).toBeLessThan(0.01);                     // 动画按间隔加减速
+
+  // 阵亡时先把当前挥砍打完再倒地
+  const die = await page.evaluate(async () => {
+    const G = window.__GAME__.G, A = window.__GAME__.A;
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const c = await import("/src/systems/combat.js");
+    const gp = await import("/src/systems/gameplay.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const rt = getRuntime();
+    G.npcs = [];
+    const n = makeNPC(A.npcsData.find(x => x.attack > 0), 0, 0);
+    G.npcs.push(n);
+    n.atkT = 0.5; n.swingTotal = 1.0; n.swingT = 0.2; n.hitPending = true; n.action = "fight"; n.frame = 3;
+    c.killNPC(rt, n);
+    const afterKill = { action: n.action, pending: !!n.pendingDie, hitPending: n.hitPending };
+    for (let i = 0; i < 40; i++) gp.npcSystem(rt, 1 / 60);
+    return { afterKill, final: n.action };
+  });
+  expect(die.afterKill).toMatchObject({ action: "fight", pending: true, hitPending: false });
+  expect(die.final).toBe("die");
+
+  // HUD 右下角功能按钮：任务 / 菜单
+  {
+    const bb = await page.locator("#cv").boundingBox();
+    const gclick = (gx, gy) => page.mouse.click(bb.x + gx * bb.width / 640, bb.y + gy * bb.height / 480);
+    await page.evaluate(() => { const G = window.__GAME__.G; G.panel = null; G.savePanel = false; });
+    const state = () => page.evaluate(() => ({ p: window.__GAME__.G.panel, s: window.__GAME__.G.savePanel }));
+    await gclick(565 + 17, 380 + 61 + 17);                                   // 任务
+    expect((await state()).p).toBe("mission");
+    await gclick(602 + 17, 380 + 61 + 17);                                   // 菜单：应互斥关闭任务
+    expect(await state()).toEqual({ p: null, s: true });
+    await gclick(565 + 17, 380 + 61 + 17);                                   // 任务：应互斥关闭存档
+    expect(await state()).toEqual({ p: "mission", s: false });
+    await gclick(565 + 17, 380 + 61 + 17);                                   // 再点任务应关闭
+    expect((await state()).p).toBe(null);
+    await page.evaluate(() => { const G = window.__GAME__.G; G.panel = null; G.savePanel = false; });
+  }
+
+  // 前方有单位也不会互相卡死（移动忽略单位硬碰撞 + 软分离）
+  expect(await page.evaluate(async () => {
+    const G = window.__GAME__.G, A = window.__GAME__.A, w = G.map.width;
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const u = await import("/src/core/utils.js");
+    const pf = await import("/src/world/pathfinding.js");
+    const gp = await import("/src/systems/gameplay.js");
+    const input = await import("/src/input/input.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const rt = getRuntime();
+    G.dialog = null; G.script = null;   // 清掉前面用例可能残留的对话/脚本（会让玩家强制站立）
+    const walk = (r, c) => r >= 0 && c >= 0 && r < w && c < w && G.map.flags[r * w + c] === 1;
+    const cells = [];
+    for (let r = 0; r < w; r++) for (let c = 0; c < w; c++) if (walk(r, c)) cells.push([r, c]);
+    const a = cells[0];
+    const grid = await import("/src/engine/grid.js");
+    G.stats.hpMax = 99999; G.stats.hp = 99999;   // 本用例只测“不被卡住”，排除途中被 NPC 打死的干扰
+    for (let attempt = 0; attempt < 3; attempt++) {   // 随机目标点，多试几次消除偶发
+      let c = null, rawPath = null;
+      for (let k = 0; k < 5000 && !c; k++) {
+        const q = cells[(Math.random() * cells.length) | 0];
+        if (Math.max(Math.abs(q[0] - a[0]), Math.abs(q[1] - a[1])) < 8) continue;
+        if (!pf.findPath(rt, a[0], a[1], q[0], q[1])) continue;             // 同连通分量
+        const rp = grid.astar(w, walk, a[0], a[1], q[0], q[1]);            // 原始网格路径取中点放 NPC（平滑后会变短，不能用它数节点）
+        if (rp && rp.length > 4) { c = q; rawPath = rp; }
+      }
+      if (!c) continue;
+      const mid = rawPath[Math.floor(rawPath.length / 2)];
+      const ca = u.cellCenter(a[0], a[1]), cc = u.cellCenter(c[0], c[1]), cm = u.cellCenter(mid.row, mid.col);
+      G.npcs = [];
+      const npc = makeNPC(A.npcsData.find(n => n.attack > 0), mid.row, mid.col);
+      npc.x = cm.x; npc.y = cm.y; npc.aggressive = true; npc.aggro = true; G.npcs.push(npc);
+      G.player.x = ca.x; G.player.y = ca.y; G.player.path = null; G.player.target = null; G.hold = null;
+      input.handleLeft(cc.x, cc.y);
+      for (let i = 0; i < 1200; i++) { gp.playerSystem(rt, 1 / 60); gp.npcSystem(rt, 1 / 60); gp.separationSystem(rt, 1 / 60); }
+      if (Math.hypot(G.player.x - cc.x, G.player.y - cc.y) < 45) return true;
+    }
+    return false;
+  })).toBe(true);
+
+  // 挥砍期间方向锁定：目标绕圈移动，同一刀内部不转向（避免动作“闪回”）
+  const lock = await page.evaluate(async () => {
+    const G = window.__GAME__.G, A = window.__GAME__.A, chars = A.chars;
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const c = await import("/src/systems/combat.js");
+    const motion = await import("/src/systems/motion.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const rt = getRuntime();
+    G.npcs = [];
+    const e = makeNPC(A.npcsData.find(n => n.attack > 0), 0, 0);
+    e.x = G.player.x; e.y = G.player.y + 30; e.hp = 1e6; e.hpMax = 1e6; e.def = 0; G.npcs.push(e);
+    G.player.x = e.x; G.player.y = e.y + 30; G.player.target = e; G.player.atkT = 0; G.player.attackCD = 0;
+    G.stats.hit = 100; G.stats.attack = 1;
+    c.playerAttackTarget(rt, 1 / 60);
+    const runs = []; let cur = null;
+    for (let i = 0; i < 220; i++) {
+      const ang = i * 0.35;
+      e.x = G.player.x + Math.cos(ang) * 30; e.y = G.player.y + Math.sin(ang) * 30;
+      const swinging = G.player.atkT > 0;
+      c.playerAttackTarget(rt, 1 / 60);
+      motion.updateAnim(G.player, 1 / 60, chars);
+      if (swinging) { if (!cur) { cur = []; runs.push(cur); } cur.push(G.player.dir); } else cur = null;
+    }
+    const perSwing = runs.map(r => [...new Set(r)]);
+    return { swings: runs.length, locked: runs.length >= 2 && perSwing.every(u => u.length === 1) };
+  });
+  expect(lock.swings).toBeGreaterThanOrEqual(2);
+  expect(lock.locked).toBe(true);
+
+  // 移动单位撞到静止单位：静止方不被撞动（只推移动方）
+  expect(await page.evaluate(async () => {
+    const G = window.__GAME__.G, A = window.__GAME__.A;
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const gp = await import("/src/systems/gameplay.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const rt = getRuntime();
+    const npc = makeNPC(A.npcsData.find(n => n.attack === 0) || A.npcsData[0], 0, 0);
+    npc.x = G.player.x + 6; npc.y = G.player.y + 2; G.npcs = [npc];
+    G.player.x = npc.x - 3; G.player.y = npc.y;
+    G.hold = 0; G.player.target = null; G.player.path = [{ x: G.player.x, y: G.player.y }];
+    const n0 = { x: npc.x, y: npc.y };
+    for (let i = 0; i < 20; i++) gp.separationSystem(rt, 1 / 60);
+    G.hold = null; G.player.path = null;
+    return Math.hypot(npc.x - n0.x, npc.y - n0.y) < 0.01;
+  })).toBe(true);
+
+  // 终点被静止单位占据：走到身旁即视为到达（停下），不会原地踏步
+  expect(await page.evaluate(async () => {
+    const G = window.__GAME__.G, A = window.__GAME__.A;
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const motion = await import("/src/systems/motion.js");
+    const gp = await import("/src/systems/gameplay.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const rt = getRuntime();
+    const npc = makeNPC(A.npcsData.find(n => n.attack === 0) || A.npcsData[0], 0, 0);
+    npc.x = G.player.x + 80; npc.y = G.player.y; G.npcs = [npc];
+    G.player.path = null; G.hold = null; G.player.target = null;
+    npc.path = [{ x: G.player.x, y: G.player.y }];
+    let prev = { x: npc.x, y: npc.y }, drift = 0;
+    for (let i = 0; i < 180; i++) {
+      motion.updateMove(npc, 1 / 60); gp.separationSystem(rt, 1 / 60);
+      if (i > 120) drift = Math.max(drift, Math.hypot(npc.x - prev.x, npc.y - prev.y));
+      prev = { x: npc.x, y: npc.y };
+    }
+    return npc.path === null && drift < 1;
+  })).toBe(true);
+
+  // 挥砍“提交”：出手后即使目标走远/死亡，也把后摇播完（NPC 侧）
+  expect(await page.evaluate(async () => {
+    const G = window.__GAME__.G, A = window.__GAME__.A;
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const gp = await import("/src/systems/gameplay.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const rt = getRuntime();
+    G.dialog = null; G.script = null;
+    const def = A.npcsData.find(n => n.attack > 0) || A.npcsData[0];
+    const e = makeNPC(def, 0, 0);
+    e.x = G.player.x + 30; e.y = G.player.y; e.aggressive = true; e.aggro = true; e.attackCD = 0; e.atkT = 0;
+    G.npcs = [e];
+    gp.npcSystem(rt, 1 / 60);
+    if (!(e.atkT > 0)) return false;
+    G.player.x += 400;                       // 目标走远
+    let interrupted = false, guard = 0;
+    while (e.atkT > 0 && guard++ < 300) { gp.npcSystem(rt, 1 / 60); if (e.action !== "fight") interrupted = true; }
+    return !interrupted && e.atkT <= 0;
+  })).toBe(true);
+
+  // 最后一击致死后，玩家把后摇播完再回站立（玩家侧）
+  expect(await page.evaluate(async () => {
+    const G = window.__GAME__.G, A = window.__GAME__.A;
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const gp = await import("/src/systems/gameplay.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const rt = getRuntime();
+    G.dialog = null; G.script = null; G.stats.hit = 100; G.stats.attack = 999;
+    const enemy = makeNPC(A.npcsData.find(n => n.attack > 0) || A.npcsData[0], 0, 0);
+    enemy.x = G.player.x + 24; enemy.y = G.player.y; enemy.hp = 1; enemy.aggressive = false; enemy.aggro = false;
+    G.npcs = [enemy];
+    const p = G.player; p.target = enemy; p.attackCD = 0; p.atkT = 0; p.action = "stand"; p.frame = 0; p.ft = 0;
+    let killFrame = -1, postFight = 0;
+    for (let i = 0; i < 200; i++) {
+      gp.playerSystem(rt, 1 / 60); gp.npcSystem(rt, 1 / 60);
+      if (killFrame < 0 && enemy.dead) killFrame = i;
+      if (killFrame >= 0 && p.action === "fight") postFight++;
+    }
+    return killFrame >= 0 && postFight >= 5 && p.target === null;
+  })).toBe(true);
+
+  // 攻击后摇期间点地移动：后摇播完后应继续走到新目的地（挥砍结束不能清掉移动路径）
+  expect(await page.evaluate(async () => {
+    const G = window.__GAME__.G, A = window.__GAME__.A;
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const gp = await import("/src/systems/gameplay.js");
+    const pf = await import("/src/world/pathfinding.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const input = await import("/src/input/input.js");
+    const u = await import("/src/core/utils.js");
+    const rt = getRuntime();
+    G.dialog = null; G.script = null; G.stats.hit = 100; G.stats.attack = 1; G.stats.hp = 9999; G.stats.hpMax = 9999;
+    const enemy = makeNPC(A.npcsData.find(n => n.attack > 0) || A.npcsData[0], 0, 0);
+    enemy.hp = 9999; enemy.aggressive = false; enemy.aggro = false;
+    G.npcs = [enemy];
+    const p = G.player;
+    const w = G.map.width;
+    const walk = (r, c) => r >= 0 && c >= 0 && r < w && c < w && G.map.flags[r * w + c] === 1;
+    // 先挪到开阔格（避免随机出生点被围死导致找不到目的地）
+    const cells = []; for (let r = 0; r < w; r++) for (let c = 0; c < w; c++) if (walk(r, c)) cells.push([r, c]);
+    const c0 = cells[0];
+    p.x = u.cellCenter(c0[0], c0[1]).x; p.y = u.cellCenter(c0[0], c0[1]).y;
+    p.path = null; p.target = null;
+    // 收集多个候选目的地（4~10 格外、可走、有路径），逐个尝试以消除随机不可达的偶发
+    const cands = [];
+    for (let rad = 4; rad <= 10; rad++) for (let dr = -rad; dr <= rad; dr++) for (let dc = -rad; dc <= rad; dc++) {
+      if (Math.max(Math.abs(dr), Math.abs(dc)) !== rad) continue;
+      const r = c0[0] + dr, c = c0[1] + dc;
+      if (walk(r, c) && pf.findPath(rt, c0[0], c0[1], r, c)) cands.push([r, c]);
+    }
+    for (const [r, c] of cands) {
+      const dest = u.cellCenter(r, c);
+      const p0 = { x: p.x, y: p.y };
+      enemy.x = p.x + 24; enemy.y = p.y; G.npcs = [enemy];
+      p.target = enemy; p.attackCD = 0; p.atkT = 0; p.action = "stand"; p.path = null;
+      gp.playerSystem(rt, 1 / 60);                 // 提交一次挥砍（进入后摇）
+      if (!(p.atkT > 0)) break;
+      input.handleLeft(dest.x, dest.y);            // 后摇期间点地移动（会清掉攻击目标）
+      G.npcs = [];                                 // 移除敌人，避免阻挡
+      if (!(p.path && p.path.length)) { p.target = null; continue; }
+      for (let i = 0; i < 400; i++) { gp.playerSystem(rt, 1 / 60); gp.npcSystem(rt, 1 / 60); gp.separationSystem(rt, 1 / 60); }
+      if (Math.hypot(p.x - dest.x, p.y - dest.y) < 48) return true;
+      p.x = p0.x; p.y = p0.y; p.path = null; p.target = null;   // 还原后再试
+    }
+    return false;
   })).toBe(true);
 
   // 背包 / 商店
@@ -132,6 +469,18 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   await savePack(page); pack = await readPack(page);
   expect(!!(pack.patch && pack.patch.content && pack.patch.content.npcs)).toBe(true);
 
+  // 列表点击应真正切换选中项（回归：之前只改 opts.sel，闭包 sel 未更新 → 点了没反应）；图片字段应显示预览
+  {
+    const selIdx = () => page.evaluate(() => [...document.querySelectorAll("#editorRoot table.ed-table tbody tr")].findIndex(tr => tr.classList.contains("on")));
+    const first = await selIdx();
+    await page.locator("#editorRoot table.ed-table tbody tr").nth(1).click();
+    await page.waitForTimeout(150);
+    expect(await selIdx()).toBe(1);
+    expect(await selIdx()).not.toBe(first);
+    const loaded = await page.evaluate(() => [...document.querySelectorAll("#editorRoot .ed-imgwrap img")].filter(im => im.complete && im.naturalWidth > 0).length);
+    expect(loaded).toBeGreaterThan(0);
+  }
+
   // 单位实例覆盖
   await page.locator('.ed-nav button:has-text("地图")').click(); await page.waitForTimeout(250);
   await page.locator('.ed-chip:has-text("单位")').first().click(); await page.waitForTimeout(200);
@@ -172,12 +521,47 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     return ok;
   })).toBe(true);
 
+  // 装饰物栏：列表 + 手画地基线编辑 + 模式持久化
+  await page.locator('.ed-nav button:has-text("装饰物")').click(); await page.waitForTimeout(250);
+  expect(await page.locator("#editorRoot table.ed-table tbody tr").count()).toBeGreaterThan(10);
+  await page.locator("#editorRoot table.ed-table tbody tr").nth(2).click(); await page.waitForTimeout(150);
+  await page.selectOption("#editorRoot .ed-side select", { label: "手画地基线" }); await page.waitForTimeout(200);
+  expect(await page.locator("#editorRoot .ed-side canvas").count()).toBeGreaterThan(0);   // 出现地基线编辑画布
+  await page.selectOption("#editorRoot .ed-side select", { label: "整体单一深度（树木等）" }); await page.waitForTimeout(150);
+  await savePack(page); pack = await readPack(page);
+  { const dt = pack.patch && pack.patch.content && pack.patch.content.decorTemplates;
+    expect(dt && Object.values(dt).some(t => t.single)).toBe(true);   // 模板（跨地图共用）已持久化到内容包
+  }
+  // 保存后应立刻进入运行时（回归：安装时曾漏把 decorTemplates 赋给 A，导致改完无效）
+  expect(await page.evaluate(() => {
+    const tpls = window.__GAME__.A.decorTemplates || {};
+    return Object.values(tpls).some(t => t && (t.single || (t.line && t.line.length)));
+  })).toBe(true);
+  await page.locator('.ed-nav button:has-text("地图")').click(); await page.waitForTimeout(150);
+
   // 关闭编辑器 → 重开游戏，实例覆盖生效
   await page.evaluate(async () => { const m = await import("/src/editor/index.js"); await m.closeEditor(true); });
   await page.waitForFunction(() => window.__GAME__.G.scene === "menu");
   await page.evaluate(async () => { const { getRuntime } = await import("/src/runtime/context.js"); const m = await import("/src/systems/scene.js"); m.startGame(getRuntime()); });
   await page.waitForFunction(() => window.__GAME__.G.scene === "game");
   expect(await page.evaluate(() => window.__GAME__.G.npcs.some(n => n.speed === 111))).toBe(true);
+
+  // 从标题菜单读档（主角尚不存在）应创建主角并把相机移到其附近（回归：曾因无玩家→相机不动→地图/角色被画到屏外而全黑）
+  await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const sv = await import("/src/systems/save.js"); const sc = await import("/src/systems/scene.js");
+    const rt = getRuntime(); sv.saveSlot(rt, 4);
+    sc.resetNewGame(rt);                 // 主角置空，模拟“本次会话刚进标题菜单”
+    sc.enterMenu(rt, { music: true });
+  });
+  expect(await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const sv = await import("/src/systems/save.js"); const rt = getRuntime(); const G = rt.state;
+    const ok = sv.loadSlot(rt, 4);
+    if (!ok || !G.player || !G.map || !G.map.terrain) return false;
+    const sx = G.player.x - G.cam.x, sy = G.player.y - G.cam.y;   // 主角应落在屏幕内
+    return G.scene === "game" && sx >= 0 && sx <= 640 && sy >= 0 && sy <= 480;
+  })).toBe(true);
 
   expect(errors).toEqual([]);
 });

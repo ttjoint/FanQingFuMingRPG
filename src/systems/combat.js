@@ -1,7 +1,8 @@
 // 战斗：命中/伤害公式、玩家攻击、死亡与掉落。运行时上下文 ctx 由调用方注入。
-import { dirFromVec } from "../core/utils.js";
+import { dirFromVec, worldToCell } from "../core/utils.js";
 import { skillByName } from "../core/registry.js";
-import { setAnim, moveEntity, actionDuration } from "./motion.js";
+import { setAnim, moveEntity, actionDuration, updateMove } from "./motion.js";
+import { findPathPoints } from "../world/pathfinding.js";
 import { addExp } from "./inventory.js";
 import { dropGround } from "../world/ground.js";
 import { startScript } from "../script/vm.js";
@@ -25,48 +26,85 @@ export function spawnEffect(ctx, sk, x, y) {
   ctx.state.effects.push({ frames: sk.frames, x, y, i: 0, t: 0 });
 }
 
-export function playerAttackTarget(ctx) {
-  const G = ctx.state, CFG = ctx.config;
-  const p = G.player, t = p.target;
-  if (!t || t.dead || !t.attackable) { p.target = null; p.atkT = 0; return; }
-  const d = Math.hypot(t.x - p.x, t.y - p.y);
-  const range = skillRange(ctx);
-  if (p.attackCD > 0) p.attackCD -= 1 / 60;
+// 命中结算发生在挥砍动画的哪个位置（0=起手，1=收尾）。
+export const HIT_FRACTION = 0.45;
 
-  // 攻击“提交”机制：一旦开始一次攻击，就先把整段攻击动画播完（约 0.5s），
-  // 期间即使目标（猴子等）小幅移动也不切回 run/walk，消除动画闪烁。
-  if (p.atkT > 0) {
-    p.atkT -= 1 / 60;
-    setAnim(p, "fight");
-    faceTarget(p, t);
-    return;
-  }
-
-  if (d > range) {                     // 追击：朝向交给 moveEntity 的平滑速度，避免每帧翻转
-    p.moveGoal = t;
-    moveEntity(p, t.x, t.y, p.running ? 150 : 90, true);
-    setAnim(p, p.running ? "run" : "walk");
-    return;
-  }
-
-  p.moveGoal = null; setAnim(p, "fight"); faceTarget(p, t);
-  if (p.attackCD > 0) { p.atkT = 0.08; return; }   // 冷却中：保持面朝并继续播放攻击帧
-
-  const sk = skillByName(G.skill) || { power: 0, mp: 0 };
-  if (sk.mp && G.stats.mp < sk.mp) { p.target = null; G.tip = "精力不足"; G.tipT = 2; return; }
-  if (sk.mp) G.stats.mp -= sk.mp;
-  const dur = actionDuration(p, "fight", ctx.assets.chars);
-  p.atkT = Math.max(0.5, dur - 0.1);
-  p.attackCD = Math.max(p.atkT, CFG.combat.attackCD);
+// 挥砍中段的伤害/特效结算（玩家）。
+function applyPlayerHit(ctx, p) {
+  const G = ctx.state;
+  const t = p.swingTarget, sk = p.swingSkill || { power: 0 };
+  p.hitPending = false;
+  if (!t || t.dead || !t.attackable) return;
   spawnEffect(ctx, sk, t.x, t.y);
   if (sk.type === 0) { G.stats.hp = Math.min(G.stats.hpMax, G.stats.hp + 40); return; }
-  // 只要发起攻击就拉仇恨（即使这一下未命中），敌人会立即开始反击。
-  t.aggro = true;
   if (rollHit(G.stats.hit, false)) {
     t.hp -= dealDamage(G.stats.attack, sk.power || 0, t.def);
     t.dmgT = 0.4;
     if (t.hp <= 0) killNPC(ctx, t);
   }
+}
+
+export function playerAttackTarget(ctx, dt) {
+  dt = dt || 1 / 60;
+  const G = ctx.state, CFG = ctx.config;
+  const p = G.player, t = p.target;
+  if (p.attackCD > 0) p.attackCD -= dt;
+
+  // 挥砍“提交”机制：一旦出手就把整段挥砍动画播完（**即使目标在挥砍中死亡**）；
+  // 命中在动画中段结算。方向在出手时锁定，挥砍期间不再转向。
+  // 注意：此分支必须在“目标失效”判定**之前**，否则最后一击杀死敌人时动画会被截断。
+  if (p.atkT > 0) {
+    p.atkT -= dt;
+    p.swingT = (p.swingT || 0) + dt;
+    if (p.atkT <= 0) p.animSpeed = 1;   // 挥砍结束，恢复正常速度
+    setAnim(p, "fight");
+    if (p.hitPending && p.swingT >= (p.swingTotal || 0) * HIT_FRACTION) applyPlayerHit(ctx, p);
+    // 挥砍播完后，若目标已死亡/失效，再清理目标，让玩家回到站立。
+    // 注意**不能清 p.path**：玩家可能在挥砍期间已点了新的移动目的地，那条路径不能被打断。
+    if (p.atkT <= 0 && (!t || t.dead || !t.attackable)) {
+      p.target = null; p.chaseTarget = null; p.chaseCell = null;
+      p.hitPending = false; p.swingTarget = null;
+    }
+    return;
+  }
+
+  if (!t || t.dead || !t.attackable) { p.target = null; p.atkT = 0; p.path = null; p.chaseTarget = null; p.chaseCell = null; p.hitPending = false; p.swingTarget = null; return; }
+  const d = Math.hypot(t.x - p.x, t.y - p.y);
+  const range = skillRange(ctx);
+
+  if (d > range) {                     // 追击：路径寻路（绕开墙与其它单位）；不可达时才直走
+    p.moveGoal = t;
+    const tgt = worldToCell(t.x, t.y), cc = worldToCell(p.x, p.y);
+    const needReplan = !p.path || !p.path.length || p.chaseTarget !== t || !p.chaseCell || p.chaseCell.row !== tgt.row || p.chaseCell.col !== tgt.col;
+    if (needReplan) {
+      const pts = findPathPoints(ctx, cc.row, cc.col, tgt.row, tgt.col, { avoidUnits: true, mover: p }, { x: p.x, y: p.y });
+      p.path = (pts && pts.length) ? pts : null;
+      p.chaseCell = tgt; p.chaseTarget = t;
+    }
+    const speed = p.running ? 150 : 90; p.speed = speed;
+    if (p.path && p.path.length) updateMove(p, dt);
+    else moveEntity(p, t.x, t.y, speed, true);
+    setAnim(p, p.running ? "run" : "walk");
+    return;
+  }
+  p.path = null;                       // 进入射程：停步攻击
+
+  p.moveGoal = null; setAnim(p, "fight"); faceTarget(p, t);
+  if (p.attackCD > 0) { p.atkT = 0.08; p.swingTotal = 0.08; p.swingT = 0; p.hitPending = false; p.animSpeed = 1; return; }   // 冷却中：保持面朝并继续播放攻击帧
+
+  const sk = skillByName(G.skill) || { power: 0, mp: 0 };
+  if (sk.mp && G.stats.mp < sk.mp) { p.target = null; G.tip = "精力不足"; G.tipT = 2; return; }
+  if (sk.mp) G.stats.mp -= sk.mp;
+  const dur = actionDuration(p, "fight", ctx.assets.chars);
+  const interval = Math.max(0.25, CFG.combat.attackCD);   // 攻击间隔（招式节奏）
+  p.atkT = interval;
+  p.swingTotal = interval; p.swingT = 0;
+  p.action = "fight"; p.frame = 0; p.ft = 0;               // 动画与挥砍计时同步从首帧开始
+  p.animSpeed = dur / interval;                           // 动画配合间隔：间隔越短动画越快（反之变慢）
+  p.hitPending = true; p.swingTarget = t; p.swingSkill = sk;
+  p.attackCD = interval;
+  // 只要发起攻击就拉仇恨（即使这一下未命中），敌人会立即开始反击。
+  t.aggro = true;
 }
 
 // 面朝目标：只在“八方向格”真正变化时改 dir，且攻击期间不参与左右抽动（攻击目标不会自己跳格）。
@@ -80,7 +118,8 @@ const DROPS = { "野猴": ["猴皮", "猴肉"], "花豹": ["豹牙", "豹肉"] }
 export function killNPC(ctx, n) {
   const G = ctx.state, A = ctx.assets;
   n.dead = true; n.dieT = 0; n.path = null; n.target = null;
-  n.action = "die"; n.frame = 0; n.ft = 0;
+  if (n.atkT > 0) { n.pendingDie = true; n.hitPending = false; }   // 正在挥砍：先把这一刀打完再倒地
+  else { n.action = "die"; n.frame = 0; n.ft = 0; n.animSpeed = 1; }
   addExp(G, n.exp);
   G.stats.honor += 1;
   const drops = (n.drops && n.drops.length) ? n.drops : (DROPS[n.name] || []).map(x => ({ name: x, count: 1 }));

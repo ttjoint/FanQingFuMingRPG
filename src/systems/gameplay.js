@@ -2,19 +2,25 @@
 // ctx = { state, assets, maps, config }。
 import { VW, VH } from "../core/constants.js";
 import { worldToCell, walkable } from "../core/utils.js";
-import { nearestWalkable, findPath, pathToWorld } from "../world/pathfinding.js";
-import { setAnim, updateMove, updateAnim } from "./motion.js";
+import { nearestWalkable, findPathPoints } from "../world/pathfinding.js";
+import { setAnim, updateMove, updateAnim, unitAhead } from "./motion.js";
 import { playerAttackTarget } from "./combat.js";
 import { npcAI } from "../world/npc.js";
 import { pickupGround } from "../world/ground.js";
 import { checkTriggers } from "../world/triggers.js";
+import { separateUnits } from "./separation.js";
 
 // 玩家：攻击计时、自动拾取、按住鼠标持续移动、攻击/移动、动画、奔跑耗精力。
 export function playerSystem(ctx, dt) {
   const g = ctx.state, p = g.player;
   if (!p) return;
-  if (!p.target) p.atkT = 0;
+  if (!p.target && p.atkT <= 0) p.atkT = 0;   // 不在挥砍时才清计时（挥砍“提交”后必须播完）
   if (!p.target && p.attackCD > 0) p.attackCD = Math.max(0, p.attackCD - dt);
+  if (p.dead) {   // 阵亡时若正在挥砍：先把这一刀播完再倒地
+    if (p.pendingDie) { p.atkT -= dt; if (p.atkT <= 0) { p.pendingDie = false; p.action = "die"; p.frame = 0; p.ft = 0; p.animSpeed = 1; } }
+    updateAnim(p, dt, ctx.assets.chars);
+    return;
+  }
   if (p.pickup && !p.dead && !g.dialog && !g.script) {
     const gr = p.pickup;
     if (g.ground.indexOf(gr) < 0) p.pickup = null;
@@ -23,26 +29,42 @@ export function playerSystem(ctx, dt) {
   if (!p.dead) {
     if (g.dialog || g.script) { setAnim(p, "stand"); }
     else {
-      // 按住鼠标：持续朝鼠标当前位置移动（高精度：终点取鼠标像素，且按位移阈值重算）
+      // 按住鼠标：持续朝鼠标**当前像素**移动。注意鼠标屏幕坐标不动、相机跟随玩家移动时，
+      // 光标下的世界坐标会变，因此每帧用 sx/sy + cam 实时换算（不能依赖只在 mousemove 更新的 wx/wy）。
       if (g.hold !== null && !p.target) {
-        const c = worldToCell(g.mouse.wx, g.mouse.wy);
-        const moved = !g.holdTarget || Math.hypot(g.mouse.wx - g.holdTarget.x, g.mouse.wy - g.holdTarget.y) > 8;
-        if (!g.holdCell || g.holdCell.row !== c.row || g.holdCell.col !== c.col || moved) {
-          g.holdCell = c;
-          const onCell = walkable(c.row, c.col);
-          const t = onCell ? c : nearestWalkable(ctx, c.row, c.col);
-          if (t) {
+        const wx = g.mouse.sx + g.cam.x, wy = g.mouse.sy + g.cam.y;
+        const c = worldToCell(wx, wy);
+        const onCell = walkable(c.row, c.col);
+        const t = onCell ? c : nearestWalkable(ctx, c.row, c.col);
+        if (t) {
+          const goalChanged = !g.holdCell || g.holdCell.row !== t.row || g.holdCell.col !== t.col;
+          const mouseMoved = !g.holdTarget || Math.hypot(wx - g.holdTarget.x, wy - g.holdTarget.y) > 0.5;
+          if (goalChanged || !p.path) {
             const cc = worldToCell(p.x, p.y);
-            const path = findPath(ctx, cc.row, cc.col, t.row, t.col);
-            if (path) {
-              g.holdTarget = { x: g.mouse.wx, y: g.mouse.wy };
-              p.path = pathToWorld(path, onCell ? { x: g.mouse.wx, y: g.mouse.wy } : null);
+            const pts = findPathPoints(ctx, cc.row, cc.col, t.row, t.col, { avoidUnits: true, mover: p }, { x: p.x, y: p.y }, onCell ? { x: wx, y: wy } : null);
+            if (pts && pts.length) {
+              g.holdCell = t; g.holdTarget = { x: wx, y: wy };
+              p.path = pts;
               p.running = (g.hold === 0); p.speed = (g.hold === 0) ? 150 : 90;
             }
+          } else if (mouseMoved && onCell && p.path && p.path.length) {
+            // 同一目标格内：只把终点改到当前鼠标像素，持续跟随（无需 A*）
+            p.path[p.path.length - 1] = { x: wx, y: wy };
+            g.holdTarget = { x: wx, y: wy };
           }
         }
       }
-      if (p.target && !p.target.dead) playerAttackTarget(ctx);
+      // 前方有单位挡路 → 用 avoidUnits 重规划（转身沿可行走路线绕行，而不是被推着划弧）
+      if (p.path && p.path.length && !p.target) {
+        p.repathT = Math.max(0, (p.repathT || 0) - dt);
+        if (p.repathT <= 0 && unitAhead(p, p.path[0].x, p.path[0].y, 100)) {
+          const goal = p.path[p.path.length - 1], gc = worldToCell(goal.x, goal.y), cc = worldToCell(p.x, p.y);
+          const pts = findPathPoints(ctx, cc.row, cc.col, gc.row, gc.col, { avoidUnits: true, mover: p }, { x: p.x, y: p.y }, goal);
+          if (pts && pts.length) p.path = pts;
+          p.repathT = 0.35;
+        }
+      }
+      if (p.atkT > 0 || (p.target && !p.target.dead)) playerAttackTarget(ctx, dt);
       else if (p.target && p.target.dead) p.target = null;
       else if (!updateMove(p, dt)) {
         if (p.action !== "stand") setAnim(p, "stand");
@@ -57,7 +79,17 @@ export function playerSystem(ctx, dt) {
 // NPC：AI + 动画（死亡单位只保留倒地最后一帧）。
 export function npcSystem(ctx, dt) {
   const g = ctx.state, chars = ctx.assets.chars;
-  for (const n of g.npcs) { if (n.dead) { updateAnim(n, dt, chars); continue; } npcAI(ctx, n, dt); updateAnim(n, dt, chars); }
+  for (const n of g.npcs) {
+    if (n.dead) {
+      // 阵亡时若正在挥砍：先把这一刀动画播完，再切换到倒地。
+      if (n.pendingDie) {
+        n.atkT -= dt;
+        if (n.atkT <= 0) { n.pendingDie = false; n.action = "die"; n.frame = 0; n.ft = 0; n.animSpeed = 1; }
+      }
+      updateAnim(n, dt, chars); continue;
+    }
+    npcAI(ctx, n, dt); updateAnim(n, dt, chars);
+  }
 }
 
 export function triggerSystem(ctx, dt) { checkTriggers(ctx, dt); }
@@ -79,5 +111,8 @@ export function cameraSystem(ctx, dt) {
   g.cam.y = Math.max(m.minY, Math.min(m.maxY - VH, g.cam.y));
 }
 
-// 每帧玩法系统的顺序（与拆分前完全一致）。
-export const gameplaySystems = [playerSystem, npcSystem, triggerSystem, effectSystem, cameraSystem];
+// 单位间软分离（避免移动时互相卡死）。
+export function separationSystem(ctx, dt) { separateUnits(ctx.state, dt); }
+
+// 每帧玩法系统的顺序。
+export const gameplaySystems = [playerSystem, npcSystem, separationSystem, triggerSystem, effectSystem, cameraSystem];

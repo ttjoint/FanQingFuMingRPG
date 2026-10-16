@@ -22,10 +22,14 @@ export function fromLegacyMap(raw) {
     if (c.trigger || c.map) events[i] = { trigger: c.trigger || 0, map: c.map || 0 };
   }
   for (let i = 0; i < w * w; i++) if (!ground[i]) ground[i] = [0, 0];
-  const decorations = (raw.objects || []).map((o, idx) => ({
-    id: "o" + (idx + 1), sprite: o.sprite.slice(),
-    tiles: (o.tiles || []).map(t => t.slice()), layer: o.layer || 0,
-  }));
+  const decorations = (raw.objects || []).map((o, idx) => {
+    const d = { id: "o" + (idx + 1), sprite: o.sprite.slice(), tiles: (o.tiles || []).map(t => t.slice()), layer: o.layer || 0 };
+    if (o.roof != null) d.roof = o.roof;     // 水平分界源 y（可选）
+    if (o.bias != null) d.bias = o.bias;     // 深度微调（像素，可选）
+    if (o.single) d.single = true;           // 整体单一深度
+    if (Array.isArray(o.line) && o.line.length) d.line = o.line.map(p => [p[0], p[1]]);   // 手画地基线
+    return d;
+  });
   const units = (raw.spawns || []).map((s, idx) => {
     const u = { id: "u" + (idx + 1), npc: s.npc, r: s.row, c: s.col };
     if (s.overrides) u.overrides = JSON.parse(JSON.stringify(s.overrides));   // 实例覆盖模板
@@ -54,7 +58,14 @@ export function toLegacyMap(doc) {
   return {
     name: doc.name, width: w, music: doc.music, entry: doc.entry ? doc.entry.slice() : null,
     cells,
-    objects: (doc.decorations || []).map(d => ({ sprite: d.sprite.slice(), tiles: (d.tiles || []).map(t => t.slice()), layer: d.layer || 0 })),
+    objects: (doc.decorations || []).map(d => {
+      const o = { sprite: d.sprite.slice(), tiles: (d.tiles || []).map(t => t.slice()), layer: d.layer || 0 };
+      if (d.roof != null) o.roof = d.roof;
+      if (d.bias != null) o.bias = d.bias;
+      if (d.single) o.single = true;
+      if (Array.isArray(d.line) && d.line.length) o.line = d.line.map(p => [p[0], p[1]]);
+      return o;
+    }),
     spawns: (doc.units || []).map(u => {
       const s = { npc: u.npc, row: u.r, col: u.c };
       if (u.overrides) s.overrides = JSON.parse(JSON.stringify(u.overrides));

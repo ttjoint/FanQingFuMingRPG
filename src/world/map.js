@@ -1,12 +1,80 @@
 // 地图数据构建 / 切换 / 玩家落点。ctx 由调用方注入；buildMapData(assets, data) 只依赖资源。
 import { VW, VH } from "../core/constants.js";
 import { cellCenter } from "../core/utils.js";
+import { getImg } from "../core/assets.js";
 import { spawnNPC, placeFree } from "./npc.js";
 import { playBGM } from "../systems/audio.js";
 import { attachAll } from "../engine/ecs.js";
+import { buildObjectDrawables, baseLineFromBottom, lineToArray } from "../engine/depth.js";
 import { UNIT_COMPONENTS } from "../runtime/components.js";
 
-// 把 assets/maps/*.json 转成运行时结构：可行走网格、地形离屏画布、带地基矩形的对象表。
+// 对象精灵的 alpha 底边（逐列取最低不透明像素，返回源本地 y；-1=该列无像素）。
+const _alphaBottomCache = new WeakMap();
+function alphaBottom(img, sprite) {
+  if (!img || !img.width) return null;
+  let cached = _alphaBottomCache.get(img);
+  if (!cached) { cached = new Map(); _alphaBottomCache.set(img, cached); }
+  const key = sprite.slice(0, 4).join(",");
+  if (cached.has(key)) return cached.get(key);
+  const [sx0, sy0, sw, sh] = sprite;
+  let out = null;
+  try {
+    const c = document.createElement("canvas"); c.width = sw; c.height = sh;
+    const cx = c.getContext("2d");
+    cx.drawImage(img, sx0, sy0, sw, sh, 0, 0, sw, sh);
+    const d = cx.getImageData(0, 0, sw, sh).data;
+    out = new Int16Array(sw).fill(-1);
+    for (let x = 0; x < sw; x++) for (let y = sh - 1; y >= 0; y--) if (d[(y * sw + x) * 4 + 3] > 8) { out[x] = y; break; }
+  } catch (e) { out = null; }
+  cached.set(key, out); return out;
+}
+
+// 自动地基线：只用“地基格 x 范围”内的 alpha 底边点拟合**下凸包**（凸多边形底边）。
+// 下凸包会跨过城门洞这类凹陷，并忽略两侧伸出的房檐（高处小部件属于屋顶）。
+function autoBase(img, sprite, tiles, tileW) {
+  if (!img || !img.width || !tiles || !tiles.length) return null;
+  const bottom = alphaBottom(img, sprite); if (!bottom) return null;
+  let tx0 = Infinity, tx1 = -Infinity;
+  for (const t of tiles) { const lx = t[2] - sprite[4]; if (lx < tx0) tx0 = lx; if (lx + tileW > tx1) tx1 = lx + tileW; }
+  return baseLineFromBottom(bottom, tx0, tx1);
+}
+
+// 玩家可见身高（像素）：取站立/行走/奔跑/攻击 × 各方向所有帧的 alpha 包围盒高度最大值 + 余量。
+// 蓝线 = 黄线 − 玩家身高；偏小会让“蓝黄间距”比角色贴图矮，导致上身在蓝区外露。
+const _imgH = new Map();
+function alphaH(im) {
+  const k = im.src || (im.width + "x" + im.height);
+  if (_imgH.has(k)) return _imgH.get(k);
+  let h = im.height;
+  try {
+    const c = document.createElement("canvas"); c.width = im.width; c.height = im.height;
+    const cx = c.getContext("2d"); cx.drawImage(im, 0, 0);
+    const d = cx.getImageData(0, 0, im.width, im.height).data;
+    let top = im.height, bot = -1;
+    for (let y = 0; y < im.height; y++) { let hit = false; for (let x = 0; x < im.width; x++) if (d[(y * im.width + x) * 4 + 3] > 8) { hit = true; break; } if (hit) { if (y < top) top = y; bot = y; } }
+    h = bot >= 0 ? (bot - top + 1) : im.height;
+  } catch (e) { }
+  _imgH.set(k, h); return h;
+}
+let _playerH = 0;
+export function playerHeadHeight(assets) {
+  if (_playerH) return _playerH;
+  const ch = assets.chars && assets.chars["role"];
+  let h = 0;
+  for (const act of ["stand", "walk", "run", "fight"]) {
+    const blocks = ch && ch[act]; if (!blocks) continue;
+    for (const block of blocks) {
+      if (!block || !block.length) continue;
+      const im = getImg("assets/role/" + block[0].replace(/\.bmp$/, ".png"));
+      if (!im || !im.width) continue;
+      const hh = alphaH(im); if (hh > h) h = hh;
+    }
+  }
+  _playerH = (h > 0 ? h : 64) + 8;   // 余量：保证蓝线不低于角色头顶
+  return _playerH;
+}
+
+// 把 assets/maps/*.json 转成运行时结构：可行走网格、地形离屏画布、对象表。
 export function buildMapData(assets, data) {
   const w = data.width;
   const flags = new Uint8Array(w * w);
@@ -16,20 +84,27 @@ export function buildMapData(assets, data) {
     flags[c.row * w + c.col] = c.flag;
     cellOf[c.row * w + c.col] = c;
   }
-  // 对象：整幅精灵，按“底边 y”与角色一起排序（避免房顶/房屋与树木交错）
-  // foot：建筑/树木的“地基”矩形（由对象图块列表求得），用于修正站在门口时被墙体遮挡的问题。
-  const objects = data.objects.map(o => {
-    const sp = o.sprite;   // [sx0, sy0, sw, sh, dxa, dya]
-    let fx0 = 1e9, fy0 = 1e9, fx1 = -1e9, fy1 = -1e9;
-    for (const t of (o.tiles || [])) {
-      const dx = t[2], dy = t[3];
-      if (dx < fx0) fx0 = dx; if (dy < fy0) fy0 = dy;
-      if (dx + 64 > fx1) fx1 = dx + 64; if (dy + 32 > fy1) fy1 = dy + 32;
-    }
-    const foot = fx1 > fx0 ? { x0: fx0, y0: fy0, x1: fx1, y1: fy1 } : null;
-    // layer：装饰的“深度层”。同一层内仍按底边 y 排序；层号越大越靠上画（如树冠/屋顶遮罩）。
-    return { sprite: sp, sortY: sp[5] + sp[3] + (o.layer || 0) * 100000, layer: o.layer || 0, foot };
-  });
+  // 对象：一幅对象精灵 = 完整视觉（含上部墙体/屋顶）+ 地基格（tiles，只覆盖底部）。
+  // 深度排序交给 engine/depth.js：整幅精灵按 64×32 切块，每块用正下方最近地基格的格心 y。
+  const otw = assets.atlasJson.tileW, oth = assets.atlasJson.tileH;
+  const objects = [];
+  const playerH = playerHeadHeight(assets);
+  const tpls = assets.decorTemplates || {};   // 跨地图共享的装饰物模板（按贴图源矩形）
+  for (const o of data.objects) {
+    // 深度模式（模板优先，其次实例）：整体单一深度 / 手画地基线 / 自动拟合（下凸包）
+    const tk = o.sprite[0] + "," + o.sprite[1] + "," + o.sprite[2] + "," + o.sprite[3];
+    const tpl = tpls[tk];
+    const single = tpl ? tpl.single : o.single;
+    const line = tpl ? tpl.line : o.line;
+    let opts;
+    if (single) opts = { single: true };
+    else if (o.roof != null) opts = { roofY: o.roof, playerH };
+    else if (line && line.length) opts = { base: lineToArray(line, o.sprite[2]), playerH };
+    else opts = { base: autoBase(assets.obj, o.sprite, o.tiles, otw), playerH };
+    const dr = buildObjectDrawables(o.sprite, o.tiles || [], o.layer || 0, otw, oth, opts);
+    if (o.bias) for (const d of dr) d.sortY += o.bias;   // 编辑器“深度微调”：整体前/后移
+    objects.push(...dr);
+  }
   // 世界边界 = 格子 ∪ 对象
   for (const c of data.cells) {
     if (c.dx < minX) minX = c.dx; if (c.dy < minY) minY = c.dy;

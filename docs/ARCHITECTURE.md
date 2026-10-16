@@ -81,6 +81,10 @@
 | 编辑器历史 / 选择模型 / 多选框选 | `editor/history.js` · `editor/selection.js` · `editor/map-editor.js` |
 | 引擎纯函数（等距/方向，DOM-free） | `engine/iso.js` |
 | 引擎 A*（注入 walkable，DOM-free） | `engine/grid.js` |
+| 引擎视线/路径平滑（string pulling） | `engine/grid.js` |
+| 引擎流场（多单位共享，Dijkstra） | `engine/flowfield.js` |
+| 引擎空间哈希（近邻查询） | `engine/spatialhash.js` |
+| 引擎等距深度切块（对象逐块深度 + 屋顶覆盖） | `engine/depth.js` |
 | 引擎椭圆碰撞（DOM-free） | `engine/collision.js` |
 | 引擎脚本解析/求值（vars 注入） | `engine/script/gsp.js` |
 | 系统管道（DOM-free，ECS 前置） | `engine/pipeline.js` |

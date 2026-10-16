@@ -2,20 +2,29 @@
 import { G } from "../core/state.js";
 import { VW, cv } from "../core/constants.js";
 import { screenPos, worldToCell, walkable, cellCenter } from "../core/utils.js";
-import { nearestWalkable, findPath, pathToWorld } from "../world/pathfinding.js";
+import { nearestWalkable, nearestWalkablePixel, findPathPoints } from "../world/pathfinding.js";
 import { groundAt, dropGround } from "../world/ground.js";
 import { canAddItem, useItemSlot, reindex } from "../systems/inventory.js";
 import { skillByName } from "../core/registry.js";
 import { castSelf } from "../systems/combat.js";
 import { shopGoods, openShop, closeShop, sellCursor } from "../systems/shop.js";
 import { advanceDialog, startScript, openSay } from "../script/vm.js";
-import { slotAt, insideShop, insideShopClose, insideDialog, settingsHit, menuHit } from "../core/layout.js";
+import { slotAt, insideShop, insideShopClose, insideDialog, settingsHit, menuHit, fnButtonAt } from "../core/layout.js";
 import { handleSlotClick } from "./slots.js";
 import { saveBtnAt, saveSlot, loadSlot } from "../systems/save.js";
 import { applyVolumes, playSound } from "../systems/audio.js";
 import { enterMenu, startGame, flashPics } from "../systems/scene.js";
 import { getRuntime } from "../runtime/context.js";
 import { isEditorAvailable } from "../content/store.js";
+
+// 五个功能窗口（属性/记事/荣辱/任务/菜单/设置）互斥：开一个就关掉其余，避免互相遮挡。
+function setPanel(kind) {
+  const cur = G.savePanel ? "menu" : G.panel;
+  const next = cur === kind ? null : kind;   // 再点同一个 = 关闭
+  G.panel = (next && next !== "menu") ? next : null;
+  G.savePanel = next === "menu";
+  if (next) G.settingsPanel = false;
+}
 
 export function npcAt(wx, wy) {
   for (let i = G.npcs.length - 1; i >= 0; i--) {
@@ -53,8 +62,8 @@ export function handleLeft(wx, wy) {
     const c = worldToCell(g.x, g.y);
     const t = nearestWalkable(getRuntime(), c.row, c.col) || c;
     const cc = worldToCell(p0.x, p0.y);
-    const path = findPath(getRuntime(), cc.row, cc.col, t.row, t.col);
-    if (path) { p0.target = null; p0.path = pathToWorld(path); p0.speed = 90; p0.running = false; }
+    const pts = findPathPoints(getRuntime(), cc.row, cc.col, t.row, t.col, { avoidUnits: true, mover: p0 }, { x: p0.x, y: p0.y });
+    if (pts && pts.length) { p0.target = null; p0.path = pts; p0.speed = 90; p0.running = false; }
     return;
   }
   if (p0) p0.pickup = null;
@@ -67,21 +76,23 @@ export function handleLeft(wx, wy) {
       const c = worldToCell(n.x, n.y);
       const p = nearestWalkable(getRuntime(), c.row, c.col);
       if (p && G.player) { const cc = worldToCell(G.player.x, G.player.y);
-        const path = findPath(getRuntime(), cc.row, cc.col, p.row, p.col);
-        if (path) { G.player.target = null; G.player.path = pathToWorld(path); G.player.speed = 90; G.player.running = false; } }
+        const pts = findPathPoints(getRuntime(), cc.row, cc.col, p.row, p.col, { avoidUnits: true, mover: G.player }, { x: G.player.x, y: G.player.y });
+        if (pts && pts.length) { G.player.target = null; G.player.path = pts; G.player.speed = 90; G.player.running = false; } }
     }
     return;
   }
   const c = worldToCell(wx, wy);
   const onCell = !!(G.map && walkable(c.row, c.col));
-  const p = onCell ? c : nearestWalkable(getRuntime(), c.row, c.col);
-  if (!p || !G.player) return;
+  let cell, exact;
+  if (onCell) { cell = c; exact = { x: wx, y: wy }; }                       // 可走格 → 精确停在点击像素
+  else { const n = nearestWalkablePixel(getRuntime(), wx, wy); if (!n) return; cell = { row: n.row, col: n.col }; exact = { x: n.x, y: n.y }; }   // 不可走 → 贴近的最近可走像素
+  if (!G.player) return;
+  if (Math.hypot(exact.x - G.player.x, exact.y - G.player.y) < 24) { G.player.path = null; G.player.target = null; return; }   // 已很近→原地不动，防抖动
   G.player.target = null;
   G.player.running = true;
   const cc = worldToCell(G.player.x, G.player.y);
-  const path = findPath(getRuntime(), cc.row, cc.col, p.row, p.col);
-  // 点的是可走格 → 停在鼠标的精确位置；否则退回最近可走格中心
-  if (path) { G.player.path = pathToWorld(path, onCell ? { x: wx, y: wy } : null); G.player.speed = 150; }
+  const pts = findPathPoints(getRuntime(), cc.row, cc.col, cell.row, cell.col, { avoidUnits: true, mover: G.player }, { x: G.player.x, y: G.player.y }, exact);
+  if (pts && pts.length) { G.player.path = pts; G.player.speed = 150; }
 }
 
 export function handleRight(wx, wy) {
@@ -104,13 +115,16 @@ export function handleRight(wx, wy) {
   }
   const c = worldToCell(wx, wy);
   const onCell = !!(G.map && walkable(c.row, c.col));
-  const p = onCell ? c : nearestWalkable(getRuntime(), c.row, c.col);
-  if (!p || !G.player) return;
+  let cell, exact;
+  if (onCell) { cell = c; exact = { x: wx, y: wy }; }
+  else { const n = nearestWalkablePixel(getRuntime(), wx, wy); if (!n) return; cell = { row: n.row, col: n.col }; exact = { x: n.x, y: n.y }; }
+  if (!G.player) return;
+  if (Math.hypot(exact.x - G.player.x, exact.y - G.player.y) < 24) { G.player.path = null; G.player.target = null; return; }
   G.player.target = null;
   G.player.running = false;
   const cc = worldToCell(G.player.x, G.player.y);
-  const path = findPath(getRuntime(), cc.row, cc.col, p.row, p.col);
-  if (path) { G.player.path = pathToWorld(path, onCell ? { x: wx, y: wy } : null); G.player.speed = 90; }
+  const pts = findPathPoints(getRuntime(), cc.row, cc.col, cell.row, cell.col, { avoidUnits: true, mover: G.player }, { x: G.player.x, y: G.player.y }, exact);
+  if (pts && pts.length) { G.player.path = pts; G.player.speed = 90; }
 }
 
 export function cycleSkill(d) {
@@ -138,6 +152,11 @@ export function addInput() {
     if (G.settingsPanel) return;
     const sb = saveBtnAt(getRuntime(), sp.x, sp.y);
     if (sb) { if (sb.act === "save") saveSlot(getRuntime(), sb.i); else loadSlot(getRuntime(), sb.i); return; }
+    if (G.scene === "game") {
+      // 右下角功能按钮：属性 / 记事 / 荣辱 / 任务 / 菜单（菜单=存读档，可再点关闭）
+      const fn = fnButtonAt(sp.x, sp.y);
+      if (fn) { setPanel(fn); return; }
+    }
     if (G.savePanel) { if (G.scene === "menu") G.savePanel = false; return; }
     if (G.scene !== "game") { handleSceneClick(sp.x, sp.y); return; }
     if (G.dialog) {
@@ -190,11 +209,12 @@ export function addInput() {
       return;
     }
     if (e.key >= "1" && e.key <= "9") { useItemSlot(G, +e.key - 1); return; }
-    if (e.key === "F5" || e.key === "F8") { G.savePanel = !G.savePanel; e.preventDefault(); return; }
-    if (e.key === "F10") { G.settingsPanel = !G.settingsPanel; e.preventDefault(); return; }
+    if (e.key === "p" || e.key === "P") { window.__POLY_DEBUG__ = !window.__POLY_DEBUG__; G.tip = "多边形调试：" + (window.__POLY_DEBUG__ ? "开" : "关"); G.tipT = 1.5; e.preventDefault(); return; }
+    if (e.key === "F5" || e.key === "F8") { setPanel("menu"); e.preventDefault(); return; }
+    if (e.key === "F10") { G.settingsPanel = !G.settingsPanel; if (G.settingsPanel) { G.panel = null; G.savePanel = false; } e.preventDefault(); return; }
     if (e.key === "Tab") { G.packOpen = !G.packOpen; if (G.packOpen && !G.pack.length) G.pack = new Array(25).fill(null); e.preventDefault(); return; }
-    if (e.key === "F4") { G.panel = G.panel === "mission" ? null : "mission"; return; }
-    if (e.key === "F1") { G.panel = G.panel === "note" ? null : "note"; return; }
+    if (e.key === "F4") { setPanel("mission"); return; }
+    if (e.key === "F1") { setPanel("note"); return; }
     if (e.key === "q" || e.key === "Q") cycleSkill(-1);
     if (e.key === "e" || e.key === "E") cycleSkill(1);
     if (e.key === "r" || e.key === "R") castSelf(getRuntime());

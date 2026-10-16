@@ -11,13 +11,14 @@ export function inMap(row, col) { const m = G.map; return m && row >= 0 && col >
 export function walkable(row, col) { return inMap(row, col) && G.map.flags[row * G.map.width + col] === 1; }
 
 // ---- 单位碰撞体 ----
-// 每个单位在地面上占一个椭圆足迹：水平半径 UNIT_RX，垂直半径约为一半（与 2:1 的等距投影一致）。
-// 单位可用 radiusX / radiusY 覆盖默认值（例如体型更大的将领/野兽）。
-export const UNIT_RX = 16, UNIT_RY = 8;
+// 每个单位在地面上占一个椭圆足迹：水平半径 UNIT_RX，垂直半径 UNIT_RY（接近 2:1 等距投影）。
+// 只取角色贴图（约 56px 宽）下部的“脚下”范围：过大会让单格走廊放不下两个单位。
+// 32×20 占一格（64×32）约 50%×62%，既贴脚又不挡道。单位可用 radiusX / radiusY 覆盖（如体型更大的将领/野兽）。
+export const UNIT_RX = 16, UNIT_RY = 10;   // 人形单位碰撞体积（可用 radiusX/radiusY 覆盖）
 
 export function unitRadii(e) {
   const rx = (e && e.radiusX) || UNIT_RX;
-  const ry = (e && e.radiusY) || rx * 0.5;
+  const ry = (e && e.radiusY) || ((e && e.radiusX) ? e.radiusX * 0.5 : UNIT_RY);
   return { rx, ry };
 }
 
@@ -28,17 +29,22 @@ export function eachUnit(fn) {
   for (let i = 0; i < list.length; i++) fn(list[i]);
 }
 
-// (x,y) 处是否与其它“存活”单位的碰撞椭圆重叠（忽略 exclude 与自身）。
-// 死亡单位趴在地上不再阻挡通行，避免尸体把路口堵死。
-export function overlapsUnit(e, x, y, exclude) {
+// (x,y) 处与其它“存活”单位重叠的单位（忽略 exclude 与自身），无则返回 null。
+export function overlappingUnit(e, x, y, exclude) {
   const a = unitRadii(e);
-  let hit = false;
+  let hit = null;
   eachUnit(u => {
     if (hit || u === e || u === exclude || u.dead) return;
     const b = unitRadii(u);
-    if (ellipsesOverlap(x, y, a.rx, a.ry, u.x, u.y, b.rx, b.ry)) hit = true;
+    if (ellipsesOverlap(x, y, a.rx, a.ry, u.x, u.y, b.rx, b.ry)) hit = u;
   });
   return hit;
+}
+
+// (x,y) 处是否与其它“存活”单位的碰撞椭圆重叠（忽略 exclude 与自身）。
+// 死亡单位趴在地上不再阻挡通行，避免尸体把路口堵死。
+export function overlapsUnit(e, x, y, exclude) {
+  return !!overlappingUnit(e, x, y, exclude);
 }
 
 export function screenToWorld(cx, cy) {

@@ -20,6 +20,10 @@ import { render } from "./render/renderer.js";
 
 const runtime = getRuntime();
 
+// 版本标记（控制台可见，用于确认是否加载到最新代码）
+import { BUILD } from "./core/constants.js";
+console.log("[gsxy] build:", BUILD);
+
 // 调试入口（控制台 / E2E 脚本可用）：window.__GAME__
 globalThis.__GAME__ = { G, A, MAPS, runtime, screenToWorld, advanceDialog: ans => advanceDialog(runtime, ans), update, render };
 
