@@ -1,4 +1,4 @@
-import { worldToCell, cellCenter } from "./iso.js";
+import { worldToCell, cellCenter, isoGeometry } from "./iso.js";
 // 引擎核心：A* 寻路（纯函数，不依赖 DOM / 全局状态）。
 // 通过注入 `isWalkable(row,col)` 谓词适配任意网格（运行时用 G.map，编辑器可用 MapDoc）。
 // world/pathfinding.js 只是它的薄封装。
@@ -99,7 +99,7 @@ export function astarSmooth(width, isWalkable, sr, sc, tr, tc) {
 }
 
 // ---- 像素级连续路径（纯函数；isW(x,y) 判定世界坐标处是否可走）----
-const RX = 32, RY = 16;
+// 菱形半宽/半高来自等距几何（可由配置注入），不再写死。
 // 线段按 ~4px 采样，每点都必须可走。
 export function walkableSegment(isW, a, b) {
   const d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(1, Math.ceil(d / 4));
@@ -114,7 +114,7 @@ export function tautPath(isW, pts) {
   while (i < out.length - 1) { let j = out.length - 1; for (; j > i + 1; j--) if (walkableSegment(isW, out[i], out[j])) break; res.push(out[j]); i = j; }
   return res;
 }
-function cellVerts(c) { return [{ x: c.x, y: c.y - RY }, { x: c.x + RX, y: c.y }, { x: c.x, y: c.y + RY }, { x: c.x - RX, y: c.y }]; }
+function cellVerts(c) { const { halfW: RX, halfH: RY } = isoGeometry(); return [{ x: c.x, y: c.y - RY }, { x: c.x + RX, y: c.y }, { x: c.x, y: c.y + RY }, { x: c.x - RX, y: c.y }]; }
 // 角点路径：候选点 = 路径各格菱形的四个角点；贪心跳到“沿路最远且可见”的角点（拐弯落在几何角点）。
 export function cornerPath(isW, nodes, start, end) {
   const cands = [];

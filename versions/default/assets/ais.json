@@ -1,0 +1,86 @@
+[
+  {
+    "id": "stationary",
+    "name": "固定站位（不动）",
+    "idle": { "action": "idle" },
+    "rules": []
+  },
+  {
+    "id": "wander",
+    "name": "原地游荡（出生点附近）",
+    "idle": { "action": "wander", "radius": 160, "interval": [2, 6], "speed": 45 },
+    "rules": []
+  },
+  {
+    "id": "wander_wide",
+    "name": "大范围游荡",
+    "idle": { "action": "wander", "radius": 320, "interval": [3, 8], "speed": 45 },
+    "rules": []
+  },
+  {
+    "id": "guard",
+    "name": "站桩守卫（原地警戒）",
+    "idle": { "action": "idle" },
+    "targeting": { "aggroRange": 260, "retaliate": true },
+    "rules": [
+      { "when": { "targetInRange": "melee" }, "do": { "action": "attack" } },
+      { "when": { "hasTarget": true }, "do": { "action": "guard", "leash": 260 } }
+    ]
+  },
+  {
+    "id": "beast",
+    "name": "野兽（游荡+主动扑咬）",
+    "idle": { "action": "wander", "radius": 200, "interval": [2, 5], "speed": 45 },
+    "targeting": { "aggroRange": 200, "retaliate": true, "giveUpT": 6, "leash": 420 },
+    "rules": [
+      { "when": { "hpBelow": 0.25 }, "do": { "action": "flee", "range": 420, "speed": 1.5 } },
+      { "when": { "targetInRange": "melee" }, "do": { "action": "attack", "cooldown": 1.1 } },
+      { "when": { "hasTarget": true }, "do": { "action": "chase", "stopRange": "melee" } }
+    ]
+  },
+  {
+    "id": "bandit",
+    "name": "强盗（主动+呼朋引伴+低血逃跑）",
+    "idle": { "action": "wander", "radius": 180, "interval": [2, 6], "speed": 45 },
+    "targeting": { "aggroRange": 260, "retaliate": true, "giveUpT": 8, "leash": 520 },
+    "rules": [
+      { "when": { "hpBelow": 0.2 }, "do": { "action": "flee", "range": 480, "speed": 1.5 } },
+      { "when": { "targetInRange": "melee" }, "do": { "action": "attack", "cooldown": 1.1 } },
+      { "when": { "allyBeingAttacked": true }, "do": { "action": "assist", "radius": 300 } },
+      { "when": { "hasTarget": true }, "do": { "action": "chase", "stopRange": "melee" } }
+    ]
+  },
+  {
+    "id": "soldier",
+    "name": "士兵（列阵+协助同阵营）",
+    "idle": { "action": "wander", "radius": 120, "interval": [3, 7], "speed": 45 },
+    "targeting": { "aggroRange": 280, "retaliate": true, "giveUpT": 10, "leash": 600 },
+    "rules": [
+      { "when": { "hpBelow": 0.15 }, "do": { "action": "flee", "range": 500, "speed": 1.4 } },
+      { "when": { "allyBeingAttacked": true }, "do": { "action": "assist", "radius": 340 } },
+      { "when": { "targetInRange": "melee" }, "do": { "action": "attack", "cooldown": 1.0 } },
+      { "when": { "hasTarget": true }, "do": { "action": "chase", "stopRange": "melee" } }
+    ]
+  },
+  {
+    "id": "boss",
+    "name": "首领（分阶段：高血普攻 / 中血猛攻 / 低血狂暴）",
+    "idle": { "action": "idle" },
+    "targeting": { "aggroRange": 320, "retaliate": true, "giveUpT": 12, "leash": 640 },
+    "rules": [
+      { "when": { "hpBelow": 0.3 }, "do": { "action": "attack", "cooldown": 0.7, "skill": "", "rage": 1.5 } },
+      { "when": { "hpBelow": 0.6 }, "do": { "action": "attack", "cooldown": 1.0 } },
+      { "when": { "targetInRange": "melee" }, "do": { "action": "attack", "cooldown": 1.2 } },
+      { "when": { "hasTarget": true }, "do": { "action": "chase", "stopRange": "melee" } }
+    ]
+  },
+  {
+    "id": "flee_only",
+    "name": "只会逃跑",
+    "idle": { "action": "wander", "radius": 120, "interval": [2, 5], "speed": 45 },
+    "targeting": { "aggroRange": 0, "retaliate": false },
+    "rules": [
+      { "when": { "hpBelow": 0.99 }, "do": { "action": "flee", "range": 400, "speed": 1.4 } }
+    ]
+  }
+]

@@ -7,7 +7,7 @@
   "scripts": {
     "start": "python serve.py 8000",
     "dev": "vite",
-    "build:assets": "python build_assets.py .. assets",
+    "build:assets": "python build_assets.py .. versions/default/assets",
     "check": "node tools/check-arch.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node tools/check-arch.mjs && tsc --noEmit && vitest run",

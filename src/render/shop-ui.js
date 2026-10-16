@@ -4,6 +4,7 @@ import { ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { itemByName } from "../core/registry.js";
 import { SHOP_BOX, SHOP_COLS, SHOP_ROWS, shopSlotPos, shopCloseBtn } from "../core/layout.js";
+import { drawItemSlot } from "./hud.js";
 
 export function drawShop() {
   if (!G.shop) return;
@@ -20,17 +21,20 @@ export function drawShop() {
   ctx.fillStyle = "#7a3a10"; ctx.font = "bold 12px 'Microsoft YaHei',SimHei,sans-serif";
   ctx.textAlign = "right"; ctx.fillText("银两 " + G.stats.money, B.x + B.w - 12, B.y + 22); ctx.textAlign = "left";
 
-  // 商品格（与 packpanel 画的格子对齐）
+  // 商品格（与 packpanel 画的格子对齐；图标走与背包同一个 drawItemSlot，保证尺寸/内边距一致）
   const total = SHOP_COLS * SHOP_ROWS;
   for (let i = 0; i < total; i++) {
     const p = shopSlotPos(i);
     if (i >= G.shop.goods.length) continue;
-    const it = itemByName(G.shop.goods[i]);
-    const im = it && it.icon ? getImg("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png")) : null;
-    if (im) ctx.drawImage(im, p.x + 4, p.y + 3, 30, 30);
+    const name = G.shop.goods[i];
+    const it = itemByName(name);
+    drawItemSlot({ name }, p.x, p.y, 38, 38);
     if (it && it.price > 0) {
       ctx.fillStyle = "#5a3a10"; ctx.font = "9px 'Microsoft YaHei',SimHei,sans-serif";
-      ctx.textAlign = "right"; ctx.fillText(String(it.price), p.x + 37, p.y + 37); ctx.textAlign = "left";
+      // 价格靠右下角，带描边保证叠在图标上仍可读
+      ctx.textAlign = "right"; ctx.textBaseline = "alphabetic";
+      ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,248,220,0.9)"; ctx.strokeText(String(it.price), p.x + 36, p.y + 36);
+      ctx.fillText(String(it.price), p.x + 36, p.y + 36); ctx.textAlign = "left";
     }
   }
 

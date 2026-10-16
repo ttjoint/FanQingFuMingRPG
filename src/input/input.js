@@ -6,8 +6,9 @@ import { nearestWalkable, nearestWalkablePixel, findPathPoints } from "../world/
 import { groundAt, dropGround } from "../world/ground.js";
 import { canAddItem, useItemSlot, reindex } from "../systems/inventory.js";
 import { skillByName } from "../core/registry.js";
-import { castSelf } from "../systems/combat.js";
-import { shopGoods, openShop, closeShop, sellCursor } from "../systems/shop.js";
+import { castSelf, playerCanAttack } from "../systems/combat.js";
+import { setPlayerRun } from "../systems/motion.js";
+import { hasGoods, openShop, closeShop, sellCursor } from "../systems/shop.js";
 import { advanceDialog, startScript, openSay } from "../script/vm.js";
 import { slotAt, insideShop, insideShopClose, insideDialog, settingsHit, menuHit, fnButtonAt } from "../core/layout.js";
 import { handleSlotClick } from "./slots.js";
@@ -71,7 +72,7 @@ export function handleLeft(wx, wy) {
   const n = npcAt(wx, wy);
   if (sk && sk.type === 0 && !n) { castSelf(getRuntime()); return; }
   if (n) {
-    if (n.attackable) { if (G.player) { G.player.target = n; G.player.running = true; G.player.path = null; G.player.atkT = 0; } }
+    if (playerCanAttack(getRuntime(), n)) { if (G.player) { G.player.target = n; setPlayerRun(G, true); G.player.path = null; G.player.atkT = 0; } }
     else { // 友善 NPC：仅走近，不攻击
       const c = worldToCell(n.x, n.y);
       const p = nearestWalkable(getRuntime(), c.row, c.col);
@@ -89,23 +90,23 @@ export function handleLeft(wx, wy) {
   if (!G.player) return;
   if (Math.hypot(exact.x - G.player.x, exact.y - G.player.y) < 24) { G.player.path = null; G.player.target = null; return; }   // 已很近→原地不动，防抖动
   G.player.target = null;
-  G.player.running = true;
+  setPlayerRun(G, true);   // 左键=跑（但精力为 0 时自动降为走路）
   const cc = worldToCell(G.player.x, G.player.y);
   const pts = findPathPoints(getRuntime(), cc.row, cc.col, cell.row, cell.col, { avoidUnits: true, mover: G.player }, { x: G.player.x, y: G.player.y }, exact);
-  if (pts && pts.length) { G.player.path = pts; G.player.speed = 150; }
+  if (pts && pts.length) G.player.path = pts;
 }
 
 export function handleRight(wx, wy) {
   const n = npcAt(wx, wy);
   if (n && !n.dead) {
-    if (n.attackable) {
+    if (playerCanAttack(getRuntime(), n)) {
       const line = n.talks && n.talks.length ? n.talks[Math.floor(Math.random() * n.talks.length)] : "";
       if (line) openSay(getRuntime(), n.name, line.replace(/\\n/g, "\n"), n.portrait);
       else { G.tip = n.name + "：……"; G.tipT = 2; }
       return;
     }
-    const goods = shopGoods(getRuntime(), n);
-    if (goods) { if (G.shop && G.shop.npc === n) closeShop(getRuntime()); else openShop(getRuntime(), n); return; }
+    // 拥有货物背包（inventory 组件）的单位才与玩家交易
+    if (hasGoods(n)) { if (G.shop && G.shop.npc === n) closeShop(getRuntime()); else openShop(getRuntime(), n); return; }
     if (!G.script && !G.dialog) {
       if (n.script) startScript(getRuntime(), n.script);
       else if (n.talks && n.talks.length) { const line = n.talks[Math.floor(Math.random() * n.talks.length)]; openSay(getRuntime(), n.name, line.replace(/\\n/g, "\n"), n.portrait); }

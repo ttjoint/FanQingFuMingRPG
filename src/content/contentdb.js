@@ -1,6 +1,6 @@
 // ContentDB：内容定义的规范模型（Record<id, Def>），由旧 assets 数据构建，
 // 也可由打包补丁（patch）覆盖。构建脚本、运行时、编辑器共用这一份结构。
-import { CONTENT_VERSION, normalizeNpc, normalizeItem, normalizeSkill, normalizeConfig, normalizeMapDoc, normalizeDecorTemplates } from "./schema.js";
+import { CONTENT_VERSION, normalizeNpc, normalizeItem, normalizeSkill, normalizeConfig, normalizeMapDoc, normalizeDecorTemplates, normalizeFactions, normalizeAis, normalizeBuffList } from "./schema.js";
 
 const deep = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
 export const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -18,6 +18,9 @@ export function buildContentDB(assets, mapDocs) {
     schemaVersion: CONTENT_VERSION,
     config: normalizeConfig(assets.config),
     npcs, npcOrder, items, itemOrder, skills, skillOrder, scripts,
+    factions: normalizeFactions(assets.factions),   // 阵营关系表（内容内置，只读）
+    ais: normalizeAis(assets.ais),                   // AI 配置表（内容内置，单位按 id 引用）
+    buffs: normalizeBuffList(assets.buffs),          // Buff/Debuff 配置表（内容内置，技能按 id 引用）
     game: deep(assets.game) || {}, transitions: deep(assets.transitions) || {}, mapsIndex: deep(assets.mapsIndex) || {},
     mapsManifest: (assets.mapsManifest || []).slice(), mapDocs: docs,
     decorTemplates: normalizeDecorTemplates(assets.decorTemplates || {}),   // 跨地图共享的装饰物模板
@@ -32,6 +35,9 @@ export function contentToLegacy(content) {
     skills: content.skillOrder.map(id => content.skills[id]),
     scripts: content.scripts,
     config: content.config, game: content.game,
+    factions: content.factions || [],
+    ais: content.ais || [],
+    buffs: content.buffs || [],
     transitions: content.transitions, mapsIndex: content.mapsIndex, mapsManifest: content.mapsManifest,
     decorTemplates: content.decorTemplates || {},
   };
@@ -54,6 +60,10 @@ export function diffContent(base, next) {
   tableDiff("skills", "removedSkills", base.skills, next.skills, next.skillOrder);
   tableDiff("scripts", "removedScripts", base.scripts, next.scripts, Object.keys(next.scripts));
   for (const k of ["config", "game", "mapsIndex", "transitions"]) if (!eq(base[k], next[k])) patch.content[k] = deep(next[k]);
+  // 阵营关系表（整表替换；随内容版本固定，但允许内容包覆盖）
+  if (!eq(base.factions, next.factions)) patch.content.factions = deep(next.factions);
+  if (!eq(base.ais, next.ais)) patch.content.ais = deep(next.ais);   // AI 配置表（整表替换）
+  if (!eq(base.buffs, next.buffs)) patch.content.buffs = deep(next.buffs);   // Buff 配置表（整表替换）
   // 装饰物模板（按贴图键）：只存非空且变化的条目
   {
     const b = base.decorTemplates || {}, n = next.decorTemplates || {};
@@ -85,6 +95,9 @@ export function applyPatch(base, patch) {
   applyTable("skills", "removedSkills", out.skillOrder);
   applyTable("scripts", "removedScripts", null);
   for (const k of ["config", "game", "mapsIndex", "transitions"]) if (c[k] !== undefined) out[k] = deep(c[k]);
+  if (c.factions !== undefined) out.factions = normalizeFactions(c.factions);
+  if (c.ais !== undefined) out.ais = normalizeAis(c.ais);
+  if (c.buffs !== undefined) out.buffs = normalizeBuffList(c.buffs);
   {
     if (!out.decorTemplates) out.decorTemplates = {};
     const mod = c.decorTemplates || {};

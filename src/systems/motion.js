@@ -3,6 +3,27 @@ import { worldToCell, walkable, dirFromVec, overlappingUnit, unitRadii, eachUnit
 
 export function setAnim(e, a) { if (e.action !== a) { e.action = a; e.frame = 0; e.ft = 0; } }
 
+// ---- 精力（奔跑）门控 ----
+// 纯逻辑在 engine/stamina.js（可在 Node 测试，无 DOM 依赖），这里再导出并接入运行时状态。
+import { CFG } from "../core/config.js";
+export { WALK_SPEED, RUN_SPEED } from "../engine/stamina.js";
+import { canRun as _canRun, resolveRun, WALK_SPEED as _WALK, RUN_SPEED as _RUN } from "../engine/stamina.js";
+
+// 玩家移速来自配置（数值平衡数据），缺省回退引擎默认。
+export function walkSpeed() { return (CFG.move && CFG.move.walkSpeed != null) ? CFG.move.walkSpeed : _WALK; }
+export function runSpeed() { return (CFG.move && CFG.move.runSpeed != null) ? CFG.move.runSpeed : _RUN; }
+
+// 精力充足才能奔跑：精力降到 0 时强制走路，直到靠药水/NPC 回复精力（mp > 0）。
+export function canRun(g) { return _canRun(g && g.stats); }
+
+// 设定玩家奔跑状态/速度：wantRun 为真但精力为 0 时，自动降为走路。返回实际是否在跑。
+export function setPlayerRun(g, wantRun) {
+  const r = resolveRun(g.stats, wantRun, { walkSpeed: walkSpeed(), runSpeed: runSpeed() });
+  g.player.running = r.running;
+  g.player.speed = r.speed;
+  return r.running;
+}
+
 // 目标点能否站立：仅看地形可行走（单位之间不再硬阻挡——改由 separationSystem 每帧软推开，
 // 否则两个迎面移动的单位会互相卡死、原地踏步）。
 function canStand(e, x, y) {

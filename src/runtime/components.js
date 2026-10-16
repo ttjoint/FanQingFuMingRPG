@@ -10,6 +10,12 @@ export const AI = defineComponent("behavior", { ai: 0, aggro: false, aggressive:
 export const Combat = defineComponent("combat", { attackable: false, atkT: 0, dead: false });
 export const Collider = defineComponent("collider", { radiusX: 0 });   // 0 = 用 UNIT_RX 默认（不要在这里写死，否则会覆盖默认半径）
 export const Loot = defineComponent("loot", { drops: [] });
+// 货物背包：拥有非空 inventory 的单位（商人/箱子）可与玩家交易。null = 无背包。
+export const Inventory = defineComponent("goods", { inventory: null });
+// 阵营（阵营关系定义在内容里，见 engine/faction.js）。空字符串 = 用兼容层派生（攻击力>0 -> enemy）。
+export const Faction = defineComponent("alignment", { faction: "" });
+// Buff / Debuff（运行时可变状态，见 engine/buff.js）。
+export const Buff = defineComponent("effects", { buffs: [] });
 
 // 单位（玩家 / NPC）共用的组件集合。
-export const UNIT_COMPONENTS = [Transform, Sprite, Stats, Motion, AI, Combat, Collider, Loot];
+export const UNIT_COMPONENTS = [Transform, Sprite, Stats, Motion, AI, Combat, Collider, Loot, Inventory, Faction, Buff];

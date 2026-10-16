@@ -13,8 +13,13 @@ playwright-report/
 blob-report/
 
 # 生成/本地文件（如需把生成资源也纳入版本库，请删除下面两行）
-# assets/maps/
-# assets/role/
+# versions/default/assets/maps/
+# versions/default/assets/role/
+
+# 用户/编辑器创建的版本文件夹（默认版本 versions/default 仍纳入版本库）。
+# 如需把某个自制版本也提交，请用 `git add -f versions/<id>`。
+versions/*/
+!versions/default/
 
 # 临时测试产物（无头 Chrome / CDP 脚本 / 截图）
 _*.mjs

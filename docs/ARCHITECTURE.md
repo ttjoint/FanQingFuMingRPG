@@ -27,12 +27,17 @@
 - `editor` → `content`（+ 只读 `A`/`G` 的运行时视图）
 - `game` → `content` + 运行时
 - `content` → 仅 `content/schema`（无 DOM、无游戏状态）
-- 规划中的 `engine` 不依赖 game/editor。
+- `engine` 为**通用纯层**：不依赖 game/editor/上层，也**不得依赖 `content/` 或 `core/`**
+  （由 `tools/check-arch.mjs` 强制）。引擎只保留通用能力与内置兵底常量；
+  所有与具体游戏有关的数值（移速、索敌半径、近战分界、等距几何、背包道具名…）
+  由装配层从 `config.json` 注入（`configureIso` / `configureSerializer` /
+  `buildAiTable(list, defaults)` / `resolveRun(stats, want, speeds)` 等）。
+  新增/修改游戏字段不需要改动引擎（见 `engine/npcSerialize.js` 的 schema 注入）。
 
 ## 关键数据流
 
 ```
-原版 assets/*.json ──fromLegacyMap──▶ MapDoc ┐
+原版 versions/default/assets/*.json ──fromLegacyMap──▶ MapDoc ┐
 原版数据表         ──buildContentDB─▶ ContentDB ┤
                                                 ├─applyPatch(pack.patch)─▶ 规范内容
 内容包 v2 (patch) ──────────────────────────────┘

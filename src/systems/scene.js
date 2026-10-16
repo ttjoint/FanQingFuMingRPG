@@ -3,10 +3,10 @@
 import { playBGM } from "./audio.js";
 import { startScript } from "../script/vm.js";
 
-export function titleMusic(ctx) { const A = ctx.assets; return (A.game && A.game.music && A.game.music.start) || "start.mp3"; }
+export function titleMusic(ctx) { const A = ctx.assets; return (A.game && A.game.music && A.game.music.start) || ""; }
 export function endMusic(ctx) { const A = ctx.assets; return (A.game && A.game.music && A.game.music.end) || titleMusic(ctx); }
-export function flashPics(ctx) { const A = ctx.assets; return (A.game && A.game.flash && A.game.flash.length) ? A.game.flash : ["team.bmp", "kouhao.bmp"]; }
-export function endPic(ctx) { const A = ctx.assets; return (A.game && A.game.endpic) || "end.bmp"; }
+export function flashPics(ctx) { const A = ctx.assets; return (A.game && A.game.flash && A.game.flash.length) ? A.game.flash : []; }
+export function endPic(ctx) { const A = ctx.assets; return (A.game && A.game.endpic) || ""; }
 
 // 启动时先播片头闪屏与标题音乐。
 export function enterBoot(ctx) {
@@ -28,7 +28,7 @@ export function resetNewGame(ctx) {
   const G = ctx.state, p = ctx.config.player;
   G.stats = { hp: p.hpMax, hpMax: p.hpMax, mp: p.mpMax, mpMax: p.mpMax, exp: 0, expNext: p.expNext,
     level: p.level, money: p.money, moral: p.moral, honor: p.honor, attack: p.attack, defence: p.defence, hit: p.hit };
-  G.skills = ["长剑"]; G.skill = "长剑";
+  G.skills = (p.startSkills || []).slice(); G.skill = p.startSkill || G.skills[0];
   G.hotbar = new Array(9).fill(null); G.pack = []; G.packOpen = false;
   G.equip = { Wu: null, Jia: null, Shi1: null, Shi2: null }; G.cursor = null; G.shop = null;
   G.missions = {}; G.vars = {}; G.notes = []; G.factions = []; G.love = {}; G.vips = {}; G.inventory = {};
@@ -59,5 +59,5 @@ export function resultTitle(ctx) {
   const list = (A.game && A.game.result) || [];
   const score = G.stats.honor || 0;
   for (const r of list) if (score >= r.lower && score < r.upper) return r.name;
-  return list.length ? list[list.length - 1].name : "江湖一梦";
+  return list.length ? list[list.length - 1].name : "";
 }

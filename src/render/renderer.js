@@ -117,6 +117,8 @@ export function render() {
     const im = getImg("assets/skill/" + e.frames[e.i].replace(/\.bmp$/, ".png"));
     if (im) ctx.drawImage(im, Math.round(e.x - camX - im.width / 2), Math.round(e.y - camY - im.height / 2));
   }
+  // 弹道（在角色与特效之上，保证可见）
+  drawProjectiles(camX, camY);
   drawHUD(); drawDialog(); drawPanels(); drawPack(); drawShop(); drawSavePanel(); drawSettingsPanel(); drawTip(); drawCursorItem(); drawTooltip();
   if (typeof window !== "undefined" && window.__POLY_DEBUG__) {
     ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(6, 26, 236, 18);
@@ -156,6 +158,52 @@ export function drawEntity(e, camX, camY) {
     ctx.fillRect(hx, hy, Math.round(w * Math.max(0, e.hp) / e.hpMax), 4);
   }
   if (e.talkT > 0) { ctx.fillStyle = "#ffe07a"; ctx.font = "12px sans-serif"; ctx.textAlign = "center"; ctx.fillText("!", e.x - camX, y - 8); ctx.textAlign = "left"; e.talkT -= 0.016; }
+  drawBuffIcons(e, camX, y);
+}
+
+// 单位头顶的 Buff 图标行（优先用 buff_icons/*.png，缺失时画色块 + 层数）。
+const BUFF_FALLBACK = tag => (tag === "buff" ? "#3a7d3a" : "#8a3a3a");
+function drawBuffIcons(e, camX, topY) {
+  const list = e.buffs;
+  if (!list || !list.length) return;
+  const SZ = 14, gap = 2;
+  let x = Math.round(e.x - camX - (list.length * (SZ + gap) - gap) / 2);
+  const yy = topY - 22;
+  for (const b of list) {
+    const icon = b.icon ? String(b.icon).replace(/\.bmp$/, ".png") : "";
+    const im = icon ? getImg("assets/buff_icons/" + icon) : null;
+    if (im && im.width) ctx.drawImage(im, x, yy, SZ, SZ);
+    else {
+      const tag = (b.tags || [])[0] || "";
+      ctx.fillStyle = BUFF_FALLBACK(tag); ctx.fillRect(x, yy, SZ, SZ);
+      ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.strokeRect(x + 0.5, yy + 0.5, SZ - 1, SZ - 1);
+    }
+    if ((b.stacks || 1) > 1) {
+      ctx.fillStyle = "#fff"; ctx.font = "9px sans-serif"; ctx.textAlign = "right";
+      ctx.fillText(String(b.stacks), x + SZ, yy + SZ); ctx.textAlign = "left";
+    }
+    x += SZ + gap;
+  }
+}
+
+// 弹道：优先画 projectile 帧动画，缺失时退化为发光圆点（保证“无素材可见”）。
+export function drawProjectiles(camX, camY) {
+  const list = G.projectiles;
+  if (!list || !list.length) return;
+  if (camX == null) { camX = Math.round(G.cam.x); camY = Math.round(G.cam.y); }
+  for (const p of list) {
+    const x = Math.round(p.x - camX), y = Math.round(p.y - camY);
+    const fname = p.frames && p.frames.length ? p.frames[p.frame % p.frames.length] : null;
+    const im = fname ? getImg("assets/projectile/" + String(fname).replace(/\.bmp$/, ".png")) : null;
+    if (im) { ctx.drawImage(im, Math.round(x - im.width / 2), Math.round(y - im.height / 2)); continue; }
+    // 默认占位：一团带光晕的小球（无素材也能观察弹道轨迹）
+    const r = Math.max(3, Math.min(14, p.radius * 0.6));
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2);
+    g.addColorStop(0, "rgba(255,240,180,0.95)");
+    g.addColorStop(0.5, "rgba(255,180,60,0.7)");
+    g.addColorStop(1, "rgba(255,120,0,0)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r * 2, 0, Math.PI * 2); ctx.fill();
+  }
 }
 
 // 地面掉落物：小图标 + 微微上下浮动

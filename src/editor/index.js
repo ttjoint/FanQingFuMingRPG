@@ -2,7 +2,7 @@
 // 保存为“补丁式内容包”（只存与默认版本不同的条目）。编辑器内部仍保留旧版
 // 数组/地图视图以复用面板，但读写统一经由 Project 适配层。
 import { G, A } from "../core/state.js";
-import { setAssetOverrides } from "../core/assets.js";
+import { setAssetOverrides, assetURL } from "../core/assets.js";
 import { h, clear, deep } from "./dom.js";
 import { injectStyle } from "./style.js";
 import { renderForm, renderListEditor } from "./fields.js";
@@ -15,10 +15,11 @@ import { createRegistry } from "../content/registry.js";
 import { validateContent, decorSpriteKey } from "../content/schema.js";
 import { getRuntime } from "../runtime/context.js";
 import {
-  loadPack, savePack, activeId, DEFAULT_VERSION, createPack, setActive,
-  exportPack, pickJSON, importPack, readImageFile,
+  loadPack, savePack, activeId, DEFAULT_VERSION, createPack, createDiskPack, setActive,
+  exportPack, pickJSON, importPack, readImageFile, refreshDiskVersions, isDiskVersion,
 } from "../content/store.js";
 import { PACK_FORMAT, PACK_VERSION } from "../content/schema.js";
+import { newNpcTemplate } from "../content/npcFields.js";
 
 let root = null, ED = null, dirty = false, curTab = "maps";
 let mainEl, sideEl, statusEl, mapEditor = null;
@@ -26,7 +27,7 @@ let mainEl, sideEl, statusEl, mapEditor = null;
 const mark = () => { dirty = true; };
 
 // 资源覆盆（上传替换）解析：assets 路径 → dataURL（若有覆盆），否则原路径。供表单图片预览用。
-const assetSrc = p => (ED && ED.images && ED.images[p]) || p;
+const assetSrc = p => (ED && ED.images && ED.images[p]) || assetURL(p);
 const roleSrc = model => {
   const m = String(model || "").replace(/\.pmg$/, "");
   const ch = A.chars && A.chars[m]; if (!ch) return null;
@@ -46,6 +47,7 @@ function createProject(base, pack) {
   p.npcs = content.npcOrder.map(id => content.npcs[id]);
   p.items = content.itemOrder.map(id => content.items[id]);
   p.skills = content.skillOrder.map(id => content.skills[id]);
+  p.buffs = content.buffs || [];   // Buff 配置表（整表，随内容版本固定但可覆盖）
   return p;
 }
 
@@ -59,6 +61,7 @@ function syncProject(p) {
   rebuild(p.npcs, it => it.id, "npcs", "npcOrder");
   rebuild(p.items, it => it.name, "items", "itemOrder");
   rebuild(p.skills, it => it.name, "skills", "skillOrder");
+  c.buffs = p.buffs || [];   // Buff 配置表：整表引用（非 record）
   // 地图已为 MapDoc 且带旧视图（非枚举）：直接作为规范存储，不做转换。
   c.mapDocs = p.maps;
   return c;
@@ -71,11 +74,16 @@ function exportObj() { return { format: PACK_FORMAT, version: PACK_VERSION, id: 
 export async function openEditor() {
   if (root) return;
   const base = A.defaults;   // 默认版本 ContentDB
+  const diskReady = await refreshDiskVersions();
   let pack = await loadPack(activeId());
-  if (!pack || pack.id === DEFAULT_VERSION || (pack.patch && pack.patch.legacyDomains)) {
+  // 本地模式（磁盘后端可用）：不识别浏览器版本——若当前指向的不是磁盘版本，则当作默认版本处理。
+  const isUsablePack = pack && pack.id !== DEFAULT_VERSION && !(pack.patch && pack.patch.legacyDomains)
+    && (!diskReady || isDiskVersion(pack.id));
+  if (!isUsablePack) {
     const name = prompt("默认版本为只读原版数据。\n请输入新版本名称，编辑内容将保存到该版本：", "我的版本");
     if (!name) return;
-    pack = await createPack(name);
+    // 本地开发后端可用时直接建磁盘版本（写入 versions/<id>/），否则浏览器版本。
+    pack = diskReady ? await createDiskPack(name, {}, "default") : await createPack(name);
     setActive(pack.id);
   }
   ED = createProject(base, pack);
@@ -124,7 +132,7 @@ function toast(msg) {
 }
 
 // ---------- 外壳 ----------
-const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["items", "物品"], ["skills", "技能"], ["config", "升级数值"], ["game", "标题结局"], ["assets", "图片素材"]];
+const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["ais", "AI"], ["buffs", "Buff"], ["items", "物品"], ["skills", "技能"], ["config", "升级数值"], ["game", "标题结局"], ["assets", "图片素材"]];
 let navEl;
 
 function buildShell() {
@@ -157,7 +165,7 @@ function selectTab(k) {
   curTab = k; renderNav();
   clear(mainEl); clear(sideEl);
   if (k !== "maps" && k !== "decor") sideEl.style.display = "none"; else sideEl.style.display = "";
-  ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, items: tabItems, skills: tabSkills, config: tabConfig, game: tabGame, assets: tabAssets })[k]();
+  ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, ais: tabAis, buffs: tabBuffs, items: tabItems, skills: tabSkills, config: tabConfig, game: tabGame, assets: tabAssets })[k]();
 }
 
 // ---------- 地图 ----------
@@ -172,7 +180,11 @@ function tabMaps() {
     npcOptions: ED.npcs.map(n => ({ v: n.id, label: n.id + " " + n.name })),
     npcName: id => { const n = ED.npcs.find(x => x.id === id); return n ? n.name : ("#" + id); },
     itemNames: ED.items.map(x => x.name),
+    factionOptions: [(ED.content.factions || []).find(f => f.id === "") || { id: "", name: "（默认/继承）" }]
+      .concat((ED.content.factions || []).map(f => ({ v: f.id, label: f.id + (f.name && f.name !== f.id ? " " + f.name : "") }))),
     skillNames: ED.skills.map(x => x.name),
+    aiOptions: [["", "（默认：有攻击力则追击，否则原地游荡）"]]
+      .concat((ED.content.ais || []).map(a => ({ v: a.id, label: a.id + (a.name && a.name !== a.id ? " " + a.name : "") }))),
     scriptNames: Object.keys(ED.content.scripts || {}),
     models: Object.keys(A.chars || {}),
     images: ED.images,
@@ -259,6 +271,88 @@ function tabScripts() {
     h("div", { class: "ed-hint" }, "语法与原版一致：Say / Ask / if / else / endif / ChangeMap / AddNPC …"));
 }
 
+// AI 配置：一条配置 = 一个行为档案（idle + targeting + 顺序匹配的 rules）。
+// 结构复杂且需可扩展，因此用 JSON 文本编辑器直接编辑，并提供常用模板一键插入。
+const AI_COND_HINT = "条件(when)可用：always, hpBelow, hpAbove, mpBelow, mpAbove, hasTarget, noTarget, targetDead, targetInRange(melee/aggro/数字), targetDistBelow, aggroOver, lostOver, allyBeingAttacked, nearbyEnemyCount, nearbyAllyCount, random, cooldownReady, leashExceeded（可组合 all/any/not）";
+const AI_ACT_HINT = "动作(do.action)可用：idle, wander(radius,interval,speed), chase(stopRange,maxTime,speed), attack(cooldown,rage), flee(range,speed), assist(radius), guard(leash)";
+const AI_TEMPLATES = {
+  "站桩": { idle: { action: "idle" }, rules: [] },
+  "原地游荡": { idle: { action: "wander", radius: 160, interval: [2, 6] }, rules: [] },
+  "守卫(警戒+回防)": { idle: { action: "idle" }, targeting: { aggroRange: 260, retaliate: true, giveUpT: 8, leash: 480 }, rules: [
+    { when: { targetInRange: "melee" }, do: { action: "attack" } },
+    { when: { hasTarget: true }, do: { action: "guard", leash: 260 } },
+  ] },
+  "主动野兽(游荡+扑咬+低血逃)": { idle: { action: "wander", radius: 200, interval: [2, 5] }, targeting: { aggroRange: 200, retaliate: true, giveUpT: 6, leash: 420 }, rules: [
+    { when: { hpBelow: 0.25 }, do: { action: "flee", range: 420, speed: 1.5 } },
+    { when: { targetInRange: "melee" }, do: { action: "attack", cooldown: 1.1 } },
+    { when: { hasTarget: true }, do: { action: "chase", stopRange: "melee" } },
+  ] },
+  "强盗(呼朋引伴+低血逃)": { idle: { action: "wander", radius: 180, interval: [2, 6] }, targeting: { aggroRange: 260, retaliate: true, giveUpT: 8, leash: 520 }, rules: [
+    { when: { hpBelow: 0.2 }, do: { action: "flee", range: 480, speed: 1.5 } },
+    { when: { targetInRange: "melee" }, do: { action: "attack", cooldown: 1.1 } },
+    { when: { allyBeingAttacked: true }, do: { action: "assist", radius: 300 } },
+    { when: { hasTarget: true }, do: { action: "chase", stopRange: "melee" } },
+  ] },
+  "首领(分阶段)": { idle: { action: "idle" }, targeting: { aggroRange: 320, retaliate: true, giveUpT: 12, leash: 640 }, rules: [
+    { when: { hpBelow: 0.3 }, do: { action: "attack", cooldown: 0.7, rage: 1.5 } },
+    { when: { hpBelow: 0.6 }, do: { action: "attack", cooldown: 1.0 } },
+    { when: { targetInRange: "melee" }, do: { action: "attack", cooldown: 1.2 } },
+    { when: { hasTarget: true }, do: { action: "chase", stopRange: "melee" } },
+  ] },
+};
+
+function tabAis() {
+  const list = ED.content.ais || (ED.content.ais = []);
+  mainEl.append(h("h3", null, "AI 配置（共 " + list.length + "）"));
+  mainEl.append(h("div", { class: "ed-hint" }, "单位通过 NPC 的「AI 配置」字段按 id 引用；这里定义可复用的行为档案。"));
+  mainEl.append(h("div", { class: "ed-hint" }, AI_COND_HINT));
+  mainEl.append(h("div", { class: "ed-hint" }, AI_ACT_HINT));
+
+  const host = h("div");
+  mainEl.append(host);
+  let sel = 0;
+  const redraw = () => {
+    clear(host);
+    const tools = h("div", { class: "ed-tools" },
+      h("button", { class: "ed-btn", onclick: () => { const id = prompt("AI 配置 id", "ai_" + (list.length + 1)); if (!id) return; list.push({ id, name: id, idle: { action: "idle" }, rules: [] }); sel = list.length - 1; mark(); redraw(); } }, "＋ 新建"),
+      h("button", { class: "ed-btn", onclick: () => { if (!list[sel]) return; list.splice(sel + 1, 0, deep(list[sel])); sel = sel + 1; mark(); redraw(); } }, "复制"),
+      h("button", { class: "ed-btn danger", onclick: () => { if (!list[sel]) return; list.splice(sel, 1); sel = Math.max(0, sel - 1); mark(); redraw(); } }, "删除"),
+      h("button", { class: "ed-btn", onclick: () => { if (!list[sel]) return; const t = prompt("模板：" + Object.keys(AI_TEMPLATES).join(" / ")); if (!t || !AI_TEMPLATES[t]) return; Object.assign(list[sel], deep(AI_TEMPLATES[t])); mark(); redraw(); } }, "套用模板"),
+    );
+    host.append(tools);
+    const tbl = h("table", { class: "ed-table" });
+    tbl.append(h("thead", null, h("tr", null, h("th", null, "id"), h("th", null, "名称"), h("th", null, "规则数"))));
+    const body = h("tbody");
+    list.forEach((a, i) => body.append(h("tr", { class: i === sel ? "on" : "", onclick: () => { sel = i; redraw(); } },
+      h("td", null, a.id || ""), h("td", null, a.name || ""), h("td", null, String((a.rules || []).length)))));
+    tbl.append(body);
+    host.append(tbl);
+
+    const a = list[sel];
+    if (!a) return;
+    const idIn = h("input", { type: "text", value: a.id || "" });
+    idIn.oninput = () => { a.id = idIn.value; mark(); };
+    const nameIn = h("input", { type: "text", value: a.name || "" });
+    nameIn.oninput = () => { a.name = nameIn.value; mark(); };
+    host.append(h("div", { class: "ed-row" }, h("label", null, "id"), idIn, h("label", null, "名称"), nameIn));
+    const ta = h("textarea", { style: "width:100%;height:360px;white-space:pre;font-family:Consolas,monospace" });
+    const body2 = /** @type {any} */ ({ ...a }); delete body2.id; delete body2.name;
+    ta.value = JSON.stringify(body2, null, 2);
+    const err = h("div", { class: "ed-hint" });
+    ta.oninput = () => {
+      try {
+        const o = JSON.parse(ta.value);
+        err.textContent = "";
+        delete a.idle; delete a.targeting; delete a.rules;
+        Object.assign(a, o);
+        mark();
+      } catch (e) { err.textContent = "JSON 语法错误：" + e.message; err.style.color = "#e66"; }
+    };
+    host.append(h("h3", null, "行为档案（idle / targeting / rules）"), ta, err);
+  };
+  redraw();
+}
+
 // ---------- 通用：列表编辑 ----------
 function listTab(title, arr, schema, columns, makeNew) {
   mainEl.append(h("h3", null, title));
@@ -277,9 +371,11 @@ const NPC_SCHEMA_FIELDS = [
   { k: "attack", label: "攻击", type: "number" }, { k: "defence", label: "防御", type: "number" },
   { k: "level", label: "等级", type: "number" }, { k: "exp", label: "经验", type: "number" },
   { k: "speed", label: "移动速度", type: "number", def: 45 }, { k: "runSpeed", label: "追击速度", type: "number", def: 70 },
-  { k: "hostile", label: "主动敌对", type: "checkbox" }, { k: "ai", label: "AI", type: "number" },
+  { k: "hostile", label: "主动敌对", type: "checkbox" },
+  { k: "ai", label: "AI 配置", type: "select" },
   { k: "skills", label: "技能", type: "strlist" },
   { k: "drops", label: "掉落物品", type: "drops" },
+  { k: "inventory", label: "货物背包(商人)", type: "inventory" },
   { k: "talks", label: "闲话(每行一句)", type: "lines", rows: 4 },
 ];
 function npcSchema() {
@@ -288,7 +384,9 @@ function npcSchema() {
     if (f.k === "model") { o.list = Object.keys(A.chars || {}); o.img = n => roleSrc(n.model); }
     if (f.k === "portrait") o.img = n => n.portrait ? assetSrc("assets/face/" + n.portrait.replace(/\.bmp$/, ".png")) : null;
     if (f.k === "script") o.list = Object.keys(ED.content.scripts || {});
+    if (f.k === "ai") o.options = [["", "（默认）"]].concat((ED.content.ais || []).map(a => [a.id, a.id + (a.name && a.name !== a.id ? " " + a.name : "")]));
     if (f.k === "drops") o.items = ED.items.map(x => x.name);
+    if (f.k === "inventory") o.items = ED.items.map(x => x.name);
     if (f.k === "skills") { o.options = ED.skills.map(x => x.name); o.addLabel = "＋ 添加技能"; }
     return o;
   });
@@ -306,16 +404,93 @@ const ITEM_SCHEMA = [
 const SKILL_SCHEMA = [
   { k: "name", label: "名称", type: "text" },
   { k: "type", label: "类型", type: "select", numeric: true, options: [[0, "治疗(自身)"], [1, "攻击"]] },
+  { k: "mode", label: "攻击方式", type: "select", options: [["melee", "近战（瞬间命中）"], ["ranged", "远程（预留弹道）"]] },
   { k: "range", label: "射程", type: "number" }, { k: "mp", label: "耗精力", type: "number" },
   { k: "power", label: "威力", type: "number" }, { k: "reqLevel", label: "需求等级", type: "number" },
   { k: "sound", label: "音效", type: "text" }, { k: "icon", label: "图标", type: "text", img: sk => sk.icon ? assetSrc("assets/skill_icons/" + sk.icon.replace(/\.bmp$/, ".png")) : null },
-  { k: "frames", label: "特效帧(每行一个)", type: "lines", rows: 5, img: sk => (sk.frames && sk.frames[0]) ? assetSrc("assets/skill/" + sk.frames[0].replace(/\.bmp$/, ".png")) : null }, { k: "desc", label: "说明", type: "textarea", rows: 2 },
+  { k: "frames", label: "特效帧(每行一个)", type: "lines", rows: 5, img: sk => (sk.frames && sk.frames[0]) ? assetSrc("assets/skill/" + sk.frames[0].replace(/\.bmp$/, ".png")) : null },
+  { k: "projectile.homing", label: "弹道·追踪目标", type: "checkbox" },
+  { k: "projectile.speed", label: "弹道·速度(像素/秒)", type: "number", def: 320 },
+  { k: "projectile.radius", label: "弹道·命中半径", type: "number", def: 18 },
+  { k: "projectile.pierce", label: "弹道·穿透次数", type: "number", def: 0 },
+  { k: "projectile.frames", label: "弹道·飞行帧(每行一个)", type: "lines", rows: 3, img: sk => (sk.projectile && sk.projectile.frames && sk.projectile.frames[0]) ? assetSrc("assets/projectile/" + sk.projectile.frames[0].replace(/\.bmp$/, ".png")) : null },
+  { k: "desc", label: "说明", type: "textarea", rows: 2 },
 ];
+
+// 技能表单按需构建（buff 候选随 ED.buffs 变化，避免模块加载时崩溃）。
+function skillSchema() {
+  const buffIds = (ED.buffs || []).map(b => b.id).filter(Boolean);
+  return SKILL_SCHEMA.concat([
+    { k: "cooldown", label: "技能冷却(秒)", type: "number", def: 0 },
+    { k: "targeting.kind", label: "目标类型", type: "select", options: [["enemy", "敌对单位"], ["ally", "同阵营"], ["self", "自己"], ["point", "落点范围"]] },
+    { k: "targeting.aoe", label: "范围伤害(AOE)", type: "checkbox" },
+    { k: "targeting.radius", label: "AOE 半径(像素)", type: "number", def: 0 },
+    { k: "targeting.maxTargets", label: "最多命中数(0=不限)", type: "number", def: 0 },
+    { k: "targeting.includeSelf", label: "AOE 含自己", type: "checkbox" },
+    { k: "onHit.heal.amount", label: "命中·治疗量", type: "number", def: 0 },
+    { k: "onHit.heal.to", label: "命中·治疗对象", type: "select", options: [["self", "自己"], ["target", "目标"]] },
+    { k: "onHit.knockback.dist", label: "命中·击退距离", type: "number", def: 0 },
+    { k: "onHit.buffs", label: "命中效果", type: "buffeffects", options: buffIds },
+  ]);
+}
+
+// Buff 配置表字段。
+const BUFF_SCHEMA = [
+  { k: "id", label: "id", type: "text" },
+  { k: "name", label: "名称", type: "text" },
+  { k: "icon", label: "图标", type: "text", img: b => b.icon ? assetSrc("assets/buff_icons/" + String(b.icon).replace(/\.bmp$/, ".png")) : null },
+  { k: "duration", label: "持续(秒)", type: "number", def: 10 },
+  { k: "maxStacks", label: "最大层数", type: "number", min: 1, def: 1 },
+  { k: "stackMode", label: "叠层方式", type: "select", options: [["refresh", "刷新时长"], ["stack", "叠加层数"]] },
+  { k: "mods.atk", label: "每层·攻击", type: "number", def: 0 },
+  { k: "mods.def", label: "每层·防御", type: "number", def: 0 },
+  { k: "mods.hpMax", label: "每层·生命上限", type: "number", def: 0 },
+  { k: "mods.mpMax", label: "每层·精力上限", type: "number", def: 0 },
+  { k: "mods.speed", label: "每层·速度", type: "number", def: 0 },
+  { k: "mods.hit", label: "每层·命中", type: "number", def: 0 },
+  { k: "dot.dps", label: "每层·每秒伤害", type: "number", def: 0 },
+  { k: "hot.hps", label: "每层·每秒治疗", type: "number", def: 0 },
+  { k: "tags", label: "标签(每行一个)", type: "lines", rows: 2 },
+  { k: "desc", label: "说明", type: "textarea", rows: 2 },
+];
+
+function tabBuffs() {
+  const list = ED.buffs || (ED.buffs = ED.content.buffs || (ED.content.buffs = []));
+  mainEl.append(h("h3", null, "Buff / Debuff 配置（共 " + list.length + "）"));
+  mainEl.append(h("div", { class: "ed-hint" }, "技能通过「命中效果」按 id 引用；叠层/刷新/持续/DOT/HOT 均在引擎 engine/buff.js 中处理。"));
+  const host = h("div");
+  mainEl.append(host);
+  let sel = 0;
+  const redraw = () => {
+    clear(host);
+    host.append(h("div", { class: "ed-tools" },
+      h("button", { class: "ed-btn", onclick: () => { const id = prompt("Buff id", "buff_" + (list.length + 1)); if (!id) return; list.push({ id, name: id, duration: 10, maxStacks: 1, stackMode: "refresh", mods: {}, tags: [] }); sel = list.length - 1; mark(); redraw(); } }, "＋ 新建"),
+      h("button", { class: "ed-btn", onclick: () => { if (!list[sel]) return; list.splice(sel + 1, 0, deep(list[sel])); sel++; mark(); redraw(); } }, "复制"),
+      h("button", { class: "ed-btn danger", onclick: () => { if (!list[sel]) return; list.splice(sel, 1); sel = Math.max(0, sel - 1); mark(); redraw(); } }, "删除"),
+    ));
+    const tbl = h("table", { class: "ed-table" });
+    tbl.append(h("thead", null, h("tr", null, h("th", null, "id"), h("th", null, "名称"), h("th", null, "持续"), h("th", null, "层数"))));
+    const body = h("tbody");
+    list.forEach((b, i) => {
+      const tr = h("tr", { class: i === sel ? "on" : "", onclick: () => { sel = i; redraw(); } });
+      tr.append(h("td", null, String(b.id || "")), h("td", null, String(b.name || "")), h("td", null, String(b.duration == null ? "" : b.duration)), h("td", null, String(b.maxStacks == null ? "" : b.maxStacks)));
+      body.append(tr);
+    });
+    tbl.append(body); host.append(tbl);
+    if (list[sel]) {
+      host.append(h("h3", null, "编辑：" + (list[sel].name || list[sel].id || ("#" + sel))));
+      const form = h("div", { class: "ed-grid" });
+      host.append(form);
+      renderForm(form, BUFF_SCHEMA, list[sel], () => mark());
+    }
+  };
+  redraw();
+}
 
 function tabNpcs() {
   listTab("NPC / 怪物（" + ED.npcs.length + "）", ED.npcs, npcSchema(),
     [{ k: "id", label: "编号" }, { k: "name", label: "名称" }, { k: "model", label: "行走图" }, { k: "level", label: "等级" }, { k: "hp", label: "生命" }],
-    () => ({ id: 0, name: "新NPC", model: "npc001.pmg", portrait: "", script: "", hp: 100, attack: 10, defence: 0, level: 1, exp: 0, hostile: 0, ai: 0, skills: [], speed: 45, runSpeed: 70, drops: [], talks: [] }));
+    () => newNpcTemplate());
 }
 function tabItems() {
   listTab("物品（" + ED.items.length + "）", ED.items, ITEM_SCHEMA,
@@ -323,7 +498,7 @@ function tabItems() {
     () => ({ name: "新物品", type: 0, subtype: 0, price: 0, reqLevel: 0, hp: 0, mp: 0, attack: 0, defence: 0, attrA: 0, attrB: 0, attrC: 0, icon: "", desc: "" }));
 }
 function tabSkills() {
-  listTab("技能（" + ED.skills.length + "）", ED.skills, SKILL_SCHEMA,
+  listTab("技能（" + ED.skills.length + "）", ED.skills, skillSchema(),
     [{ k: "name", label: "名称" }, { k: "type", label: "类型" }, { k: "power", label: "威力" }, { k: "mp", label: "耗精力" }, { k: "range", label: "射程" }],
     () => ({ name: "新技能", desc: "", type: 1, range: 40, mp: 0, reqLevel: 1, power: 10, sound: "", icon: "", frames: [] }));
 }
@@ -343,6 +518,7 @@ function tabConfig() {
     { k: "money", label: "起始银两", type: "number" }, { k: "attack", label: "起始攻击", type: "number" },
     { k: "defence", label: "起始防御", type: "number" }, { k: "hit", label: "起始命中", type: "number" },
     { k: "moral", label: "起始道德", type: "number" }, { k: "honor", label: "起始声望", type: "number" },
+    { k: "startSkills", label: "初始技能（逗号分隔）", type: "strlist" },
   ]);
   sec("升级常数", "levelUp", [
     { k: "expMul", label: "所需经验×", type: "number", step: 0.1 }, { k: "expAdd", label: "所需经验+", type: "number" },
@@ -356,6 +532,16 @@ function tabConfig() {
     { k: "mpDrainRun", label: "奔跑耗精力/秒", type: "number", step: 0.1 }, { k: "npcAggro", label: "敌人视野", type: "number" },
     { k: "npcMelee", label: "敌人近战距离", type: "number" }, { k: "npcAttackCD", label: "敌人攻击冷却", type: "number", step: 0.1 },
     { k: "npcHitBase", label: "敌人命中基数", type: "number" }, { k: "npcHitPerLevel", label: "敌人命中/级", type: "number" },
+    { k: "meleeMaxRange", label: "近战/远程分界", type: "number" },
+  ]);
+  sec("移动速度", "move", [
+    { k: "walkSpeed", label: "走路速度(像素/秒)", type: "number" }, { k: "runSpeed", label: "奔跑速度(像素/秒)", type: "number" },
+  ]);
+  sec("经济", "economy", [
+    { k: "sellRate", label: "卖出回收比例", type: "number", step: 0.05 },
+  ]);
+  sec("背包", "inventory", [
+    { k: "packItem", label: "背包道具名", type: "text" }, { k: "packSize", label: "背包格数", type: "number" },
   ]);
 }
 
@@ -382,7 +568,12 @@ function tabGame() {
 function assetPaths() {
   const set = new Set();
   for (const it of ED.items) if (it.icon) set.add("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png"));
-  for (const sk of ED.skills) if (sk.icon) set.add("assets/skill_icons/" + sk.icon.replace(/\.bmp$/, ".png"));
+  for (const sk of ED.skills) {
+    if (sk.icon) set.add("assets/skill_icons/" + sk.icon.replace(/\.bmp$/, ".png"));
+    for (const f of (sk.frames || [])) set.add("assets/skill/" + String(f).replace(/\.bmp$/, ".png"));
+    for (const f of ((sk.projectile && sk.projectile.frames) || [])) set.add("assets/projectile/" + String(f).replace(/\.bmp$/, ".png"));
+  }
+  for (const b of (ED.buffs || [])) if (b.icon) set.add("assets/buff_icons/" + String(b.icon).replace(/\.bmp$/, ".png"));
   for (const n of ED.npcs) if (n.portrait) set.add("assets/face/" + n.portrait.replace(/\.bmp$/, ".png"));
   for (const u of ["mainmenu", "content", "end", "start", "load", "about", "exit", "team", "kouhao", "userpanel", "dlgpanel", "packpanel"])
     set.add("assets/ui/" + u + ".png");

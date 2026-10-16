@@ -1,7 +1,7 @@
 # 数据模型（Data Model）
 
 当前规范模型分三层：**内容定义（ContentDB）**、**地图文档（MapDoc）**、**内容包（Pack v2）**。
-原版 `assets/*.json` 通过适配器导入，运行时通过适配器消费。
+原版 `versions/default/assets/*.json`（逻辑键仍为 `assets/...`）通过适配器导入，运行时通过适配器消费。
 
 ## 1. 稳定引用 Ref
 

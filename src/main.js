@@ -30,7 +30,9 @@ globalThis.__GAME__ = { G, A, MAPS, runtime, screenToWorld, advanceDialog: ans =
 let last = performance.now();
 function loop(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  update(dt);
+  // 测试用暂停开关：置 true 时暂停 update（渲染照常），
+  // 便于 e2e 在 evaluate 中独占推进逻辑，避免与 rAF 竞争。
+  if (!globalThis.__GAME_PAUSED__) { update(dt); }
   render();
   requestAnimationFrame(loop);
 }
@@ -41,6 +43,30 @@ function fit() {
 }
 window.addEventListener("resize", fit); fit();
 
+// 逻辑数据文件名 → 版本文件夹内的相对路径。原版从 versions/default/assets 读；
+// 磁盘版本可从 versions/<id>/assets/<同名> 覆盖为不同数据，实现“每个版本一个文件夹”。
+const DATA_FILES = [
+  "atlas.json", "chars.json", "anchors.json", "npcs.json", "items.json", "skills.json",
+  "scripts.json", "factions.json", "ais.json", "buffs.json", "config.json", "game.json",
+  "transitions.json", "maps_index.json", "maps_manifest.json",
+];
+
+// 从指定版本文件夹读取数据文件：先取原版，再（若存在）用版本自身 assets/ 覆盖。
+async function loadVersionData(versionId) {
+  // 原版基准（版本文件夹中的 default/assets）
+  const base = {};
+  await Promise.all(DATA_FILES.map(async f => { base[f] = await fetch("versions/default/assets/" + f).then(r => (r.ok ? r.json() : null)).catch(() => null); }));
+  // 若当前是磁盘版本，尝试用版本自己的 assets/ 覆盖（不存在则沿用原版）。
+  if (versionId && versionId !== "default" && versionId !== "__default__") {
+    const dir = "versions/" + encodeURIComponent(versionId) + "/assets/";
+    await Promise.all(DATA_FILES.map(async f => {
+      const v = await fetch(dir + f).then(r => (r.ok ? r.json() : null)).catch(() => null);
+      if (v != null) base[f] = v;
+    }));
+  }
+  return base;
+}
+
 export async function boot() {
   // 1) 选定内容包（v2：补丁式）。
   const idx = loadIndex();
@@ -48,28 +74,33 @@ export async function boot() {
   A.activePack = pack; A.versionId = pack.id;
   setAssetOverrides(pack.images || {});
 
+  // 1b) 数据按版本文件夹读取：原版 versions/default/assets，磁盘版本可用自身 assets/ 覆盖。
+  const data = await loadVersionData(pack.id);
+
   // 2) 基础素材 / 表。
-  A.atlasJson = await loadJSON("assets/atlas.json");
+  A.atlasJson = data["atlas.json"];
   A.atlas = await loadImg("assets/atlas.png");
   A.obj = await loadImg("assets/obj.png");
-  A.chars = await loadJSON("assets/chars.json");
-  A.anchors = await loadJSON("assets/anchors.json").catch(() => ({}));
+  A.chars = data["chars.json"];
+  A.anchors = data["anchors.json"] || {};
   loadSettings(G);
 
   const assets = {
-    npcs: await loadJSON("assets/npcs.json"),
-    items: await loadJSON("assets/items.json"),
-    skills: await loadJSON("assets/skills.json"),
-    scripts: await loadJSON("assets/scripts.json"),
-    config: await loadJSON("assets/config.json").catch(() => DEFAULT_CONFIG),
-    game: await loadJSON("assets/game.json").catch(() => ({})),
-    transitions: await loadJSON("assets/transitions.json").catch(() => ({})),
-    mapsIndex: await loadJSON("assets/maps_index.json").catch(() => ({})),
+    npcs: data["npcs.json"],
+    items: data["items.json"],
+    skills: data["skills.json"],
+    scripts: data["scripts.json"],
+    factions: data["factions.json"] || [],
+    ais: data["ais.json"] || [],
+    buffs: data["buffs.json"] || [],
+    config: data["config.json"] || DEFAULT_CONFIG,
+    game: data["game.json"] || {},
+    transitions: data["transitions.json"] || {},
+    mapsIndex: data["maps_index.json"] || {},
   };
 
   // 3) 载入原版全部地图并转成图层化 MapDoc。
-  const fallbackMaps = ["孙家庄", "后山", "平原", "战场", "扬州", "扬州_屠城", "清军大营", "龙家庄", "龙家庄_师亡"];
-  const names = await loadJSON("assets/maps_manifest.json").catch(() => fallbackMaps);
+  const names = data["maps_manifest.json"] || [];
   assets.mapsManifest = names;
   const loaded = await Promise.all(names.map(n => loadJSON("assets/maps/" + encodeURIComponent(n) + ".json").catch(() => null)));
   const mapDocs = {};

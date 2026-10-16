@@ -2,6 +2,10 @@
 // 这是「构建脚本 / 运行时 / 编辑器」共用的单一契约。数据缺字段时会补齐，
 // 未知字段一律保留（向前兼容，避免丢数据）。
 import { isRef, refKind, refId } from "./ids.js";
+import { normalizeProjectile } from "../engine/projectile.js";
+import { normalizeBuffs } from "../engine/buff.js";
+import { normalizeTargeting } from "../engine/targeting.js";
+import { CFG } from "../core/config.js";
 
 export const CONTENT_VERSION = 2;
 export const MAPDOC_VERSION = 2;
@@ -27,15 +31,49 @@ export function normalizeNpc(n) {
   o.level = num(o.level, 1);
   o.exp = num(o.exp, 0);
   o.hostile = num(o.hostile, 0);
-  o.ai = num(o.ai, 0);
+  o.ai = (o.ai == null || o.ai === "") ? "" : (typeof o.ai === "number" ? o.ai : String(o.ai));   // AI 配置 id（字符串引用，兼容旧数字）
   o.speed = num(o.speed, 45);
   o.runSpeed = num(o.runSpeed, 70);
+  // 阵营（faction）：空字符串 = 未指定，运行时用 defaultFaction() 兼容层派生（攻击力>0 -> enemy）。
+  o.faction = str(o.faction, "");
   // skills 在旧数据里是错位的台词文本：过滤为数组（保留合法字符串）
   o.skills = Array.isArray(o.skills) ? o.skills.map(String) : [];
   if (!Array.isArray(o.drops)) o.drops = [];
   o.drops = o.drops.map(d => ({ name: str(d && d.name, ""), count: num(d && d.count, 1) })).filter(d => d.name);
   o.talks = arr(o.talks).map(String);
+  // 货物箱（商人）：「背包」组件的数据源。stock 为显式货源，auto 为按分类自动补货。
+  // 无 inventory / 空货物 = 无背包 = 非商人（shopGoods 返回 null，不开店）。
+  o.inventory = normalizeInventory(o.inventory);
   return o;
+}
+
+// ---- 阵营（faction）----
+// 关系表是内容的一部分（随资源版本固定）；每项 { id, name, hostileTo: [id] }。
+// 判定为双向对称（见 engine/faction.js）。
+export function normalizeFactions(list) {
+  return arr(list).filter(f => f && f.id).map(f => ({
+    id: str(f.id, ""),
+    name: str(f.name, str(f.id, "")),
+    hostileTo: arr(f.hostileTo).map(String),
+  }));
+}
+
+// AI 配置表（内置内容，单位按 id 引用）。结构保持灵活：只做浅校验，
+// 具体条件/动作语义由 engine/ai.js 在编译时处理。
+export function normalizeAis(list) {
+  return arr(list).filter(a => a && a.id != null).map(a => {
+    const o = clone(a) || {};
+    o.id = str(o.id, "");
+    o.name = str(o.name, o.id);
+    if (!o.idle || typeof o.idle !== "object") o.idle = { action: "idle" };
+    if (!Array.isArray(o.rules)) o.rules = [];
+    return o;
+  });
+}
+
+// Buff 配置表（内容内置，技能/脚本按 id 引用）。具体语义见 engine/buff.js。
+export function normalizeBuffList(list) {
+  return normalizeBuffs(list);
 }
 
 // ---- Item / Skill ----
@@ -52,19 +90,51 @@ export function normalizeItem(it) {
   o.icon = str(o.icon, ""); o.desc = str(o.desc, "");
   return o;
 }
+
 export function normalizeSkill(sk) {
   const o = clone(sk) || {};
   o.name = str(o.name, "新技能");
   o.type = num(o.type, 1);
   o.range = num(o.range, 40);
+  // 攻击方式：近战(melee) / 远程(ranged)；缺省按射程推断（<=60 视为近战）。
+  // mode 决定“命中如何发生”，具体弹道参数在阶段的 projectile 字段中描述。
+  // 近战/远程分界射程来自配置（数值平衡数据），不再硬编码。
+  const meleeMax = (CFG.combat && CFG.combat.meleeMaxRange != null) ? CFG.combat.meleeMaxRange : 60;
+  o.mode = (o.mode === "melee" || o.mode === "ranged") ? o.mode : (o.range > meleeMax ? "ranged" : "melee");
   o.mp = num(o.mp, 0);
   o.reqLevel = num(o.reqLevel, 1);
   o.power = num(o.power, 0);
   o.sound = str(o.sound, "");
   o.icon = str(o.icon, "");
   o.frames = arr(o.frames).map(String);
+  // 弹道配置：仅远程技能有意义；缺失则为 null（近战/瞬间结算）。
+  o.projectile = o.mode === "ranged" ? normalizeProjectile(o.projectile) : null;
+  // 阶段 D：目标类型 / AOE / 技能级冷却。
+  o.targeting = normalizeTargeting(o.targeting);
+  o.cooldown = Math.max(0, num(o.cooldown, 0));
+  // 阶段 C/D：命中时施加的 buff（列表，元素为 buff id；支持 {id,stacks,chance} 形式）。
+  o.onHit = normalizeOnHit(o.onHit);
   o.desc = str(o.desc, "");
   return o;
+}
+
+// 规整技能的 onHit 配置：统一为 { buffs, heal, knockback }。
+function normalizeOnHit(v) {
+  if (!v || typeof v !== "object") return null;
+  const out = {};
+  const bs = Array.isArray(v.buffs) ? v.buffs : [];
+  out.buffs = bs.map(b => {
+    if (typeof b === "string") return { id: b, stacks: 1, chance: 100 };
+    return { id: str(b && b.id, ""), stacks: Math.max(1, Math.floor(num(b && b.stacks, 1))), chance: num(b && b.chance, 100) };
+  }).filter(b => b.id);
+  // 命中治疗：给自己（self）或目标（target）。
+  if (v.heal && typeof v.heal === "object") {
+    out.heal = { amount: Math.max(0, num(v.heal.amount, 0)), to: v.heal.to === "target" ? "target" : "self" };
+  }
+  // 击退：把目标推开 dist 像素。
+  if (v.knockback) out.knockback = { dist: Math.max(0, num(typeof v.knockback === "object" ? v.knockback.dist : v.knockback, 0)) };
+  const has = out.buffs.length || out.heal || out.knockback;
+  return has ? out : null;
 }
 
 // ---- 装饰物模板（跨地图共享，按贴图源矩形为键）----
@@ -83,12 +153,23 @@ export function normalizeDecorTemplates(t) {
   return out;
 }
 
+// ---- 背包 / 货物箱 ----
+// 通用容器：{ stock?: [{name,count}], auto?: "potion"|"weapon"|"armor"|"accessory" }。
+// Npc 的 inventory 即“货物背包”：有非空货物即可与玩家交易（见 systems/shop.js）。
+export function normalizeInventory(inv) {
+  if (!inv || typeof inv !== "object") return null;
+  const o = {};
+  if (Array.isArray(inv.stock)) {
+    o.stock = inv.stock.map(e => ({ name: str(e && e.name, ""), count: num(e && e.count, 1) })).filter(e => e.name);
+  }
+  if (inv.auto) o.auto = str(inv.auto, "");
+  return (o.stock && o.stock.length) || o.auto ? o : null;
+}
+
 // ---- Config ----
-export const DEFAULT_CONFIG = {
-  player: { hpMax: 200, mpMax: 100, expNext: 500, level: 1, money: 500, moral: 0, honor: 0, attack: 20, defence: 5, hit: 30 },
-  levelUp: { expMul: 1.5, expAdd: 200, hpMax: 40, mpMax: 20, attack: 5, defence: 3, hit: 3, maxLevel: 99, healOnLevel: true },
-  combat: { rangeMin: 40, attackCD: 0.9, mpDrainRun: 1.6, npcAttackCD: 1.1, npcAggro: 260, npcMelee: 46, npcHitBase: 20, npcHitPerLevel: 60 },
-};
+// 默认值单一事实来源在 core/config.js；此处再导出以保持既有引用兼容。
+export { DEFAULT_CONFIG } from "../core/config.js";
+import { DEFAULT_CONFIG } from "../core/config.js";
 export function normalizeConfig(c) {
   const out = clone(DEFAULT_CONFIG);
   if (c) for (const sec of Object.keys(DEFAULT_CONFIG)) {

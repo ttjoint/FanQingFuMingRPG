@@ -5,6 +5,7 @@ import { spawnByName } from "../world/npc.js";
 import { addItem, removeItem, addExp } from "../systems/inventory.js";
 import { syncMissions } from "../systems/missions.js";
 import { playBGM } from "../systems/audio.js";
+import { applyBuff } from "../engine/buff.js";
 
 // 脚本生成器遇到 end/exit 时抛出的哨兵。
 export const EXIT = { exit: true };
@@ -88,11 +89,22 @@ export function* execCall(ctx, name, args) {
     case "DelAllNPCInMap": G.npcs = []; return;
     case "ShowNPCTalk": { const n = G.npcs.find(x => x.name === s(0)); if (n) n.talkT = 2; return; }
     case "SetNPCAttack": return;
+    // 动态修改某个实例的阵营（实例阵营可变；关系表内置不可改）。
+    // SetFaction(name, factionId)：按名称找 NPC（兼容脚本旧习惯），改其 faction。
+    case "SetFaction": { const n = G.npcs.find(x => x.name === s(0)); if (n) n.faction = s(1); return; }
+    // 给单位施加 Buff。SetBuff(target, buffId, [stacks])；target="player" 或 NPC 名称。
+    case "SetBuff": {
+      const def = ctx.assets.buffTable && ctx.assets.buffTable.byId.get(s(1));
+      const tgt = s(0) === "player" ? G.player : G.npcs.find(x => x.name === s(0));
+      if (def && tgt) applyBuff(tgt, def, { stacks: v(2) || 1 });
+      return;
+    }
 
     case "LoadInitialMap": loadMap(ctx, s(0)); setPlayer(ctx, v(1), v(2), v(3)); return;
     case "ChangeMap": loadMap(ctx, s(0)); setPlayer(ctx, v(1), v(2), v(3)); return;
     case "CmpMapName": setVar(args[1], G.currentMap === s(0).replace(/\.map$/, "") ? 1 : 0, G.vars); return;
     case "GameOver": G.gameOver = true; return;
+    case "ShowEnding": G.pendingEnd = true; return;   // 剧本显式结束：切到结局场景（数据驱动，不靠文本关键字）
     case "PlaySound": return;    // TODO: 音频
     case "PlayMusic": playBGM(G, s(0)); return;
     case "Rain": G.rain = !G.rain; return;
@@ -115,8 +127,7 @@ export function openSay(ctx, speaker, text, portrait) {
   G.tip = null; G.tipT = 0;
   for (const n of G.npcs) n.talkT = 0;
   G.dialog = { kind: "say", speaker, text, portrait };
-  // 终幕对白（陈近南.gsp 最后一句）带“游戏结束”标记：说完后切到结局场景。
-  if (text && text.indexOf("游戏结束") >= 0) G.pendingEnd = true;
+  // 结局触发改为剧本显式命令 ShowEnding（数据驱动），不再扫描文本。
 }
 export function openAsk(ctx, speaker, text, portrait) {
   const G = ctx.state;

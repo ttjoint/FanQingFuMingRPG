@@ -1,0 +1,9 @@
+[
+  { "id": "player", "name": "玩家", "hostileTo": [] },
+  { "id": "enemy", "name": "敌对", "hostileTo": ["player"] },
+  { "id": "ming", "name": "明军", "hostileTo": ["qing"] },
+  { "id": "qing", "name": "清军", "hostileTo": ["ming"] },
+  { "id": "bandit", "name": "强盗", "hostileTo": ["player", "ming", "qing"] },
+  { "id": "beast", "name": "野兽", "hostileTo": ["player", "ming", "qing", "bandit"] },
+  { "id": "neutral", "name": "中立", "hostileTo": [] }
+]

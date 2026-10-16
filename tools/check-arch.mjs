@@ -36,6 +36,8 @@ for (const f of files.filter(f => rel(f).startsWith("src/engine/"))) {
   const t = read(f);
   for (const m of t.matchAll(/from\s+["']([^"']+)["']/g)) {
     if (UP.test("/" + m[1] + "/") || /core\/state/.test(m[1])) issues.push("engine 依赖上层：" + rel(f) + " -> " + m[1]);
+    // 引擎必须通用：不得依赖具体游戏资料（content/）或核心装配（core/）。
+    if (/\/content\//.test("/" + m[1] + "/") || /\/core\//.test("/" + m[1] + "/")) issues.push("engine 依赖具体资料：" + rel(f) + " -> " + m[1]);
   }
   if (/\b(document|window|localStorage|indexedDB)\b/.test(t)) issues.push("engine 含 DOM/BOM：" + rel(f));
 }

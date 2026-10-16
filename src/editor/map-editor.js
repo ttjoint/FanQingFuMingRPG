@@ -9,7 +9,7 @@
 import { h, clear } from "./dom.js";
 import { A } from "../core/state.js";
 import { worldToCell, cellCenter } from "../core/utils.js";
-import { getImg, preloadChar } from "../core/assets.js";
+import { getImg, preloadChar, assetURL } from "../core/assets.js";
 import { renderNpcPanel } from "./npc-panel.js";
 import { createHistory } from "./history.js";
 import { createSelection } from "./selection.js";
@@ -46,6 +46,8 @@ export function mountMapEditor(main, side, opts) {
   const npcOptions = opts.npcOptions || [];
   const npcName = opts.npcName || (id => "#" + id);
   const itemNames = opts.itemNames || [];
+  const factionOptions = opts.factionOptions || [];
+  const aiOptions = opts.aiOptions || [];
   const skillNames = opts.skillNames || [];
   const scriptNames = opts.scriptNames || [];
   const models = opts.models || [];
@@ -131,7 +133,7 @@ export function mountMapEditor(main, side, opts) {
   const textIn = (val, on) => { const i = h("input", { type: "text", value: val == null ? "" : val }); i.oninput = () => on(i.value); return i; };
   const numIn = (val, on) => { const i = h("input", { type: "number", value: val == null ? 0 : val }); i.oninput = () => on(Number(i.value)); return i; };
   const btn = (label, cls, on) => h("button", { class: "ed-btn" + (cls ? " " + cls : ""), onclick: on }, label);
-  const imgSrc = p => images[p] || p;
+  const imgSrc = p => images[p] || assetURL(p);
   const npcById = id => npcs.find(n => n.id === id);
 
   // ---------- 图鉴 ----------
@@ -780,7 +782,7 @@ export function mountMapEditor(main, side, opts) {
         // 实例模式：编辑合并视图，把改动字段镜像进 overrides；模板模式：直接编辑共享模板。
         const working = instMode ? JSON.parse(JSON.stringify({ ...tpl, ...s.overrides })) : tpl;
         renderNpcPanel(host, working, {
-          images, models, itemNames, skillNames, scripts: scriptNames,
+          images, models, itemNames, skillNames, scripts: scriptNames, factionOptions, aiOptions,
           portraits: [...new Set(npcs.map(n => n.portrait).filter(Boolean))],
           onChange: f => {
             if (instMode && f && f.k) s.overrides[f.k] = JSON.parse(JSON.stringify(working[f.k]));

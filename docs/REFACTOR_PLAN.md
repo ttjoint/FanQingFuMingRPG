@@ -87,6 +87,6 @@
 
 ## 约定
 
-- 原版 `assets/` 永远只读；改动只进“内容包”。
+- 原版 `versions/default/assets/` 永远只读；改动只进 `versions/<id>/` 版本（内容包）。
 - 数据结构变更需同步：`schema.js` + 迁移 + 单测。
 - 每阶段结束跑 `node test/run.mjs` 与 `node tools/e2e.mjs`。

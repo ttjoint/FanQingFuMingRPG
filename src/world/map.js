@@ -154,7 +154,8 @@ export function setPlayer(ctx, row, col, dir) {
   const p = cellCenter(row, col);
   if (!G.player) {
     G.player = attachAll({ model: "role", x: p.x, y: p.y, path: null, action: "stand", dir: dir || 4,
-                 frame: 0, ft: 0, running: false, target: null, moveGoal: null, attackCD: 0, atkT: 0, pickup: null, dead: false }, UNIT_COMPONENTS);
+                 frame: 0, ft: 0, running: false, target: null, moveGoal: null, attackCD: 0, atkT: 0, pickup: null, dead: false,
+                 isPlayer: true, faction: "player" }, UNIT_COMPONENTS);
   } else { G.player.x = p.x; G.player.y = p.y; G.player.target = null; G.player.path = null; if (dir != null) G.player.dir = dir; }
   // 玩家落点若与某个 NPC 重叠，把该 NPC 挪到最近的空位（保持入口点不变）
   for (const n of G.npcs) if (!n.dead) placeFree(n);

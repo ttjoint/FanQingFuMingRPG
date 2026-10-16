@@ -20,8 +20,10 @@ export function reindex(g) {
 
 export function freeSlot(g) {
   for (let i = 0; i < 9; i++) if (!g.hotbar[i]) return { kind: "hotbar", i };
-  // 拥有“包裹”时自动开启 16 格背包
-  if (!g.pack.length && countItem(g, "包裹") > 0) g.pack = new Array(25).fill(null);
+  // 拥有“包裹（PackItem）”道具时自动开启背包；名称与格数来自配置。
+  const packItem = (CFG.inventory && CFG.inventory.packItem) || "包裹";
+  const packSize = (CFG.inventory && CFG.inventory.packSize) || 25;
+  if (!g.pack.length && countItem(g, packItem) > 0) g.pack = new Array(packSize).fill(null);
   for (let i = 0; i < g.pack.length; i++) if (!g.pack[i]) return { kind: "pack", i };
   return null;
 }
@@ -127,7 +129,7 @@ export function useEntry(g, entry, kind, key) {
     entry.count--; if (entry.count <= 0) setSlot(g, kind, key, null);
     reindex(g); g.tip = "学会 " + entry.name; g.tipT = 2;
   } else if (it.type === 7) {
-    g.packOpen = !g.packOpen; g.pack = g.pack.length ? g.pack : new Array(25).fill(null);
+    g.packOpen = !g.packOpen; g.pack = g.pack.length ? g.pack : new Array((CFG.inventory && CFG.inventory.packSize) || 25).fill(null);
   } else {
     g.tip = entry.name + " 无法使用"; g.tipT = 2;
   }

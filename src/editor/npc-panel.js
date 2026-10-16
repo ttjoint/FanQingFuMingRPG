@@ -2,21 +2,15 @@
 // 数值、掉落、技能、AI 行为等。供地图编辑器的「单位」层右侧栏复用。
 import { h, clear } from "./dom.js";
 import { A } from "../core/state.js";
-import { renderForm, renderDrops, renderStrList } from "./fields.js";
+import { assetURL } from "../core/assets.js";
+import { renderForm, renderDrops, renderStrList, renderInventory } from "./fields.js";
 
 const ACTIONS = [["stand", "站立"], ["walk", "行走"], ["run", "奔跑"], ["fight", "攻击"], ["die", "倒地"]];
-
-// 原版 npc.npc 的 AI 编号 -> 可读说明（网页版按「攻击>0 + 主动敌对」判定敌人）。
-const AI_OPTIONS = [
-  [0, "0 · 默认（有行走帧则游荡）"], [1, "1 · 待机"], [2, "2 · 巡逻"],
-  [3, "3 · 固定站位（多有脚本）"], [4, "4 · 随机游荡"],
-  [5, "5 · 特殊"], [6, "6 · 特殊"], [7, "7 · 特殊"],
-];
 
 export function renderNpcPanel(host, npc, ctx) {
   clear(host);
   const images = ctx.images || {};
-  const path = p => images[p] || p;
+  const path = p => images[p] || assetURL(p);
   const frameSrc = name => path("assets/role/" + name.replace(/\.bmp$/, ".png"));
   const faceSrc = name => path("assets/face/" + name.replace(/\.bmp$/, ".png"));
 
@@ -28,7 +22,8 @@ export function renderNpcPanel(host, npc, ctx) {
   if (npc.speed == null) npc.speed = 45;
   if (npc.runSpeed == null) npc.runSpeed = 70;
   if (!Array.isArray(npc.drops)) npc.drops = [];
-
+  if (npc.inventory == null || typeof npc.inventory !== "object") npc.inventory = { stock: [], auto: "" };
+  if (!Array.isArray(npc.inventory.stock)) npc.inventory.stock = [];
   const on = f => {
     ctx.onChange && ctx.onChange(f);
     if (f && (f.k === "model" || f.k === "portrait") && ctx.rerender) ctx.rerender();
@@ -87,7 +82,8 @@ export function renderNpcPanel(host, npc, ctx) {
     { k: "level", label: "等级", type: "number" },
     { k: "exp", label: "经验", type: "number" },
     { k: "hostile", label: "主动敌对", type: "checkbox" },
-    { k: "ai", label: "AI 行为", type: "select", numeric: true, options: AI_OPTIONS },
+    { k: "faction", label: "阵营", type: "select", options: ctx.factionOptions || [] },
+    { k: "ai", label: "AI 配置", type: "select", options: ctx.aiOptions || [["", "（默认：有攻击力则追击，否则原地游荡）"]] },
     { k: "speed", label: "移动速度", type: "number" },
     { k: "runSpeed", label: "追击速度", type: "number" },
   ], npc, on);
@@ -97,6 +93,12 @@ export function renderNpcPanel(host, npc, ctx) {
   const drops = h("div", { class: "ed-drops" });
   host.append(drops);
   renderDrops(drops, npc, { k: "drops", items: ctx.itemNames || [] }, f => ctx.onChange && ctx.onChange(f));
+
+  // ---- 货物背包（填了且非空才会作为商人开店）----
+  host.append(h("h3", null, "货物背包（商人）"));
+  const shopBox = h("div", { class: "ed-drops" });
+  host.append(shopBox);
+  renderInventory(shopBox, npc, { k: "inventory", items: ctx.itemNames || [] }, f => ctx.onChange && ctx.onChange(f));
 
   // ---- 技能 ----
   host.append(h("h3", null, "技能"));

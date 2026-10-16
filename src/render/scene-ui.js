@@ -9,6 +9,7 @@ import { isEditorAvailable, activeId, versionName } from "../content/store.js";
 
 // 把资源名规范成 assets/ui/*.png：允许 "mainmenu"、"end.bmp"、"end.png" 三种写法。
 function ui(name) {
+  if (!name) return null;
   if (/\.bmp$/i.test(name)) name = name.replace(/\.bmp$/i, ".png");
   else if (!/\.[a-z0-9]+$/i.test(name)) name += ".png";
   return getImg("assets/ui/" + name);

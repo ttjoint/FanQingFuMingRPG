@@ -1,15 +1,29 @@
 // 战斗：命中/伤害公式、玩家攻击、死亡与掉落。运行时上下文 ctx 由调用方注入。
 import { dirFromVec, worldToCell } from "../core/utils.js";
 import { skillByName } from "../core/registry.js";
-import { setAnim, moveEntity, actionDuration, updateMove } from "./motion.js";
+import { setAnim, moveEntity, actionDuration, updateMove, canRun, walkSpeed, runSpeed } from "./motion.js";
 import { findPathPoints } from "../world/pathfinding.js";
 import { addExp } from "./inventory.js";
 import { dropGround } from "../world/ground.js";
 import { startScript } from "../script/vm.js";
+import { canAttack } from "../engine/faction.js";
+import { isMelee, skillRange as skRange, rollAttackHit, damage as dmgFormula } from "../engine/skill.js";
+import { normalizeTargeting, selectTargets, needsPrimary, isSelfOnly, tickCooldowns, isReady, startCooldown, knockbackTarget } from "../engine/targeting.js";
+import { spawnProjectile } from "./projectiles.js";
+import { statMods, applyBuff } from "../engine/buff.js";
+
+// 阵营关系表（内容内置，只读）；缺失时 canAttack 退化为“有攻击力即可”。
+const factionTable = ctx => (ctx.assets && ctx.assets.factionTable) || null;
+// 玩家能否攻击目标：阵营敌对 + 目标未死。
+export function playerCanAttack(ctx, t) {
+  const p = ctx.state.player;
+  if (!p) return false;
+  return canAttack({ ...p, isPlayer: true, attackable: true, faction: p.faction || "player" }, t, factionTable(ctx));
+}
 
 export function skillRange(ctx) {
   const sk = skillByName(ctx.state.skill);
-  return sk ? Math.max(ctx.config.combat.rangeMin, sk.range) : ctx.config.combat.rangeMin;
+  return sk ? skRange(sk, ctx.config.combat.rangeMin) : ctx.config.combat.rangeMin;
 }
 
 // 忠实还原 exe：roll = Random(100)（MINSTD 0x429300）；若 role+0x64>0 则 roll=(roll²)%100；
@@ -19,7 +33,7 @@ export function rollHit(hitRate, square) {
   if (square) roll = (roll * roll) % 100;
   return roll <= Math.max(0, Math.min(100, hitRate));
 }
-export function dealDamage(atk, power, def) { return Math.max(1, atk + power - Math.floor(def / 2)); }
+export function dealDamage(atk, power, def) { return dmgFormula(atk, power, def); }
 
 export function spawnEffect(ctx, sk, x, y) {
   if (!sk || !sk.frames || !sk.frames.length) return;
@@ -32,16 +46,26 @@ export const HIT_FRACTION = 0.45;
 // 挥砍中段的伤害/特效结算（玩家）。
 function applyPlayerHit(ctx, p) {
   const G = ctx.state;
-  const t = p.swingTarget, sk = p.swingSkill || { power: 0 };
+  const t = p.swingTarget, sk = p.swingSkill || { power: 0, mode: "melee" };
   p.hitPending = false;
-  if (!t || t.dead || !t.attackable) return;
-  spawnEffect(ctx, sk, t.x, t.y);
-  if (sk.type === 0) { G.stats.hp = Math.min(G.stats.hpMax, G.stats.hp + 40); return; }
-  if (rollHit(G.stats.hit, false)) {
-    t.hp -= dealDamage(G.stats.attack, sk.power || 0, t.def);
-    t.dmgT = 0.4;
-    if (t.hp <= 0) killNPC(ctx, t);
+  if (!t || t.dead || !playerCanAttack(ctx, t)) return;
+  // AOE / 多目标技能：走统一的目标选择入口（castSkill）。
+  const tg = normalizeTargeting(sk.targeting);
+  if (tg.aoe || isSelfOnly(tg) || tg.kind === "ally" || tg.kind === "point") {
+    castSkill(ctx, p, t, sk, { atk: G.stats.attack, hitRate: G.stats.hit });
+    return;
   }
+  if (sk.type === 0) {
+    spawnEffect(ctx, sk, p.x, p.y);
+    healUnit(ctx, p, Math.max(40, sk.power || 0));
+    return;
+  }
+  // 远程 + 配置了弹道：发射一枚弹道，命中时机延后到飞行抵达时（伤害仍在 resolveHit）。
+  if (sk.projectile) {
+    spawnProjectile(ctx, p, t, sk, { params: { atk: G.stats.attack, hitRate: G.stats.hit } });
+    return;
+  }
+  resolveHit(ctx, p, t, sk, { atk: G.stats.attack, hitRate: G.stats.hit });
 }
 
 export function playerAttackTarget(ctx, dt) {
@@ -61,14 +85,14 @@ export function playerAttackTarget(ctx, dt) {
     if (p.hitPending && p.swingT >= (p.swingTotal || 0) * HIT_FRACTION) applyPlayerHit(ctx, p);
     // 挥砍播完后，若目标已死亡/失效，再清理目标，让玩家回到站立。
     // 注意**不能清 p.path**：玩家可能在挥砍期间已点了新的移动目的地，那条路径不能被打断。
-    if (p.atkT <= 0 && (!t || t.dead || !t.attackable)) {
+    if (p.atkT <= 0 && (!t || t.dead || !playerCanAttack(ctx, t))) {
       p.target = null; p.chaseTarget = null; p.chaseCell = null;
       p.hitPending = false; p.swingTarget = null;
     }
     return;
   }
 
-  if (!t || t.dead || !t.attackable) { p.target = null; p.atkT = 0; p.path = null; p.chaseTarget = null; p.chaseCell = null; p.hitPending = false; p.swingTarget = null; return; }
+  if (!t || t.dead || !playerCanAttack(ctx, t)) { p.target = null; p.atkT = 0; p.path = null; p.chaseTarget = null; p.chaseCell = null; p.hitPending = false; p.swingTarget = null; return; }
   const d = Math.hypot(t.x - p.x, t.y - p.y);
   const range = skillRange(ctx);
 
@@ -81,10 +105,12 @@ export function playerAttackTarget(ctx, dt) {
       p.path = (pts && pts.length) ? pts : null;
       p.chaseCell = tgt; p.chaseTarget = t;
     }
-    const speed = p.running ? 150 : 90; p.speed = speed;
+    const running = p.running && canRun(G);   // 精力为 0 → 追击也强制走路
+    p.running = running;
+    const speed = running ? runSpeed() : walkSpeed(); p.speed = speed;
     if (p.path && p.path.length) updateMove(p, dt);
     else moveEntity(p, t.x, t.y, speed, true);
-    setAnim(p, p.running ? "run" : "walk");
+    setAnim(p, running ? "run" : "walk");
     return;
   }
   p.path = null;                       // 进入射程：停步攻击
@@ -93,6 +119,11 @@ export function playerAttackTarget(ctx, dt) {
   if (p.attackCD > 0) { p.atkT = 0.08; p.swingTotal = 0.08; p.swingT = 0; p.hitPending = false; p.animSpeed = 1; return; }   // 冷却中：保持面朝并继续播放攻击帧
 
   const sk = skillByName(G.skill) || { power: 0, mp: 0 };
+  // 技能级冷却（阶段 D）：冷却中不发起新攻击（保持面朝）。
+  if (sk.name && !isReady(p, sk)) {
+    p.atkT = 0.08; p.swingTotal = 0.08; p.swingT = 0; p.hitPending = false; p.animSpeed = 1;
+    return;
+  }
   if (sk.mp && G.stats.mp < sk.mp) { p.target = null; G.tip = "精力不足"; G.tipT = 2; return; }
   if (sk.mp) G.stats.mp -= sk.mp;
   const dur = actionDuration(p, "fight", ctx.assets.chars);
@@ -113,7 +144,133 @@ export function faceTarget(e, t) {
   if (e.dir !== nd) e.dir = nd;
 }
 
-const DROPS = { "野猴": ["猴皮", "猴肉"], "花豹": ["豹牙", "豹肉"] };
+// 命中结算的**唯一入口**（玩家 / NPC 共用）。
+// 由调用方保证：attacker/target 均为有效单位，且 target 可被攻击。
+// 返回 { hit, dmg, dead }。近战与远程在本阶段都“命中即瞬间结算”，
+// 远程的弹道只是把“何时命中”延后 / 可视化（阶段 B），伤害逻辑不变。
+export function resolveHit(ctx, attacker, target, sk, opts) {
+  const o = opts || {};
+  const mode = sk && sk.mode ? sk.mode : "melee";
+  spawnEffect(ctx, sk, target.x, target.y);
+  // 治疗型技能（type 0）：本阶段仅玩家自疗，NPC 不用。
+  if (sk && sk.type === 0) return { hit: true, dmg: 0, heal: true };
+  const hit = o.forceHit ? true : rollHit(o.hitRate == null ? 100 : o.hitRate, !isMelee({ mode }));
+  if (!hit) return { hit: false, dmg: 0 };
+  const power = sk ? (sk.power || 0) : 0;
+  // Buff 属性加成：攻方 atk +、守方 def +（按层数累加）。
+  const am = statMods(attacker), dm = statMods(target);
+  const def = (target.defence || target.def || 0) + dm.def;
+  const amount = dealDamage((o.atk || 0) + am.atk, power, def);
+  const dead = applyDamage(ctx, target, amount, attacker);
+  // 命中施加 buff / 治疗 / 击退（阶段 C/D）。
+  applyOnHit(ctx, attacker, target, sk);
+  return { hit: true, dmg: amount, dead };
+}
+
+// 命中后效果：施加 buff（按概率）、命中治疗、击退。
+function applyOnHit(ctx, attacker, target, sk) {
+  const oh = sk && sk.onHit;
+  if (!oh) return;
+  if (Array.isArray(oh.buffs)) {
+    for (const b of oh.buffs) {
+      const chance = b.chance == null ? 100 : b.chance;
+      if (Math.random() * 100 > chance) continue;
+      const def2 = ctx.assets.buffTable && ctx.assets.buffTable.byId.get(b.id);
+      if (def2) applyBuff(target, def2, { stacks: b.stacks });
+    }
+  }
+  if (oh.heal && oh.heal.amount > 0) {
+    healUnit(ctx, oh.heal.to === "target" ? target : attacker, oh.heal.amount);
+  }
+  if (oh.knockback && oh.knockback.dist > 0 && !target.dead && !(target.isPlayer || target === ctx.state.player)) {
+    const dst = knockbackTarget(attacker, target, oh.knockback.dist);
+    if (dst) { target.x = dst.x; target.y = dst.y; target.path = null; }
+  }
+}
+
+// 治疗一个单位（玩家走 G.stats.hp，NPC 走 hp）。
+export function healUnit(ctx, unit, amount) {
+  const g = ctx.state;
+  if (!unit || unit.dead || amount <= 0) return 0;
+  const dl = statMods(unit);
+  if (unit.isPlayer || unit === g.player) {
+    const before = g.stats.hp;
+    g.stats.hp = Math.min(g.stats.hpMax + dl.hpMax, g.stats.hp + amount);
+    return g.stats.hp - before;
+  }
+  const before = unit.hp;
+  unit.hp = Math.min((unit.hpMax || 0) + dl.hpMax, unit.hp + amount);
+  return unit.hp - before;
+}
+
+// 施放一个带目标选择的技能（玩家与 NPC 共用）。
+//   target: 主目标单位（单体必填；AOE 时作为范围中心；self 时忽略）
+// 返回实际命中的单位数量。
+// 与 resolveHit 的区别：这里负责“选中一批目标” + 技能冷却。具体命中/伤害委托 resolveHit。
+// 注：AOE 目前即时结算（不经过弹道）；带 projectile 的 AOE 可后续扩展为“弹道命中后溅射”。
+export function castSkill(ctx, attacker, target, sk, opts) {
+  const o = opts || {};
+  if (!sk) return 0;
+  const table = factionTable(ctx);
+  // 玩家实体本身没有 attackable/atk（攻击力在 G.stats 里），需注入才能通过 canAttack。
+  const isPlayer = attacker && attacker === ctx.state.player;
+  const armed = isPlayer ? { ...attacker, isPlayer: true, attackable: true, faction: attacker.faction || "player" } : attacker;
+  const hostile = (a, b) => canAttack(a === ctx.state.player ? armed : a, b, table);
+  const tg = normalizeTargeting(sk.targeting);
+  const units = collectAllUnits(ctx);
+  const targets = selectTargets(tg, attacker, target, units, hostile);
+  if (!targets.length) return 0;
+  // 技能级冷却：未就绪时不可施放。
+  if (!o.ignoreCooldown && !isReady(attacker, sk)) return 0;
+  let hits = 0;
+  for (const t of targets) {
+    if (sk.type === 0) {          // 治疗型技能
+      spawnEffect(ctx, sk, t.x, t.y);
+      healUnit(ctx, t, Math.max(40, sk.power || 0));
+      hits++;
+      continue;
+    }
+    if (o.forceHit || hostile(attacker, t)) {
+      const r = resolveHit(ctx, attacker, t, sk, { atk: o.atk || 0, hitRate: o.hitRate == null ? 100 : o.hitRate });
+      if (r.hit) hits++;
+    }
+  }
+  if (hits) startCooldown(attacker, sk);
+  return hits;
+}
+
+// 收集场上所有可被选中的单位（含玩家，排除施法者由 selectTargets 处理）。
+function collectAllUnits(ctx) {
+  const g = ctx.state, out = [];
+  if (g.player) out.push(g.player);
+  for (const u of g.npcs) if (!u.dead) out.push(u);
+  return out;
+}
+
+// 每帧推进单位技能冷却（由 buffSystem / 主循环调用）。
+export { tickCooldowns };
+
+// 对一个单位造成伤害（玩家 / NPC 均适用）。返回是否致死。
+// 玩家致死保留“挥砍提交”语义（先播完这一刀再倒地）；NPC 致死走 killNPC。
+export function applyDamage(ctx, victim, amount, source) {
+  const g = ctx.state;
+  if (!victim || victim.dead) return false;
+  if (source && source !== victim) victim.lastAttacker = source;   // 用于 AI 报复/协助
+  if (victim.isPlayer || victim === g.player) {
+    g.stats.hp -= amount;
+    if (g.stats.hp <= 0) {
+      g.stats.hp = 0; victim.dead = true;
+      if (victim.atkT > 0) victim.pendingDie = true;   // 玩家也在挥砍：先播完这一刀再倒地
+      else { victim.action = "die"; victim.frame = 0; victim.ft = 0; }
+      return true;
+    }
+    return false;
+  }
+  victim.hp -= amount;
+  victim.dmgT = 0.4;
+  if (victim.hp <= 0) { killNPC(ctx, victim); return true; }
+  return false;
+}
 
 export function killNPC(ctx, n) {
   const G = ctx.state, A = ctx.assets;
@@ -122,8 +279,8 @@ export function killNPC(ctx, n) {
   else { n.action = "die"; n.frame = 0; n.ft = 0; n.animSpeed = 1; }
   addExp(G, n.exp);
   G.stats.honor += 1;
-  const drops = (n.drops && n.drops.length) ? n.drops : (DROPS[n.name] || []).map(x => ({ name: x, count: 1 }));
-  for (const d of drops) {
+  // 掉落完全由数据驱动（npcs.json 的 drops 字段），不再有硬编码兜底表。
+  for (const d of (n.drops || [])) {
     const nm = typeof d === "string" ? d : d.name;
     const ct = typeof d === "string" ? 1 : (d.count || 1);
     if (nm) dropGround(G, nm, n.x, n.y, ct);

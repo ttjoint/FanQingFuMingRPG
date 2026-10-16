@@ -1,19 +1,38 @@
 // 引擎核心：等距坐标换算与方向（纯函数，不依赖 DOM / 全局状态，可在 Node 中测试）。
 // 运行时通过 core/utils.js 再导出，保持既有 import 不变（过渡层）。
+//
+// 几何参数（世界原点 / 菱形半宽半高）**可由游戏配置注入**：
+//   configureIso({ originX, halfW, halfH })
+// 缺省时使用引擎内置默认（与原版一致），因此引擎本身保持通用，
+// 其余项目只需在装配层调用一次 configureIso 即可适配不同的地图尺寸。
 
-export function cellCenter(row, col) { return { x: 1568 + 32 * (row - col), y: 16 * (row + col) + 16 }; }
+const GEO = { originX: 1568, halfW: 32, halfH: 16 };
+
+export function configureIso(g) {
+  if (!g) return;
+  if (typeof g.originX === "number") GEO.originX = g.originX;
+  if (typeof g.halfW === "number") GEO.halfW = g.halfW;
+  if (typeof g.halfH === "number") GEO.halfH = g.halfH;
+}
+export function isoGeometry() { return { ...GEO }; }
+
+export function cellCenter(row, col) {
+  return { x: GEO.originX + GEO.halfW * (row - col), y: GEO.halfH * (row + col) + GEO.halfH };
+}
 
 export function worldToCell(x, y) {
-  const sum = (y - 16) / 16, diff = (x - 1568) / 32;
+  const sum = (y - GEO.halfH) / GEO.halfH, diff = (x - GEO.originX) / GEO.halfW;
   return { row: Math.round((sum + diff) / 2), col: Math.round((sum - diff) / 2) };
 }
 
 // 在一个格子的菱形范围内取一个随机点（用于 NPC 走到格内任意位置）。
+// 内缩 2px 避免贴边；外接菱形筛选用半宽/半高。
 export function randomPointInCell(row, col, rnd = Math.random) {
   const c = cellCenter(row, col);
+  const rx = GEO.halfW - 2, ry = GEO.halfH - 2;
   let dx, dy;
-  do { dx = (rnd() * 2 - 1) * 30; dy = (rnd() * 2 - 1) * 14; }
-  while (Math.abs(dx) / 32 + Math.abs(dy) / 16 > 0.85);   // 限制在菱形内部，避免贴边
+  do { dx = (rnd() * 2 - 1) * rx; dy = (rnd() * 2 - 1) * ry; }
+  while (Math.abs(dx) / GEO.halfW + Math.abs(dy) / GEO.halfH > 0.85);   // 限制在菱形内部，避免贴边
   return { x: c.x + dx, y: c.y + dy };
 }
 

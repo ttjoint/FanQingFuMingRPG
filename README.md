@@ -26,7 +26,7 @@
 - ✅ **建筑遮挡（多边形裁剪 / 屏风模型）**：每个对象拆成**两块用 Canvas `clip()` 多边形裁剪**的绘制物——**覆盖层 = 蓝线（黄线 − 玩家身高）以上**，沿斜线精确裁剪、排序键 `ROOF_TOP`（**高于所有角色**：只要屏幕重叠就遮挡玩家，不论玩家 y 是否在贴图之外/更靠前）；**基座 = 蓝线以下**，整块一个深度 = **黄线的最高点**（斜面上最小 y，不是最前/最深那个格）——这样角色站在黄色区域内基本都在其前方、稳定不被遮挡（用最前格会沿黄区走动时时遮时不遮）。因为边界是**沿斜线/贴图轮廓**的，遮蔽不会像轴对齐方格那样“横竖截断玩家半身”；玩家在对象前方→整幅露出，在后方→被轮廓自然遮住。**覆盖层无条件遮挡角色**（不做“门廊提升”：站在可走地基格上也不会被豁免，蓝区内的身体一律被盖住）。**地基线来源**：未手画时由引擎自动拟合——只在“地基格 x 范围内”取 alpha 底边、用**下凸包**（跨城门洞凹陷、忽略两侧房檐），并**舍去两端陡峭段**（“地基→飞檐顶”的近竖直连线）。**同一张贴图在不同地图里是同一个模板**（按贴图源矩形去重，如扬州与扬州_屠城共 45 个模板而非 186 个实例），地基线/深度模式只编辑一次、所有实例共享。**每个模板可选深度模式**（编辑器「装饰物」栏 / 地图装饰面板）：① 自动下凸包；② **手画地基线**（拆成两半的城门等自动不可靠时手描；青线自动跟随；可一键恢复自动；黄线可越出贴图，拖到下方即让青线覆盖整幅→完全遮蔽）；③ **整体单一深度**（树木/柱子等点状对象）。
 - ✅ **死亡倒地动画**（只播一次）；**NPC 空闲对白**（无脚本 NPC 右键说话）
 - ✅ 地图切换：`ChangeMap`/`LoadInitialMap`、**脚本触发器**（格子 `+0x1C`）、**地图直传**（格子 `+0x1D` → `maps.ini` + 入口点 `+0x44/0x48`）、NPC 动态增删
-- ✅ **完整场景集**：原游戏 `map/` 下**全部 9 张地图**均已导出并随 `assets/maps_manifest.json` 清单**全部预载**（含仅靠地图直传抵达、未被脚本直接引用的场景，如「战场」），不会因硬编码名单而漏掉任何一张
+- ✅ **完整场景集**：原游戏 `map/` 下**全部 9 张地图**均已导出并随 `versions/default/assets/maps_manifest.json` 清单**全部预载**（含仅靠地图直传抵达、未被脚本直接引用的场景，如「战场」），不会因硬编码名单而漏掉任何一张
 - ✅ **标题菜单 / 片头 / 结局**：忠实复刻原版 `game.ini` 的开场与收尾——片头闪屏（`team`→`kouhao`，可点击跳过）→ 标题菜单（`mainmenu` + 开始/载入/关于/退出，`start.mp3`）→ 游玩 → 结局（`end.png` + 结局评价称号 + 结局音乐）；菜单按钮坐标取自 `mainmenu.ini`
 - ✅ **数据版本（内容包）**：原版数据永远是只读的**默认版本**；编辑器保存的修改成为**独立版本**，开始游戏前在「数据版本」中选择。支持新建 / 重命名 / 删除 / 导出 / 导入（`.gsxy.json`）
 - ✅ **内置内容编辑器**（仅本地模式显示，静态部署自动隐藏）：**地图分层编辑**（地面图块 / 装饰多深度层 / 可走阻挡 / 脚本触发与地图直传 / NPC 出生点与入口，画布自适应铺满窗口，点选 NPC 或出入口即在右侧编辑其行走图、移动速度、属性、对话脚本与掉落）、脚本（GSP 文本）、NPC、物品、技能、升级与战斗数值、结局称号，以及**图片素材上传替换**（存为版本的一部分），另外还有**「装饰物」独立栏**（跨地图按**贴图源矩形**列出**共用模板**并显示出现次数/地图：坐标、深度层、深度微调、深度模式（自动下凸包 / **手画地基线** / 整体单一深度），预览上可拖控制点、空白单击加点、右键删点，黄线可越出贴图，青线自动跟随，可一键恢复自动地基线）；列表页（NPC/物品/技能等）**点击行即可切换选中项**，参数里含图片的字段（行走图/头像/图标/特效帧）**直接显示图片预览**
@@ -55,10 +55,13 @@ python serve.py 8005
 ```
 FanQingFuMingRPG/
 ├─ index.html            页面骨架（加载 src/main.js）
-├─ build_assets.py       从原版游戏目录生成 assets/
-├─ serve.py              本地开发服务器（no-cache）
+├─ build_assets.py       从原版游戏目录生成 versions/default/assets/
+├─ serve.py              本地开发服务器（no-cache）+ 版本库写文件后端 /__api__/versions
 ├─ package.json          工程信息 / scripts
-├─ assets/               生成的静态资源（图集、地图、数据表、音频…）
+├─ versions/             数据版本库：每个版本一个文件夹
+│  └─ default/           原版默认版本（只读）
+│     ├─ version.json    版本元数据（id/name/readonly…）
+│     └─ assets/         生成的静态资源（图集、地图、数据表、音频…）
 └─ src/
    ├─ main.js            入口：boot（加载资源→建图→装配输入）+ 主循环
    ├─ core/              基础层（无业务逻辑）
@@ -136,8 +139,11 @@ FanQingFuMingRPG/
 └─ tools/e2e.mjs         端到端冒烟测试（CDP）
 ```
 
-分层依赖方向（目标）：`engine → content → game/runtime → editor`；当前处于渐进式改造，
-运行时仍经适配层消费新模型，装配点收敛到 `runtime/context.js`。详见 `docs/ARCHITECTURE.md` 与 `docs/DATA_MODEL.md`。
+分层依赖方向（目标）：`engine ← content ← game/runtime ← editor`（箭头指向“被依赖”）；
+`engine/` 为通用纯层，**不得依赖 `content/` 或 `core/`**，由 `tools/check-arch.mjs` 强制；
+所有与具体游戏有关的数值/字段（移速、索敌、近战分界、等距几何、背包道具…）均由装配层
+从 `config.json` 注入。当前处于渐进式改造，运行时仍经适配层消费新模型，
+装配点收敛到 `runtime/context.js`。详见 `docs/ARCHITECTURE.md` 与 `docs/DATA_MODEL.md`。
 
 ## 测试
 
@@ -187,13 +193,28 @@ IdRegistry、等距坐标/方向、A* 寻路与视线/路径平滑、流场、�
 
 ## 数据版本与编辑器
 
-游戏启动时会读取一个**数据版本**（内容包）：
+游戏启动时会读取一个**数据版本**。所有版本都放在 `versions/` 目录下，**每个版本一个文件夹**：
 
-- **默认版本** = 原版 `assets/` 数据，只读、永不被修改。
-- 编辑器保存时会把改动写入一个**独立版本**（存在浏览器 `localStorage`）。
-- 菜单左上「数据版本」里选择用哪个版本开始游戏；切换后刷新页面生效。
-- 版本可导出为 `.gsxy.json`（内联素材，备份/分享）或 `.gsxy.zip`（项目文件：`project.json` + `images/`），并可导入。
-- 启动顺序：`assets` 默认值 → 所选版本的 `domains` 覆盖 → `images` 图片覆盖。
+```
+versions/
+  default/            最初默认版本（原版），只读
+    version.json      版本元数据 { id, name, builtin, readonly, ... }
+    assets/           原版全部数据（*.json + 图片/音频/地图）
+  <id>/               编辑器 / 用户创建的版本（可写）
+    version.json      元数据 + 名称
+    patch.json        相对原版的“补丁”（只存不同之处）
+    assets/           可选：本版本覆盖的数据/图片（先在 default 找，再在此覆盖）
+```
+
+- **默认版本**（`versions/default/`）= 原版数据，**只读、永不被修改**；编辑器打不开它去编辑。
+- 在版本管理里选「复制」任意版本即可得到一个**可写副本**，再在其基础上编辑。
+- **本地模式**（`python serve.py`，即 `localhost`/`127.0.0.1`）：`serve.py` 提供 `/__api__/versions`
+  写文件后端，编辑器保存时**直接写入 `versions/<id>/` 文件夹**（便于版本管理、可纳入 git）。
+- **静态部署**（任意域名，无写文件后端）：编辑器自动退化为**纯浏览器**存储
+  （补丁存 `localStorage`、图片存 `IndexedDB`），并可导出为 `.gsxy.json` / `.gsxy.zip` 迁移。
+- 启动顺序：`versions/default/assets` 原版数据 → 所选版本的 `patch` 覆盖 → 版本的图片覆盖。
+- 图片按**逻辑键**（`assets/...`）引用：未覆盖的总是从 `versions/default/assets/` 加载，
+  版本只需存放被覆盖的素材，无需复制整份资源。
 
 「编辑内容」入口**只在本地模式显示**（`file://` 或 `localhost` / `127.0.0.1` / `.local`），
 静态部署（任意域名）下自动隐藏；本机也可用 `?editor=1` 显式打开。
@@ -216,19 +237,20 @@ IdRegistry、等距坐标/方向、A* 寻路与视线/路径平滑、流场、�
 |---|---|
 | `index.html` | 页面骨架 |
 | `src/` | 游戏源码（分层 ES Module，结构见上） |
-| `build_assets.py` | 从游戏目录生成 `assets/` |
-| `serve.py` | 本地开发服务器（no-cache，避免旧 ES Module 缓存） |
+| `build_assets.py` | 从游戏目录生成 `versions/default/assets/` |
+| `serve.py` | 本地开发服务器（no-cache）+ 版本库写文件后端（`/__api__/versions`） |
 | `package.json` | 工程信息 / npm scripts（`start` / `build:assets`） |
-| `assets/atlas.png` | 地面图块图谱（160 张 64×32） |
-| `assets/obj.png` | 对象大图集（2048×1600） |
-| `assets/maps/*.json` | **全部 9 张地图**（表头 + 格子 + 对象 + NPC 出生点） |
-| `assets/maps_manifest.json` | 场景清单（原游戏 `map/*.map` 全量；启动时据此预载所有地图） |
-| `assets/game.json` | 标题/结局配置（片头闪屏、结局评价称号、音乐，来自原 `game.ini`） |
-| `assets/chars.json` | 模型 → 动作 → 8 方向 → 帧序列 |
-| `assets/role/*.png` | 角色帧（品红已透明） |
-| `assets/npcs.json` / `items.json` / `skills.json` | 数据表 |
-| `assets/face/` `items_icons/` `skill_icons/` | 头像 / 图标 |
-| `assets/scripts.json` | 25 个 `.gsp` 文本 |
+| `versions/default/version.json` | 原版默认版本的元数据（只读） |
+| `versions/default/assets/atlas.png` | 地面图块图谱（160 张 64×32） |
+| `versions/default/assets/obj.png` | 对象大图集（2048×1600） |
+| `versions/default/assets/maps/*.json` | **全部 9 张地图**（表头 + 格子 + 对象 + NPC 出生点） |
+| `versions/default/assets/maps_manifest.json` | 场景清单（原游戏 `map/*.map` 全量；启动时据此预载所有地图） |
+| `versions/default/assets/game.json` | 标题/结局配置（片头闪屏、结局评价称号、音乐，来自原 `game.ini`） |
+| `versions/default/assets/chars.json` | 模型 → 动作 → 8 方向 → 帧序列 |
+| `versions/default/assets/role/*.png` | 角色帧（品红已透明） |
+| `versions/default/assets/npcs.json` / `items.json` / `skills.json` | 数据表 |
+| `versions/default/assets/face/` `items_icons/` `skill_icons/` | 头像 / 图标 |
+| `versions/default/assets/scripts.json` | 25 个 `.gsp` 文本 |
 
 ## 已知简化 / 待办
 

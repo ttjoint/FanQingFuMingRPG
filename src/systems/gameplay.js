@@ -3,12 +3,19 @@
 import { VW, VH } from "../core/constants.js";
 import { worldToCell, walkable } from "../core/utils.js";
 import { nearestWalkable, findPathPoints } from "../world/pathfinding.js";
-import { setAnim, updateMove, updateAnim, unitAhead } from "./motion.js";
+import { setAnim, updateMove, updateAnim, unitAhead, canRun, walkSpeed, setPlayerRun } from "./motion.js";
+import { tickMp } from "../engine/stamina.js";
 import { playerAttackTarget } from "./combat.js";
 import { npcAI } from "../world/npc.js";
 import { pickupGround } from "../world/ground.js";
 import { checkTriggers } from "../world/triggers.js";
 import { separateUnits } from "./separation.js";
+import { projectileSystem } from "./projectiles.js";
+import { buffSystem } from "./buffs.js";
+
+// 精力充足才能奔跑：精力降到 0 时强制走路（左右键都只能是走路），直到靠药水/NPC 回复精力。
+// 门控本体在 motion.js（避免 gameplay↔combat 循环 import），这里再导出保持既有引用不变。
+export { canRun, WALK_SPEED, RUN_SPEED, setPlayerRun } from "./motion.js";
 
 // 玩家：攻击计时、自动拾取、按住鼠标持续移动、攻击/移动、动画、奔跑耗精力。
 export function playerSystem(ctx, dt) {
@@ -45,7 +52,6 @@ export function playerSystem(ctx, dt) {
             if (pts && pts.length) {
               g.holdCell = t; g.holdTarget = { x: wx, y: wy };
               p.path = pts;
-              p.running = (g.hold === 0); p.speed = (g.hold === 0) ? 150 : 90;
             }
           } else if (mouseMoved && onCell && p.path && p.path.length) {
             // 同一目标格内：只把终点改到当前鼠标像素，持续跟随（无需 A*）
@@ -53,6 +59,9 @@ export function playerSystem(ctx, dt) {
             g.holdTarget = { x: wx, y: wy };
           }
         }
+        // 每帧根据当前精力重新评估跑/走：精力耗尽时（即使左键按住）立即降为走路。
+        // 精力只能靠药水/NPC 恢复；恢复后再按住左键即可重新起跑。
+        setPlayerRun(g, g.hold === 0);
       }
       // 前方有单位挡路 → 用 avoidUnits 重规划（转身沿可行走路线绕行，而不是被推着划弧）
       if (p.path && p.path.length && !p.target) {
@@ -68,9 +77,13 @@ export function playerSystem(ctx, dt) {
       else if (p.target && p.target.dead) p.target = null;
       else if (!updateMove(p, dt)) {
         if (p.action !== "stand") setAnim(p, "stand");
-        if (p.running && g.stats.mp <= 0) p.running = false;
       }
-      if (p.action === "run" || (p.action === "walk" && p.running)) g.stats.mp = Math.max(0, g.stats.mp - ctx.config.combat.mpDrainRun * dt);
+      // 精力耗尽：立即取消奔跑、改成走路速度（保证“奔跑中精力瞬间到 0”当帧切成走路）。
+      // （按住移动的跑/走判定已在上面每帧由 setPlayerRun 处理，这里兼容单击/追击等非按住情形。）
+      if (p.running && !canRun(g)) { p.running = false; p.speed = walkSpeed(); }
+      // 精力消耗只看“是否真的在奔跑移动”（p.action==="run" 由 updateMove/追击在实际位移时设置）：
+      // 停止（待机/到达终点/被挡）时不掉精力；精力**不会自动回复**，只能靠药水或 NPC/脚本。
+      if (p.action === "run") { const CFG = ctx.config.combat; g.stats.mp = tickMp(g.stats.mp, g.stats.mpMax, true, CFG.mpDrainRun, dt); }
     }
   }
   updateAnim(p, dt, ctx.assets.chars);
@@ -115,4 +128,4 @@ export function cameraSystem(ctx, dt) {
 export function separationSystem(ctx, dt) { separateUnits(ctx.state, dt); }
 
 // 每帧玩法系统的顺序。
-export const gameplaySystems = [playerSystem, npcSystem, separationSystem, triggerSystem, effectSystem, cameraSystem];
+export const gameplaySystems = [playerSystem, npcSystem, separationSystem, triggerSystem, projectileSystem, buffSystem, effectSystem, cameraSystem];

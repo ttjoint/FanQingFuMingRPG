@@ -1,0 +1,10 @@
+{
+  "format": "gsxy.version",
+  "version": 1,
+  "id": "default",
+  "name": "默认版本（原版）",
+  "builtin": true,
+  "readonly": true,
+  "assets": "assets",
+  "createdAt": 0
+}

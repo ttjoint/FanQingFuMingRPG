@@ -5,23 +5,27 @@
 // 建图函数（buildMapData）由入口注入，避免 context → world/map 的循环依赖。
 import { setConfig } from "../core/config.js";
 import { CFG } from "../core/config.js";
+import { configureIso } from "../engine/iso.js";
 import { createRegistry } from "../content/registry.js";
 import { contentToLegacy } from "../content/contentdb.js";
 import { toLegacyMap } from "../content/mapDoc.js";
+import { buildFactionTable } from "../engine/faction.js";
+import { buildAiTable } from "../engine/ai.js";
+import { buildBuffTable } from "../engine/buff.js";
 
 // 初始运行时状态（原先在 core/state.js）。
 function createGameState() {
   return {
     stats: { hp: 200, hpMax: 200, mp: 100, mpMax: 100, exp: 0, expNext: 500, level: 1,
              money: 500, moral: 0, honor: 0, attack: 20, defence: 5, hit: 30 },
-    player: null, npcs: [], vars: {}, inventory: {}, skills: ["长剑"], skill: "长剑",
+    player: null, npcs: [], vars: {}, inventory: {}, skills: (CFG.player.startSkills || []).slice(), skill: CFG.player.startSkill || (CFG.player.startSkills || [])[0],
     hotbar: new Array(9).fill(null), pack: [], packOpen: false,
     equip: { Wu: null, Jia: null, Shi1: null, Shi2: null }, cursor: null, shop: null, savePanel: false,
     settings: { bgm: 0.6, sfx: 0.8 }, settingsPanel: false, bgm: null, bgmSrc: null,
     factions: [], missions: {}, notes: [], vips: {}, love: {},
     dialog: null, tip: null, tipT: 0, script: null, gameOver: false, deathT: 0,
     currentMap: null, map: null, cam: { x: 0, y: 0 }, time: 0,
-    panel: null, effects: [], ground: [], triggerCD: 0, lastCell: null, hold: null, holdCell: null, holdTarget: null,
+    panel: null, effects: [], projectiles: [], ground: [], triggerCD: 0, lastCell: null, hold: null, holdCell: null, holdTarget: null,
     scene: "boot", flashStep: 0, flashT: 0, resultTitle: null, pendingEnd: false,
     mouse: { x: 0, y: 0, sx: 0, sy: 0, wx: 0, wy: 0 },
   };
@@ -52,8 +56,16 @@ export function createRuntime() {
       A.npcsData = legacy.npcs; A.items = legacy.items; A.skills = legacy.skills;
       A.scripts = legacy.scripts; A.game = legacy.game; A.transitions = legacy.transitions;
       A.mapsIndex = legacy.mapsIndex; A.config = legacy.config;
+      setConfig(A.config);                                                  // 先装载配置，供后续派生
+      if (A.config && A.config.iso) configureIso(A.config.iso);            // 等距几何（世界原点/菱形尺寸）由配置注入
+      A.factions = legacy.factions || [];                                  // 阵营关系表（内容内置）
+      A.factionTable = buildFactionTable(A.factions);                      // { byId, list }，运行时只读
+      A.ais = legacy.ais || [];                                            // AI 配置表（内容内置）
+      // AI targeting 缺省值由配置派生（索敌半径等平衡数值不再写死在引擎）。
+      A.aiTable = buildAiTable(A.ais, { aggroRange: CFG.combat && CFG.combat.npcAggro });  // Map<id, plan>，运行时只读
+      A.buffs = legacy.buffs || [];                                        // Buff 配置表（内容内置）
+      A.buffTable = buildBuffTable(A.buffs);                               // { byId, list }，运行时只读
       A.decorTemplates = legacy.decorTemplates || {};   // 跨地图共享的装饰物模板（手画地基线/单一深度）
-      setConfig(A.config);
 
       A.mapsManifest = content.mapsManifest;
       A.rawMaps = {};

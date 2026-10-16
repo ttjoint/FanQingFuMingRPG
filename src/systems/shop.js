@@ -4,15 +4,18 @@ import { addItem, canAddItem, setSlot, reindex } from "./inventory.js";
 import { syncMissions } from "./missions.js";
 import { playSound } from "./audio.js";
 import { entryOf } from "../core/layout.js";
+import { goodsList } from "../engine/inventory.js";
+import { CFG } from "../core/config.js";
 
+// 货物背包 / 货源逻辑见 engine/inventory.js（纯函数，可独立测试）。
+export { hasGoods, goodsList } from "../engine/inventory.js";
+
+// 商店货源：由单位的「货物背包」组件（inventory）驱动，与 NPC 名称/模型解耦。
+// 无背包 / 空背包 = 非商人，返回 null（不会开店）。
 export function shopGoods(ctx, n) {
-  if (!n) return null;
-  const A = ctx.assets;
-  if (n.name === "冰糖葫芦贩") return ["冰糖葫芦"];
-  if (n.model === "卖药人") return A.items.filter(i => i.type === 0 && (i.hp > 0 || i.mp > 0) && i.price > 0 && (i.name.includes("药") || i.name.includes("水"))).map(i => i.name);
-  if (n.model === "卖武器者") return A.items.filter(i => i.type === 1 && i.price > 0).map(i => i.name);
-  if (n.model === "卖装备者") return A.items.filter(i => (i.type === 2 || i.type === 3) && i.price > 0).map(i => i.name);
-  return null;
+  const inv = n && n.inventory;
+  const list = goodsList(inv, ctx.assets.items);
+  return list && list.length ? list : null;
 }
 
 export function openShop(ctx, n) {
@@ -55,7 +58,8 @@ export function sellCursor(ctx) {
   const G = ctx.state;
   const c = G.cursor; if (!c || c.fromShop) return;
   const it = itemByName(c.name), n = c.count || 1;
-  const gain = Math.max(1, Math.floor((it ? it.price : 0) / 2)) * n;
+  const rate = (CFG.economy && CFG.economy.sellRate != null) ? CFG.economy.sellRate : 0.5;
+  const gain = Math.max(1, Math.floor((it ? it.price : 0) * rate)) * n;
   G.stats.money += gain; G.cursor = null; playSound(G, "sell.wav");
   G.tip = "卖出 " + c.name + " +" + gain; G.tipT = 2; reindex(G);
 }

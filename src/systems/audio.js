@@ -1,6 +1,8 @@
 // 音效 / 背景音乐 / 音量设置。运行时状态 g 由调用方注入。
+import { assetPath } from "../core/assets.js";
+
 export function playSound(g, name) {
-  try { const a = new Audio("assets/sound/" + name); a.volume = g.settings.sfx; a.play().catch(() => { }); } catch (e) { }
+  try { const a = new Audio(assetPath("assets/sound/" + name)); a.volume = g.settings.sfx; a.play().catch(() => { }); } catch (e) { }
 }
 
 export function loadSettings(g) {
@@ -10,10 +12,11 @@ export function loadSettings(g) {
 export function saveSettings(g) { try { localStorage.setItem("gsxy_settings", JSON.stringify(g.settings)); } catch (e) { } }
 
 export function playBGM(g, name) {
-  const path = name ? "assets/music/" + name.replace(/\.[^.]+$/, ".mp3") : null;
-  if (!path) return;
-  if (g.bgmSrc === path && g.bgm && !g.bgm.paused) return;
-  g.bgmSrc = path;
+  const key = name ? "assets/music/" + name.replace(/\.[^.]+$/, ".mp3") : null;
+  if (!key) return;
+  if (g.bgmSrc === key && g.bgm && !g.bgm.paused) return;
+  g.bgmSrc = key;
+  const path = assetPath(key);
   try {
     if (g.bgm) g.bgm.pause();
     g.bgm = new Audio(path); g.bgm.loop = true; g.bgm.volume = g.settings.bgm;

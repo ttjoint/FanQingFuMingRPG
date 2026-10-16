@@ -9,7 +9,9 @@
     "honor": 0,
     "attack": 20,
     "defence": 5,
-    "hit": 30
+    "hit": 30,
+    "startSkills": ["长剑"],
+    "startSkill": "长剑"
   },
   "levelUp": {
     "expMul": 1.5,
@@ -30,6 +32,23 @@
     "npcAggro": 260,
     "npcMelee": 46,
     "npcHitBase": 20,
-    "npcHitPerLevel": 60
+    "npcHitPerLevel": 60,
+    "meleeMaxRange": 60
+  },
+  "economy": {
+    "sellRate": 0.5
+  },
+  "inventory": {
+    "packItem": "包裹",
+    "packSize": 25
+  },
+  "move": {
+    "walkSpeed": 90,
+    "runSpeed": 150
+  },
+  "iso": {
+    "originX": 1568,
+    "halfW": 32,
+    "halfH": 16
   }
 }

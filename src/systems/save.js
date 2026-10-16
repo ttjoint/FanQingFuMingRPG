@@ -9,8 +9,14 @@ import { reindex } from "./inventory.js";
 import { closeShop } from "./shop.js";
 import { playSound } from "./audio.js";
 import { normalizeSave, SAVE_VERSION } from "../content/saveSchema.js";
+import { CFG } from "../core/config.js";
+import { diffNpcAgainst, npcFieldsFromSave, configureSerializer } from "../engine/npcSerialize.js";
+import { NPC_SCHEMA } from "../content/npcFields.js";
 import { attachAll } from "../engine/ecs.js";
 import { UNIT_COMPONENTS } from "../runtime/components.js";
+
+// 把游戏具体的 NPC 字段方案注入通用序列化引擎（引擎本身不认识这些字段）。
+configureSerializer(NPC_SCHEMA);
 
 export const SAVE_SLOTS = 6;
 export const saveKey = i => "gsxy_save_" + i;
@@ -44,42 +50,19 @@ export function serializeGame(ctx) {
   };
 }
 
-// 存档中 NPC 的“实例字段 -> 模板派生值”，只存与模板不同的字段（存档差异化）。
-const NPCDIFF = {
-  name: d => d.name,
-  model: d => (d.model || "").replace(/\.pmg$/, ""),
-  portrait: d => d.portrait,
-  script: d => d.script,
-  hp: d => d.hp, hpMax: d => d.hp,
-  atk: d => d.attack, def: d => d.defence,
-  level: d => d.level, exp: d => d.exp || 0,
-  attackable: d => d.attack > 0, aggressive: d => !!d.hostile,
-  ai: d => d.ai,
-  speed: d => d.speed || 45, runSpeed: d => d.runSpeed || 70,
-  drops: d => (d.drops || []).map(x => ({ name: x.name, count: x.count || 1 })),
-  talks: d => d.talks || [],
-  talk: d => (d.talks && d.talks.length) ? d.talks[0].replace(/\\n/g, "\n") : "",
-};
+// 存档中 NPC 的字段差异 / 还原均为纯逻辑（可单测）：见 engine/npcSerialize.js。
+// 字段表集中于 content/npcFields.js，与 makeNPC 共用，避免平行维护。
 function diffNpc(ctx, n) {
   const t = (ctx.assets.npcsData || []).find(x => x.id === n.id);
-  const out = { id: n.id, x: n.x, y: n.y, dir: n.dir, dead: !!n.dead };
-  for (const k in NPCDIFF) {
-    const dv = t ? NPCDIFF[k](t) : undefined;
-    if (JSON.stringify(n[k]) !== JSON.stringify(dv)) out[k] = n[k];
-  }
-  return out;
+  return diffNpcAgainst(n, t);
 }
 
 // 从存档恢复：模板（按 id）+ 存档里覆盖的字段 + 运行时默认。兼容旧的完整快照。
 export function npcFromSave(ctx, s) {
   const t = (ctx.assets.npcsData || []).find(x => x.id === s.id) || {};
-  const pick = (k, dflt) => (s[k] !== undefined ? s[k] : (t && NPCDIFF[k] ? NPCDIFF[k](t) : dflt));
+  const fields = npcFieldsFromSave(t, s);
   return attachAll({
-    id: s.id, name: pick("name", ""), model: pick("model", ""), portrait: pick("portrait", ""), script: pick("script", ""),
-    hp: pick("hp", 0), hpMax: pick("hpMax", 0), atk: pick("atk", 0), def: pick("def", 0), level: pick("level", 0), exp: pick("exp", 0),
-    attackable: pick("attackable", false), aggressive: pick("aggressive", false), ai: pick("ai", 0),
-    speed: pick("speed", 45), runSpeed: pick("runSpeed", 70),
-    drops: pick("drops", []), talks: pick("talks", []), talk: pick("talk", ""),
+    id: s.id, ...fields,
     x: s.x, y: s.y, dir: s.dir, dead: !!s.dead, action: s.dead ? "die" : "stand", frame: 0, ft: 0,
     target: null, path: null, attackCD: 0, aggro: false, dieT: 0, dmgT: 0, wanderT: 1 + Math.random() * 3, talkT: 0, vx: 0, vy: 0,
   }, UNIT_COMPONENTS);
@@ -95,7 +78,7 @@ export function deserializeGame(ctx, d) {
   G.hotbar.length = 9; while (G.hotbar.length < 9) G.hotbar.push(null);
   G.pack = JSON.parse(JSON.stringify(d.pack || []));
   G.equip = JSON.parse(JSON.stringify(d.equip || { Wu: null, Jia: null, Shi1: null, Shi2: null }));
-  G.skills = (d.skills || ["长剑"]).slice(); G.skill = d.skill || G.skills[0] || "长剑";
+  G.skills = (d.skills || (CFG.player.startSkills || [])).slice(); G.skill = d.skill || G.skills[0] || CFG.player.startSkill;
   G.missions = d.missions || {}; G.vars = d.vars || {}; G.notes = d.notes || [];
   G.factions = d.factions || []; G.love = d.love || {}; G.vips = d.vips || {}; G.cursor = null;
   reindex(G);
