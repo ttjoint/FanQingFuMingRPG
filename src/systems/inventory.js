@@ -1,7 +1,31 @@
 // 物品栏 / 装备栏 / 背包 / 升级。运行时状态 g 由调用方注入。
+//
+// 条目模型：{ name, count, inst? }
+//   - inst 为空：旧的堆叠条目（可同名累加）。
+//   - inst 存在：单件实例（count 恒为 1），带独立词缀/强化/耐久，不与其他条目堆叠。
+// name 始终是「模板」主键（itemByName 可解析）。
 import { itemByName } from "../core/registry.js";
 import { CFG } from "../core/config.js";
 import { syncMissions } from "./missions.js";
+import { instanceStats, equipSlotOf, canStack as canStackEntries, normalizeInstance } from "../engine/item.js";
+
+// 条目是否为「有实例的单件」。
+export function isInstanceEntry(e) { return !!(e && e.inst); }
+
+// 可堆叠判定：模板可堆叠、且条目无实例。
+export function entryStackable(g, entry) {
+  if (!entry) return false;
+  if (entry.inst) return false;
+  const it = itemByName(entry.name) || {};
+  return it.stackable !== false;
+}
+
+// 条目的合并键：有实例的条目彼此不可合并（各自独立）。
+function sameKind(a, b) {
+  if (!a || !b) return false;
+  if (a.inst || b.inst) return false;
+  return a.name === b.name;
+}
 
 export function countItem(g, name) {
   let n = 0;
@@ -34,26 +58,53 @@ export function setSlot(g, kind, key, val) {
   else if (kind === "equip") g.equip[key] = val;
 }
 
+// 归一化一个「条目」：兼容旧的纯 name 字符串 / {name,count} / {name,count,inst}。
+export function normalizeEntry(e) {
+  if (!e) return null;
+  if (typeof e === "string") return { name: e, count: 1 };
+  if (!e.name) return null;
+  const o = { name: e.name, count: e.count == null ? 1 : e.count };
+  if (e.inst) { o.inst = normalizeInstance(e.inst); o.count = 1; }
+  return o;
+}
+
 // 能否再容纳 count 个该物品（可叠放物品已有同类堆也算能）
 export function canAddItem(g, name, cnt) {
   const it = itemByName(name) || {};
-  const stackable = it.type === 0 || it.type === 8 || it.type === 4;
-  if (stackable) for (const list of [g.hotbar, g.pack]) for (const s of list) if (s && s.name === name) return true;
+  const stackable = it.stackable !== false;
+  if (stackable) for (const list of [g.hotbar, g.pack]) for (const s of list) if (s && !s.inst && s.name === name) return true;
   return !!freeSlot(g);
 }
 
-export function addItem(g, name, cnt) {
-  if (!name) return;
-  cnt = cnt || 1;
-  if (cnt < 0) { removeItem(g, name, -cnt); return; }
-  const it = itemByName(name) || {};
-  const stackable = it.type === 0 || it.type === 8 || it.type === 4;
+// 加入物品。entryOrName 可为字符串（兼容旧调用）/ {name,count} / {name,count,inst}。
+export function addItem(g, entryOrName, cnt) {
+  const entry = normalizeEntry(typeof entryOrName === "string" ? { name: entryOrName, count: cnt || 1 } : entryOrName);
+  if (!entry) return;
+  if (!entry.inst && entry.count < 0) { removeItem(g, entry.name, -entry.count); return; }
+  const it = itemByName(entry.name) || {};
+  const stackable = !entry.inst && it.stackable !== false;
   if (stackable) {
-    for (const list of [g.hotbar, g.pack]) for (const s of list) if (s && s.name === name) { s.count += cnt; reindex(g); syncMissions(g, name); return; }
+    for (const list of [g.hotbar, g.pack]) for (const s of list) {
+      if (s && !s.inst && s.name === entry.name) {
+        const max = it.maxStack || 99;
+        if (s.count < max) { const take = Math.min(entry.count, max - s.count); s.count += take; entry.count -= take; }
+        if (entry.count <= 0) { reindex(g); syncMissions(g, entry.name); return; }
+      }
+    }
   }
-  const free = freeSlot(g);
-  if (free) { setSlot(g, free.kind, free.i, { name, count: cnt }); reindex(g); syncMissions(g, name); return; }
-  g.tip = "背包已满，丢弃 " + name; g.tipT = 2;
+  // 剩余部分逐格放入（实例按各自条目放置）。
+  while (entry.count > 0) {
+    const free = freeSlot(g);
+    if (!free) { g.tip = "背包已满，丢弃 " + entry.name; g.tipT = 2; break; }
+    if (entry.inst) { setSlot(g, free.kind, free.i, { name: entry.name, count: 1, inst: entry.inst }); entry.count = 0; }
+    else {
+      const max = it.maxStack || 99;
+      const put = Math.min(entry.count, max);
+      setSlot(g, free.kind, free.i, { name: entry.name, count: put });
+      entry.count -= put;
+    }
+    reindex(g); syncMissions(g, entry.name);
+  }
 }
 
 export function removeItem(g, name, cnt) {
@@ -84,51 +135,65 @@ export function addExp(g, n) {
 }
 
 // ---- 装备加成 ----
-export function applyBonus(g, it, sign) {
+// 兼容旧签名：applyBonus(g, it, sign)（it 为模板）；新签名还可传 entry 以计入词缀。
+export function applyBonus(g, it, sign, entry) {
   if (!it) return;
-  g.stats.attack += sign * (it.attack || 0);
-  g.stats.defence += sign * (it.defence || 0);
-  g.stats.hit += sign * (it.attrA || 0);
+  const st = entry ? instanceStats(entry, it, CFG.itemEnhance) : { atk: it.attack || 0, def: it.defence || 0, hit: it.attrA || 0 };
+  g.stats.attack += sign * (st.atk || 0);
+  g.stats.defence += sign * (st.def || 0);
+  g.stats.hit += sign * (st.hit || 0);
 }
 
+// 装备槽位：模板的 equipSlot 优先（weapon/armor/trinket），映射到装备栏的 Wu/Jia/Shi1/Shi2。
 export function equipSlotFor(g, it) {
-  if (it.type === 1) return "Wu";
-  if (it.type === 2) return "Jia";
-  if (it.type === 3) return (g.equip.Shi1 && !g.equip.Shi2) ? "Shi2" : "Shi1";
+  const slot = equipSlotOf(it);
+  if (slot === "weapon" || slot === "Wu") return "Wu";
+  if (slot === "armor" || slot === "Jia") return "Jia";
+  if (slot === "trinket" || slot === "Shi1" || slot === "Shi2")
+    return (g.equip.Shi1 && !g.equip.Shi2) ? "Shi2" : "Shi1";
   return null;
 }
 
 export function equipFrom(g, entry, kind, key) {
   const it = itemByName(entry.name), target = equipSlotFor(g, it);
   if (!target) { g.tip = "无法装备"; g.tipT = 2; return; }
-  entry.count--; if (entry.count <= 0) setSlot(g, kind, key, null);
+  // 取出一件（实例条目整件取出；堆叠条目减一）。
+  const moved = entry.inst ? { name: entry.name, count: 1, inst: entry.inst } : { name: entry.name, count: 1 };
+  entry.count -= 1; if (entry.count <= 0) setSlot(g, kind, key, null);
   const old = g.equip[target];
   if (old) { const f = freeSlot(g); if (f) setSlot(g, f.kind, f.i, old); }
-  g.equip[target] = { name: entry.name, count: 1 };
-  applyBonus(g, it, +1); reindex(g);
+  g.equip[target] = moved;
+  applyBonus(g, it, +1, moved); reindex(g);
   g.tip = "装备 " + entry.name; g.tipT = 2;
 }
 
 export function useEntry(g, entry, kind, key) {
   if (!entry) return;
   const it = itemByName(entry.name); if (!it) return;
-  if (it.type === 0) {
-    if (it.hp) g.stats.hp = Math.min(g.stats.hpMax, g.stats.hp + it.hp);
-    if (it.mp) g.stats.mp = Math.min(g.stats.mpMax, g.stats.mp + it.mp);
+  const kindTag = it.kind || (it.type === 1 ? "weapon" : it.type === 2 ? "armor" : it.type === 3 ? "trinket" : it.type === 0 ? "consumable" : it.type === 4 ? "scroll" : it.type === 7 ? "pack" : "misc");
+  if (kindTag === "consumable") {
+    // 使用效果数据化：优先 it.use，其次回退 to 旧 hp/mp 字段。
+    const u = it.use || {};
+    const hp = u.hp != null ? u.hp : (it.hp || 0);
+    const mp = u.mp != null ? u.mp : (it.mp || 0);
+    if (hp) g.stats.hp = Math.min(g.stats.hpMax, g.stats.hp + hp);
+    if (mp) g.stats.mp = Math.min(g.stats.mpMax, g.stats.mp + mp);
     entry.count--; if (entry.count <= 0) setSlot(g, kind, key, null);
     reindex(g); syncMissions(g, entry.name);
     g.tip = "使用 " + entry.name; g.tipT = 2;
-  } else if (it.type === 1 || it.type === 2 || it.type === 3) {
+  } else if (kindTag === "weapon" || kindTag === "armor" || kindTag === "trinket") {
     if (kind === "equip") {
-      applyBonus(g, it, -1); setSlot(g, kind, key, null);
-      const f = freeSlot(g); if (f) setSlot(g, f.kind, f.i, { name: entry.name, count: 1 });
+      applyBonus(g, it, -1, entry); setSlot(g, kind, key, null);
+      const f = freeSlot(g); if (f) setSlot(g, f.kind, f.i, entry);
       reindex(g); g.tip = "卸下 " + entry.name; g.tipT = 2;
     } else equipFrom(g, entry, kind, key);
-  } else if (it.type === 4) {
-    if (!g.skills.includes(entry.name)) { g.skills.push(entry.name); g.skill = entry.name; }
+  } else if (kindTag === "scroll") {
+    // 技能书：learn 为目标技能名（缺省用物品名，兼容旧数据）。
+    const learn = (it.use && it.use.learn) || entry.name;
+    if (!g.skills.includes(learn)) { g.skills.push(learn); g.skill = learn; }
     entry.count--; if (entry.count <= 0) setSlot(g, kind, key, null);
-    reindex(g); g.tip = "学会 " + entry.name; g.tipT = 2;
-  } else if (it.type === 7) {
+    reindex(g); g.tip = "学会 " + learn; g.tipT = 2;
+  } else if (kindTag === "pack") {
     g.packOpen = !g.packOpen; g.pack = g.pack.length ? g.pack : new Array((CFG.inventory && CFG.inventory.packSize) || 25).fill(null);
   } else {
     g.tip = entry.name + " 无法使用"; g.tipT = 2;
@@ -136,3 +201,6 @@ export function useEntry(g, entry, kind, key) {
 }
 
 export function useItemSlot(g, i) { const s = g.hotbar[i]; if (s) useEntry(g, s, "hotbar", i); }
+
+// 供外部（掉落 / 商店）判断两个条目是否可堆叠合并。
+export { canStackEntries };

@@ -177,7 +177,9 @@ export function renderForm(host, schema, obj, onChange) {
       };
     } else if (f.type === "select") {
       ctl = h("select");
-      for (const o of f.options) {
+      // f.fx：选项来自内容特效表（effects.json）；由调用方通过 f.options 注入，此处只保证首项为空。
+      const options = f.options;
+      for (const o of (options || [])) {
         const value = Array.isArray(o) ? o[0] : o.v, label = Array.isArray(o) ? o[1] : o.label;
         ctl.append(h("option", { value }, label));
       }

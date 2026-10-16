@@ -7,6 +7,39 @@
 import { tickBuffs, dotPerSecond, hotPerSecond } from "../engine/buff.js";
 import { tickCooldowns } from "../engine/targeting.js";
 import { applyDamage } from "./combat.js";
+import { spawnFx } from "./effects.js";
+
+// 为循环型 buff 光环特效维护实例：每个单位每个带 fx.aura 的 buff 一个循环实例。
+// 单位身上的光环用 anchor="unit" + follow=单位（每帧渲染时实时读取位置）。
+function syncBuffAuras(ctx, unit) {
+  if (!unit._fxAuras) unit._fxAuras = {};
+  const live = {};
+  for (const b of unit.buffs || []) {
+    const def = b.def;
+    const auraId = def && def.fx && def.fx.aura;
+    if (!auraId) continue;
+    const key = def.id;
+    live[key] = true;
+    if (!unit._fxAuras[key]) unit._fxAuras[key] = spawnFx(ctx, auraId, { anchor: "unit", follow: unit, loop: true });
+  }
+  // 移除已失效光环实例。
+  for (const key in unit._fxAuras) {
+    if (!live[key]) {
+      const inst = unit._fxAuras[key];
+      const list = ctx.state.fx;
+      const i = list ? list.indexOf(inst) : -1;
+      if (i >= 0) list.splice(i, 1);
+      delete unit._fxAuras[key];
+    }
+  }
+}
+
+// 施加/到期特效（一次性）。
+export function playBuffFx(ctx, unit, buffDef, phase) {
+  const fx = buffDef && buffDef.fx;
+  const id = fx && (phase === "expire" ? fx.onExpire : fx.onApply);
+  if (id) spawnFx(ctx, id, { anchor: "unit", follow: unit, loop: false });
+}
 
 // 累加固定时间步的 DoT/HoT（浮点误差累积到 1 点以上才结算，避免每帧小数扣血）。
 function accumulate(unit, dt) {
@@ -44,6 +77,7 @@ export function buffSystem(ctx, dt) {
     if (!u) continue;
     // 技能冷却每帧推进（与 buff 无关，故放在 buff 早退之前）。
     tickCooldowns(u, dt);
+    if (!u.dead && Array.isArray(u.buffs) && u.buffs.length) syncBuffAuras(ctx, u);
     if (!Array.isArray(u.buffs) || !u.buffs.length) continue;
     if (u.dead) { u.buffs = []; u._dotAcc = 0; u._hotAcc = 0; continue; }
     accumulate(u, dt);

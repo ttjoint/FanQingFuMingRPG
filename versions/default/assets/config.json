@@ -42,6 +42,23 @@
     "packItem": "包裹",
     "packSize": 25
   },
+  "items": {
+    "dropTtl": 0,
+    "dropScatter": 22,
+    "pickupRadius": 20,
+    "pickupDelay": 0,
+    "stackRadius": 18
+  },
+  "fx": {
+    "uiRings": true,
+    "moveMarker": true,
+    "itemHighlight": true,
+    "ring": {
+      "target": "#e04040",
+      "interact": "#4080ff",
+      "move": "#ffe08a"
+    }
+  },
   "move": {
     "walkSpeed": 90,
     "runSpeed": 150

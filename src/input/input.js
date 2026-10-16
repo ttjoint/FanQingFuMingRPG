@@ -3,7 +3,8 @@ import { G } from "../core/state.js";
 import { VW, cv } from "../core/constants.js";
 import { screenPos, worldToCell, walkable, cellCenter } from "../core/utils.js";
 import { nearestWalkable, nearestWalkablePixel, findPathPoints } from "../world/pathfinding.js";
-import { groundAt, dropGround } from "../world/ground.js";
+import { groundAt, dropGround } from "../systems/ground.js";
+import { setMoveMarker } from "../systems/indicators.js";
 import { canAddItem, useItemSlot, reindex } from "../systems/inventory.js";
 import { skillByName } from "../core/registry.js";
 import { castSelf, playerCanAttack } from "../systems/combat.js";
@@ -91,6 +92,7 @@ export function handleLeft(wx, wy) {
   if (Math.hypot(exact.x - G.player.x, exact.y - G.player.y) < 24) { G.player.path = null; G.player.target = null; return; }   // 已很近→原地不动，防抖动
   G.player.target = null;
   setPlayerRun(G, true);   // 左键=跑（但精力为 0 时自动降为走路）
+  setMoveMarker(G, exact.x, exact.y);   // 点击地面：落点光圈动画
   const cc = worldToCell(G.player.x, G.player.y);
   const pts = findPathPoints(getRuntime(), cc.row, cc.col, cell.row, cell.col, { avoidUnits: true, mover: G.player }, { x: G.player.x, y: G.player.y }, exact);
   if (pts && pts.length) G.player.path = pts;
@@ -181,7 +183,7 @@ export function addInput() {
       const p = (G.map && walkable(c.row, c.col)) ? c : nearestWalkable(getRuntime(), c.row, c.col);
       if (p) {
         const pos = cellCenter(p.row, p.col);
-        dropGround(G, G.cursor.name, pos.x, pos.y, G.cursor.count || 1);
+        dropGround(G, G.cursor, pos.x, pos.y, { owner: G.player, from: "player" });
         G.cursor = null; reindex(G); playSound(G, "drop_item.wav");
       }
       return;

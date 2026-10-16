@@ -9,6 +9,10 @@ import { drawTip, drawPanels, drawPack, drawSavePanel, drawSettingsPanel } from 
 import { drawShop } from "./shop-ui.js";
 import { drawTooltip } from "./tooltip.js";
 import { drawScene } from "./scene-ui.js";
+import { drawEffect, drawRing, drawMoveMarker, drawGroundItemHighlight, drawIndicatorRings, drawMoveMarkerAt, overEffects, underEffects, topEffects } from "./effects.js";
+import { effectPos } from "../engine/effect.js";
+import { computeIndicators } from "../systems/indicators.js";
+import { getRuntime } from "../runtime/context.js";
 
 export function spriteFor(e) {
   const ch = A.chars[e.model]; if (!ch) return null;
@@ -68,6 +72,13 @@ export function render() {
   const camX = Math.round(cam.x), camY = Math.round(cam.y);
   ctx.drawImage(m.terrain, m.minX - camX, m.minY - camY);
 
+  // 指示数据（红/蓝圈、落点、物品高亮）——每帧重算，渲染层只读。
+  computeIndicators(getRuntime());
+  // 1) 底层特效（under）：脚底圈、地面标记 —— 永远在所有单位之下。
+  drawIndicatorRings(camX, camY);
+  drawMoveMarkerAt(camX, camY);
+  for (const inst of underEffects(G)) drawEffect(inst, camX, camY);
+
   // 收集可绘制对象（含玩家/NPC/掉落物），按 sortY 排序（对象已拆成逐格块/覆盖层块）。
   const list = [];
   for (const o of m.objects) {
@@ -78,6 +89,11 @@ export function render() {
   for (const n of G.npcs) list.push({ sortY: entitySortY(n), npc: n });
   for (const g of G.ground) list.push({ sortY: g.y, ground: g });
   if (G.player) list.push({ sortY: entitySortY(G.player), ent: G.player });
+  // 中层特效（over）：与单位一同按底边 y 参与深度排序。
+  for (const inst of overEffects(G)) {
+    const p = effectPos(inst);
+    list.push({ sortY: p.y, fxInst: inst });
+  }
   list.sort((a, b) => a.sortY - b.sortY);
   for (const it of list) {
     if (it.sprite) {
@@ -110,7 +126,8 @@ export function render() {
     }
     else if (it.ent) drawEntity(it.ent, camX, camY);
     else if (it.npc) drawEntity(it.npc, camX, camY);
-    else if (it.ground) drawGroundItem(it.ground, camX, camY);
+    else if (it.fxInst) drawEffect(it.fxInst, camX, camY);
+    else if (it.ground) { drawGroundItem(it.ground, camX, camY); if (G.uiFx && G.uiFx.item === it.ground) drawGroundItemHighlight(it.ground, camX, camY); }
   }
   // 技能特效（盖在角色之上）
   for (const e of G.effects) {
@@ -119,6 +136,8 @@ export function render() {
   }
   // 弹道（在角色与特效之上，保证可见）
   drawProjectiles(camX, camY);
+  // 2) 顶层特效（top）：头顶 buff/称号 —— 永远在最顶层。
+  for (const inst of topEffects(G)) drawEffect(inst, camX, camY);
   drawHUD(); drawDialog(); drawPanels(); drawPack(); drawShop(); drawSavePanel(); drawSettingsPanel(); drawTip(); drawCursorItem(); drawTooltip();
   if (typeof window !== "undefined" && window.__POLY_DEBUG__) {
     ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(6, 26, 236, 18);
@@ -213,6 +232,17 @@ export function drawGroundItem(g, camX, camY) {
   const im = it && it.icon ? getImg("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png")) : null;
   const bob = Math.sin(G.time * 3 + g.x) * 1.5;
   const x = Math.round(g.x - camX), y = Math.round(g.y - camY + bob);
+  // 稀有度光柱：实例/稀有物品在地面时更醒目
+  const rc = it && it.rarity && it.rarity !== "common" ? it.rarity : null;
+  if (rc) {
+    ctx.save(); ctx.globalCompositeOperation = "lighter";
+    const grd = ctx.createLinearGradient(x, g.y - camY - 34, x, g.y - camY + 4);
+    const col = rc === "unique" ? "255,138,61" : rc === "rare" ? "255,215,94" : "111,179,255";
+    grd.addColorStop(0, "rgba(" + col + ",0)");
+    grd.addColorStop(1, "rgba(" + col + ",0.35)");
+    ctx.fillStyle = grd; ctx.fillRect(x - 10, g.y - camY - 34, 20, 38);
+    ctx.restore();
+  }
   ctx.fillStyle = "rgba(0,0,0,0.35)";
   ctx.beginPath(); ctx.ellipse(x, g.y - camY + 3, 12, 4, 0, 0, Math.PI * 2); ctx.fill();
   if (im) ctx.drawImage(im, x - 12, y - 24, 24, 24);

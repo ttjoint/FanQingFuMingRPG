@@ -2,10 +2,11 @@
 import { parseGSP, argVal, argStr, argVar, setVar, evalExpr } from "../engine/script/gsp.js";
 import { loadMap, setPlayer } from "../world/map.js";
 import { spawnByName } from "../world/npc.js";
-import { addItem, removeItem, addExp } from "../systems/inventory.js";
+import { addItem, removeItem, addExp, countItem } from "../systems/inventory.js";
 import { syncMissions } from "../systems/missions.js";
 import { playBGM } from "../systems/audio.js";
 import { applyBuff } from "../engine/buff.js";
+import { npcPickup, npcDrop, dropGround, groundAt } from "../systems/ground.js";
 
 // 脚本生成器遇到 end/exit 时抛出的哨兵。
 export const EXIT = { exit: true };
@@ -92,6 +93,51 @@ export function* execCall(ctx, name, args) {
     // 动态修改某个实例的阵营（实例阵营可变；关系表内置不可改）。
     // SetFaction(name, factionId)：按名称找 NPC（兼容脚本旧习惯），改其 faction。
     case "SetFaction": { const n = G.npcs.find(x => x.name === s(0)); if (n) n.faction = s(1); return; }
+
+    // ---- NPC 背包：拾取 / 丢弃（供剧本驱动，AI 自动拾取暂不实现）----
+    // NPCPickItem(npcName, itemName?)：不传物品名则拾取脚下最近的掉落物。
+    case "NPCPickItem": {
+      const n = G.npcs.find(x => x.name === s(0)); if (!n) return;
+      const nm = s(1);
+      let gr = null;
+      for (let i = G.ground.length - 1; i >= 0; i--) {
+        const c = G.ground[i];
+        if (nm && c.name !== nm) continue;
+        if (Math.hypot(c.x - n.x, c.y - n.y) > 48) continue;
+        gr = c; break;
+      }
+      npcPickup(ctx, n, gr);
+      return;
+    }
+    // NPCDropItem(npcName, bagIndex?)：不传序号则丢弃背包中最后一格物品。
+    case "NPCDropItem": {
+      const n = G.npcs.find(x => x.name === s(0)); if (!n) return;
+      const bag = n.bag || [];
+      let idx = v(1);
+      if (idx == null || idx < 0 || !bag[idx]) { idx = -1; for (let i = bag.length - 1; i >= 0; i--) if (bag[i]) { idx = i; break; } }
+      if (idx >= 0) npcDrop(ctx, n, idx);
+      return;
+    }
+    // NPCDropAt(npcName, itemName, count?)：直接把物品丢到 NPC 脚下（不经背包）。
+    case "NPCDropAt": {
+      const n = G.npcs.find(x => x.name === s(0)); if (!n) return;
+      dropGround(G, { name: s(1), count: v(2) || 1 }, n.x, n.y, { owner: n, from: "npc" });
+      return;
+    }
+    // NPCGiveItem(npcName, itemName, count?)：NPC 交给玩家（进玩家背包）。
+    case "NPCGiveItem": {
+      addItem(G, s(1), v(2) || 1);
+      return;
+    }
+    // PlayerDropItem(itemName, count?)：玩家丢弃物品到脚下。
+    case "PlayerDropItem": {
+      const p = G.player; if (!p) return;
+      const nm = s(0), ct = v(1) || 1;
+      if (countItem(G, nm) < ct) return;
+      removeItem(G, nm, ct);
+      dropGround(G, { name: nm, count: ct }, p.x, p.y, { owner: p, from: "player" });
+      return;
+    }
     // 给单位施加 Buff。SetBuff(target, buffId, [stacks])；target="player" 或 NPC 名称。
     case "SetBuff": {
       const def = ctx.assets.buffTable && ctx.assets.buffTable.byId.get(s(1));

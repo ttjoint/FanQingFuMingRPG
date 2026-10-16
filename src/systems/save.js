@@ -72,7 +72,7 @@ export function deserializeGame(ctx, d) {
   const G = ctx.state;
   d = normalizeSave(d);
   closeShop(ctx);
-  G.dialog = null; G.script = null; G.panel = null; G.packOpen = false; G.cursor = null; G.effects = []; G.hold = null;
+  G.dialog = null; G.script = null; G.panel = null; G.packOpen = false; G.cursor = null; G.effects = []; G.fx = []; G.uiFx = null; G.moveMarker = null; G.hold = null;
   G.stats = { ...d.stats };
   G.hotbar = JSON.parse(JSON.stringify(d.hotbar || new Array(9).fill(null)));
   G.hotbar.length = 9; while (G.hotbar.length < 9) G.hotbar.push(null);

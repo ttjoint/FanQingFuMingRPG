@@ -132,7 +132,7 @@ function toast(msg) {
 }
 
 // ---------- 外壳 ----------
-const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["ais", "AI"], ["buffs", "Buff"], ["items", "物品"], ["skills", "技能"], ["config", "升级数值"], ["game", "标题结局"], ["assets", "图片素材"]];
+const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["ais", "AI"], ["buffs", "Buff"], ["items", "物品"], ["skills", "技能"], ["effects", "特效"], ["config", "升级数值"], ["game", "标题结局"], ["assets", "图片素材"]];
 let navEl;
 
 function buildShell() {
@@ -165,7 +165,7 @@ function selectTab(k) {
   curTab = k; renderNav();
   clear(mainEl); clear(sideEl);
   if (k !== "maps" && k !== "decor") sideEl.style.display = "none"; else sideEl.style.display = "";
-  ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, ais: tabAis, buffs: tabBuffs, items: tabItems, skills: tabSkills, config: tabConfig, game: tabGame, assets: tabAssets })[k]();
+  ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, ais: tabAis, buffs: tabBuffs, items: tabItems, skills: tabSkills, effects: tabEffects, config: tabConfig, game: tabGame, assets: tabAssets })[k]();
 }
 
 // ---------- 地图 ----------
@@ -354,6 +354,16 @@ function tabAis() {
 }
 
 // ---------- 通用：列表编辑 ----------
+// 特效字段的候选：内容特效表（effects.json）的 id，首项为“（无）”。
+function fxOptions() {
+  return [["", "（无）"]].concat((ED.content.effects || []).map(e => [e.id, e.id + (e.name && e.name !== e.id ? " " + e.name : "")]));
+}
+// 把 schema 中 fx:true 的字段换成真实 options（需在编辑时延迟构建）。
+function withFx(schema) {
+  // fx.* 字段：候选项来自内容特效表（effects.json）。用键名前缀识别，避免额外标记字段。
+  return schema.map(f => (f.k && f.k.indexOf("fx.") === 0 ? { ...f, options: fxOptions() } : f));
+}
+
 function listTab(title, arr, schema, columns, makeNew) {
   mainEl.append(h("h3", null, title));
   const host = h("div");
@@ -400,6 +410,13 @@ const ITEM_SCHEMA = [
   { k: "defence", label: "防御+", type: "number" }, { k: "attrA", label: "命中+", type: "number" },
   { k: "attrB", label: "属性B", type: "number" }, { k: "attrC", label: "属性C", type: "number" },
   { k: "icon", label: "图标", type: "text", img: it => it.icon ? assetSrc("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png")) : null }, { k: "desc", label: "说明", type: "textarea", rows: 2 },
+  { k: "rarity", label: "稀有度", type: "select", options: [["common", "普通"], ["magic", "精良"], ["rare", "稀有"], ["unique", "传说"], ["quest", "任务"]] },
+  { k: "stackable", label: "可堆叠", type: "checkbox" },
+  { k: "maxStack", label: "最大堆叠", type: "number", def: 0 },
+  { k: "socketCount", label: "镶嵌孔数", type: "number", def: 0 },
+  { k: "maxDurability", label: "最大耐久", type: "number", def: 0 },
+  { k: "fx.aura", label: "特效·装备光环", type: "select" },
+  { k: "fx.use", label: "特效·使用时", type: "select" },
 ];
 const SKILL_SCHEMA = [
   { k: "name", label: "名称", type: "text" },
@@ -431,6 +448,8 @@ function skillSchema() {
     { k: "onHit.heal.to", label: "命中·治疗对象", type: "select", options: [["self", "自己"], ["target", "目标"]] },
     { k: "onHit.knockback.dist", label: "命中·击退距离", type: "number", def: 0 },
     { k: "onHit.buffs", label: "命中效果", type: "buffeffects", options: buffIds },
+    { k: "fx.hit", label: "特效·命中", type: "select" },
+    { k: "fx.cast", label: "特效·施法", type: "select" },
   ]);
 }
 
@@ -451,8 +470,36 @@ const BUFF_SCHEMA = [
   { k: "dot.dps", label: "每层·每秒伤害", type: "number", def: 0 },
   { k: "hot.hps", label: "每层·每秒治疗", type: "number", def: 0 },
   { k: "tags", label: "标签(每行一个)", type: "lines", rows: 2 },
+  { k: "fx.aura", label: "特效·光环(循环)", type: "select" },
+  { k: "fx.onApply", label: "特效·施加时", type: "select" },
+  { k: "fx.onExpire", label: "特效·到期时", type: "select" },
   { k: "desc", label: "说明", type: "textarea", rows: 2 },
 ];
+
+const EFFECT_SCHEMA = [
+  { k: "id", label: "id", type: "text" },
+  { k: "name", label: "名称", type: "text" },
+  { k: "layer", label: "层级(叠放次序)", type: "select", options: [["under", "地面（恒低于单位）"], ["over", "角色层（按 y 排序）"], ["top", "顶层（头顶，恒在上）"]] },
+  { k: "anchor", label: "锚点", type: "select", options: [["world", "世界坐标"], ["unit", "单位"], ["item", "物品"]] },
+  { k: "frames", label: "帧图(每行一个)", type: "lines", rows: 4, img: e => (e.frames && e.frames[0]) ? assetSrc("assets/fx/" + e.frames[0].replace(/\.bmp$/, ".png")) : null },
+  { k: "fps", label: "帧率(帧/秒)", type: "number", def: 12 },
+  { k: "loop", label: "循环播放", type: "checkbox" },
+  { k: "holdFirst", label: "首帧停留(秒)", type: "number", def: 0 },
+  { k: "holdLast", label: "尾帧停留(秒)", type: "number", def: 0 },
+  { k: "life", label: "存在时长(秒,0=不限)", type: "number", def: 0 },
+  { k: "ox", label: "横向偏移", type: "number", def: 0 },
+  { k: "oy", label: "纵向偏移", type: "number", def: 0 },
+  { k: "scale", label: "缩放", type: "number", step: 0.1, def: 1 },
+  { k: "texture", label: "贴图(预留,留空=程序化)", type: "text" },
+  { k: "color", label: "颜色(程序化)", type: "text" },
+  { k: "radius", label: "半径(程序化)", type: "number", def: 18 },
+];
+function tabEffects() {
+  const list = ED.content.effects || (ED.content.effects = []);
+  listTab("特效（" + list.length + "）", list, EFFECT_SCHEMA,
+    [{ k: "id", label: "id" }, { k: "layer", label: "层级" }, { k: "anchor", label: "锚点" }, { k: "loop", label: "循环" }],
+    () => ({ id: "fx_" + (list.length + 1), name: "新特效", layer: "over", anchor: "world", frames: [], fps: 12, loop: false, holdFirst: 0, holdLast: 0, life: 0, ox: 0, oy: 0, scale: 1, color: "", radius: 18 }));
+}
 
 function tabBuffs() {
   const list = ED.buffs || (ED.buffs = ED.content.buffs || (ED.content.buffs = []));
@@ -481,7 +528,7 @@ function tabBuffs() {
       host.append(h("h3", null, "编辑：" + (list[sel].name || list[sel].id || ("#" + sel))));
       const form = h("div", { class: "ed-grid" });
       host.append(form);
-      renderForm(form, BUFF_SCHEMA, list[sel], () => mark());
+      renderForm(form, withFx(BUFF_SCHEMA), list[sel], () => mark());
     }
   };
   redraw();
@@ -493,12 +540,12 @@ function tabNpcs() {
     () => newNpcTemplate());
 }
 function tabItems() {
-  listTab("物品（" + ED.items.length + "）", ED.items, ITEM_SCHEMA,
+  listTab("物品（" + ED.items.length + "）", ED.items, withFx(ITEM_SCHEMA),
     [{ k: "name", label: "名称" }, { k: "type", label: "类型" }, { k: "price", label: "价格" }, { k: "attack", label: "攻击" }, { k: "defence", label: "防御" }],
     () => ({ name: "新物品", type: 0, subtype: 0, price: 0, reqLevel: 0, hp: 0, mp: 0, attack: 0, defence: 0, attrA: 0, attrB: 0, attrC: 0, icon: "", desc: "" }));
 }
 function tabSkills() {
-  listTab("技能（" + ED.skills.length + "）", ED.skills, skillSchema(),
+  listTab("技能（" + ED.skills.length + "）", ED.skills, withFx(skillSchema()),
     [{ k: "name", label: "名称" }, { k: "type", label: "类型" }, { k: "power", label: "威力" }, { k: "mp", label: "耗精力" }, { k: "range", label: "射程" }],
     () => ({ name: "新技能", desc: "", type: 1, range: 40, mp: 0, reqLevel: 1, power: 10, sound: "", icon: "", frames: [] }));
 }

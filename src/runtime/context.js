@@ -12,6 +12,7 @@ import { toLegacyMap } from "../content/mapDoc.js";
 import { buildFactionTable } from "../engine/faction.js";
 import { buildAiTable } from "../engine/ai.js";
 import { buildBuffTable } from "../engine/buff.js";
+import { buildEffectTable } from "../engine/effect.js";
 
 // 初始运行时状态（原先在 core/state.js）。
 function createGameState() {
@@ -26,6 +27,7 @@ function createGameState() {
     dialog: null, tip: null, tipT: 0, script: null, gameOver: false, deathT: 0,
     currentMap: null, map: null, cam: { x: 0, y: 0 }, time: 0,
     panel: null, effects: [], projectiles: [], ground: [], triggerCD: 0, lastCell: null, hold: null, holdCell: null, holdTarget: null,
+    fx: [], uiFx: null, moveMarker: null,
     scene: "boot", flashStep: 0, flashT: 0, resultTitle: null, pendingEnd: false,
     mouse: { x: 0, y: 0, sx: 0, sy: 0, wx: 0, wy: 0 },
   };
@@ -65,6 +67,8 @@ export function createRuntime() {
       A.aiTable = buildAiTable(A.ais, { aggroRange: CFG.combat && CFG.combat.npcAggro });  // Map<id, plan>，运行时只读
       A.buffs = legacy.buffs || [];                                        // Buff 配置表（内容内置）
       A.buffTable = buildBuffTable(A.buffs);                               // { byId, list }，运行时只读
+      A.effects = legacy.effects || [];                                    // 特效定义表（内容内置）
+      A.effectTable = buildEffectTable(A.effects);                         // { byId, get, list }，运行时只读
       A.decorTemplates = legacy.decorTemplates || {};   // 跨地图共享的装饰物模板（手画地基线/单一深度）
 
       A.mapsManifest = content.mapsManifest;

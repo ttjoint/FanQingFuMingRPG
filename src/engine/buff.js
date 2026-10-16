@@ -44,6 +44,13 @@ export function normalizeBuff(b) {
   o.dot = b.dot && typeof b.dot === "object" ? { dps: n(b.dot.dps, 0) } : null;
   o.hot = b.hot && typeof b.hot === "object" ? { hps: n(b.hot.hps, 0) } : null;
   o.tags = Array.isArray(b.tags) ? b.tags.map(String) : [];
+  // 特效引用（内容数据）：{ aura, onApply, onExpire } —— 各为特效定义 id。
+  // 引擎只保存引用，具体播放与层级由运行时/渲染层处理。
+  if (b.fx && typeof b.fx === "object") {
+    const fx = {};
+    for (const k of ["aura", "onApply", "onExpire"]) if (b.fx[k]) fx[k] = s(b.fx[k]);
+    o.fx = Object.keys(fx).length ? fx : null;
+  } else o.fx = null;
   return o;
 }
 

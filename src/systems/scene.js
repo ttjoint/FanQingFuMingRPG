@@ -32,7 +32,7 @@ export function resetNewGame(ctx) {
   G.hotbar = new Array(9).fill(null); G.pack = []; G.packOpen = false;
   G.equip = { Wu: null, Jia: null, Shi1: null, Shi2: null }; G.cursor = null; G.shop = null;
   G.missions = {}; G.vars = {}; G.notes = []; G.factions = []; G.love = {}; G.vips = {}; G.inventory = {};
-  G.ground = []; G.effects = []; G.gameOver = false; G.currentMap = null; G.map = null;
+  G.ground = []; G.effects = []; G.fx = []; G.uiFx = null; G.moveMarker = null; G.gameOver = false; G.currentMap = null; G.map = null;
   G.player = null;   // 丢弃旧主角对象，避免上一次阵亡的 dead/动画状态被带进新游戏
   G.tip = null; G.panel = null; G.dialog = null; G.script = null; G.triggerCD = 0; G.lastCell = null;
   G.deathT = 0;

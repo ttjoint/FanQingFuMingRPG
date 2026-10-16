@@ -7,7 +7,10 @@ import { setAnim, updateMove, updateAnim, unitAhead, canRun, walkSpeed, setPlaye
 import { tickMp } from "../engine/stamina.js";
 import { playerAttackTarget } from "./combat.js";
 import { npcAI } from "../world/npc.js";
-import { pickupGround } from "../world/ground.js";
+import { pickupGround } from "../systems/ground.js";
+import { updateGround } from "../systems/ground.js";
+import { fxSystem } from "./effects.js";
+import { tickIndicators } from "./indicators.js";
 import { checkTriggers } from "../world/triggers.js";
 import { separateUnits } from "./separation.js";
 import { projectileSystem } from "./projectiles.js";
@@ -114,6 +117,12 @@ export function effectSystem(ctx, dt) {
   g.effects = g.effects.filter(e => e.i < e.frames.length);
 }
 
+// 地面掉落物：存在时长到期移除。
+export function groundSystem(ctx, dt) { updateGround(ctx.state, dt); }
+
+// 指示：落点光圈计时（红/蓝圈与高亮在渲染时每帧重算）。
+export function indicatorSystem(ctx, dt) { tickIndicators(ctx.state, dt); }
+
 // 相机跟随（带边界钳制）。
 export function cameraSystem(ctx, dt) {
   const g = ctx.state, p = g.player; if (!p) return;
@@ -128,4 +137,4 @@ export function cameraSystem(ctx, dt) {
 export function separationSystem(ctx, dt) { separateUnits(ctx.state, dt); }
 
 // 每帧玩法系统的顺序。
-export const gameplaySystems = [playerSystem, npcSystem, separationSystem, triggerSystem, projectileSystem, buffSystem, effectSystem, cameraSystem];
+export const gameplaySystems = [playerSystem, npcSystem, separationSystem, triggerSystem, projectileSystem, buffSystem, fxSystem, groundSystem, indicatorSystem, effectSystem, cameraSystem];

@@ -4,18 +4,32 @@ import { VW, VH, ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { itemByName } from "../core/registry.js";
 import { slotAt, displayEntry } from "../core/layout.js";
+import { displayName, instanceStats, rarityColor } from "../engine/item.js";
 
-export function itemInfoLines(it) {
-  const L = [it.name];
+export function itemInfoLines(it, entry) {
+  const st = entry && entry.inst ? instanceStats(entry, it) : null;
+  const L = [entry && entry.inst ? displayName(entry, it) : it.name];
+  if (it.rarity && it.rarity !== "common") L.push("稀有度：" + rarityLabel(it.rarity));
   if (it.price > 0) L.push("价格：" + it.price + " 文");
   if (it.reqLevel > 0) L.push("等级限制：" + it.reqLevel);
-  if (it.hp) L.push("生命 +" + it.hp);
-  if (it.mp) L.push("精力 +" + it.mp);
-  if (it.attack) L.push("攻击 +" + it.attack);
-  if (it.defence) L.push("防御 +" + it.defence);
-  if (it.attrA) L.push("命中 +" + it.attrA);
+  const hp = st ? st.hp : it.hp, mp = st ? st.mp : it.mp;
+  const atk = st ? st.atk : it.attack, def = st ? st.def : it.defence, hit = st ? st.hit : it.attrA;
+  if (hp) L.push("生命 +" + hp);
+  if (mp) L.push("精力 +" + mp);
+  if (atk) L.push("攻击 +" + atk);
+  if (def) L.push("防御 +" + def);
+  if (hit) L.push("命中 +" + hit);
+  if (entry && entry.inst) {
+    for (const af of entry.inst.affixes || []) if (af && af.name) L.push("· " + af.name);
+    if (entry.inst.enhance) L.push("强化 +" + entry.inst.enhance);
+    if (it.maxDurability) L.push("耐久 " + (entry.inst.durability != null ? entry.inst.durability : it.maxDurability) + "/" + it.maxDurability);
+  }
   if (it.desc) L.push(it.desc);
   return L;
+}
+
+export function rarityLabel(r) {
+  return ({ common: "普通", magic: "精良", rare: "稀有", unique: "传说", quest: "任务" })[r] || r;
 }
 
 export function drawTooltip() {
@@ -25,7 +39,7 @@ export function drawTooltip() {
   if (!entry) return;
   const it = itemByName(entry.name);
   if (!it) return;
-  const lines = itemInfoLines(it);
+  const lines = itemInfoLines(it, entry);
   ctx.font = "12px 'Microsoft YaHei',SimHei,sans-serif";
   const MAXW = 210;   // 过长的描述/名称截断，避免提示框超出屏幕
   for (let i = 0; i < lines.length; i++) {
@@ -47,8 +61,9 @@ export function drawTooltip() {
   const im = it.icon ? getImg("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png")) : null;
   if (im) ctx.drawImage(im, x + pad, y + pad + 2, 28, 28);
   const tx = x + pad + (im ? 34 : 0);
+  const nameColor = it.rarity && it.rarity !== "common" ? rarityColor(it.rarity) : "#ffe9a8";
   lines.forEach((l, i) => {
-    ctx.fillStyle = i === 0 ? "#ffe9a8" : (i === 1 && it.price > 0 ? "#9fd0ff" : "#d8d0b8");
+    ctx.fillStyle = i === 0 ? nameColor : (l.startsWith("· ") ? "#8fe08f" : (i === 1 && it.price > 0 ? "#9fd0ff" : "#d8d0b8"));
     ctx.fillText(l, tx, y + pad + 11 + i * lh);
   });
 }

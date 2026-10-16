@@ -4,12 +4,15 @@ import { skillByName } from "../core/registry.js";
 import { setAnim, moveEntity, actionDuration, updateMove, canRun, walkSpeed, runSpeed } from "./motion.js";
 import { findPathPoints } from "../world/pathfinding.js";
 import { addExp } from "./inventory.js";
-import { dropGround } from "../world/ground.js";
+import { dropGround } from "../systems/ground.js";
 import { startScript } from "../script/vm.js";
 import { canAttack } from "../engine/faction.js";
+import { rollDrops } from "../engine/lootTable.js";
 import { isMelee, skillRange as skRange, rollAttackHit, damage as dmgFormula } from "../engine/skill.js";
 import { normalizeTargeting, selectTargets, needsPrimary, isSelfOnly, tickCooldowns, isReady, startCooldown, knockbackTarget } from "../engine/targeting.js";
 import { spawnProjectile } from "./projectiles.js";
+import { spawnFx } from "./effects.js";
+import { playBuffFx } from "./buffs.js";
 import { statMods, applyBuff } from "../engine/buff.js";
 
 // 阵营关系表（内容内置，只读）；缺失时 canAttack 退化为“有攻击力即可”。
@@ -35,7 +38,15 @@ export function rollHit(hitRate, square) {
 }
 export function dealDamage(atk, power, def) { return dmgFormula(atk, power, def); }
 
-export function spawnEffect(ctx, sk, x, y) {
+export function spawnEffect(ctx, sk, x, y, anchor, follow) {
+  // 新特效系统：技能可用 fx.hit 指定特效定义 id（或 fx 直接为 id）。
+  const fxDef = sk && sk.fx;
+  const fxId = typeof fxDef === "string" ? fxDef : (fxDef && (fxDef.hit || fxDef.cast));
+  if (fxId) {
+    spawnFx(ctx, fxId, { x, y, anchor: anchor || (follow ? "unit" : "world"), follow: follow || null });
+    return;
+  }
+  // 兼容旧路径：技能自带 frames（贴图序列）作为命中特效。
   if (!sk || !sk.frames || !sk.frames.length) return;
   ctx.state.effects.push({ frames: sk.frames, x, y, i: 0, t: 0 });
 }
@@ -176,7 +187,7 @@ function applyOnHit(ctx, attacker, target, sk) {
       const chance = b.chance == null ? 100 : b.chance;
       if (Math.random() * 100 > chance) continue;
       const def2 = ctx.assets.buffTable && ctx.assets.buffTable.byId.get(b.id);
-      if (def2) applyBuff(target, def2, { stacks: b.stacks });
+      if (def2) { applyBuff(target, def2, { stacks: b.stacks }); playBuffFx(ctx, target, def2, "apply"); }
     }
   }
   if (oh.heal && oh.heal.amount > 0) {
@@ -279,12 +290,10 @@ export function killNPC(ctx, n) {
   else { n.action = "die"; n.frame = 0; n.ft = 0; n.animSpeed = 1; }
   addExp(G, n.exp);
   G.stats.honor += 1;
-  // 掉落完全由数据驱动（npcs.json 的 drops 字段），不再有硬编码兜底表。
-  for (const d of (n.drops || [])) {
-    const nm = typeof d === "string" ? d : d.name;
-    const ct = typeof d === "string" ? 1 : (d.count || 1);
-    if (nm) dropGround(G, nm, n.x, n.y, ct);
-  }
+  // 掉落由数据驱动（npcs.json 的 drops 字段）。经掉落表 roll，支持几率/数量区间/词缀。
+  const defs = {};
+  for (const it of (A.items || [])) defs[it.name] = it;
+  for (const e of rollDrops(n.drops || [], defs)) dropGround(G, e, n.x, n.y);
   for (const k in G.missions) { const m = G.missions[k];
     if (m.type === 1 && m.target === n.name && m.state === 4) { m.got++; if (m.got >= m.need) m.state = 1; } }
   const ds = n.name + "_死.gsp";

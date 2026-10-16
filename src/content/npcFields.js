@@ -32,6 +32,9 @@ export const NPC_FIELDS = {
   runSpeed: { fromTemplate: d => orElse(d && d.runSpeed, 70), default: 70 },
   drops: { fromTemplate: d => ((d && d.drops) || []).map(x => ({ name: x.name, count: x.count || 1 })), default: [] },
   inventory: { fromTemplate: d => (d && d.inventory) || null, default: null },
+  // NPC 背包（脚本指令拾取/丢弃的目标容器）：条目数组，与玩家背包同一模型。
+  // 空背包归一为 undefined（与未初始化的运行时实体一致），避免空数组与缺省值不等而误写入存档。
+  bag: { fromTemplate: d => ((d && d.bag && d.bag.length) ? JSON.parse(JSON.stringify(d.bag)) : undefined), default: undefined },
   faction: { fromTemplate: d => (d && d.faction) || "", default: "" },
   talks: { fromTemplate: d => (d && d.talks) || [], default: [] },
   talk: { fromTemplate: d => ((d && d.talks && d.talks.length) ? d.talks[0].replace(/\\n/g, "\n") : ""), default: "" },
@@ -49,7 +52,7 @@ export function newNpcTemplate() {
     id: 0, name: "新NPC", model: "npc001.pmg", portrait: "", script: "",
     hp: 100, attack: 10, defence: 0, level: 1, exp: 0, hostile: 0, ai: 0,
     skills: [], speed: NPC_DEFAULT_SPEED, runSpeed: NPC_DEFAULT_RUN_SPEED,
-    drops: [], talks: [], inventory: null, faction: "",
+    drops: [], talks: [], inventory: null, bag: undefined, faction: "",
   };
 }
 

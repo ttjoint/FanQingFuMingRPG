@@ -11,6 +11,11 @@ export const DEFAULT_CONFIG = {
   combat: { rangeMin: 40, attackCD: 0.9, mpDrainRun: 1.6, npcAttackCD: 1.1, npcAggro: 260, npcMelee: 46, npcHitBase: 20, npcHitPerLevel: 60, meleeMaxRange: 60 },
   economy: { sellRate: 0.5 },
   inventory: { packItem: "包裹", packSize: 25 },
+  // 掉落物：存在时长 / 散布 / 拾取与保护 / 地面堆叠合并半径。
+  items: { dropTtl: 0, dropScatter: 22, pickupRadius: 20, pickupDelay: 0, stackRadius: 18 },
+  // 特效/指示：层级、颜色、开关（可由内容覆盖）。
+  fx: { uiRings: true, moveMarker: true, itemHighlight: true,
+        ring: { target: "#e04040", interact: "#4080ff", move: "#ffe08a" } },
   move: { walkSpeed: 90, runSpeed: 150 },
   iso: { originX: 1568, halfW: 32, halfH: 16 },
 };

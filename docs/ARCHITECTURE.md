@@ -91,6 +91,12 @@
 | 引擎空间哈希（近邻查询） | `engine/spatialhash.js` |
 | 引擎等距深度切块（对象逐块深度 + 屋顶覆盖） | `engine/depth.js` |
 | 引擎椭圆碰撞（DOM-free） | `engine/collision.js` |
+| 引擎物品模板/实例（词缀·镶嵌·强化） | `engine/item.js` |
+| 引擎掉落表（兼容旧格式 + 稀有度/词缀） | `engine/lootTable.js` |
+| 引擎特效（图层/锚点/帧动画/循环） | `engine/effect.js` |
+| 地面掉落物轻量实体 + NPC 背包 | `systems/ground.js` |
+| 特效系统（推进/回收）+ Buff 光环 | `systems/effects.js` · `systems/buffs.js` |
+| 指示系统（红/蓝圈、落点、物品高亮） | `systems/indicators.js` · `render/effects.js` |
 | 引擎脚本解析/求值（vars 注入） | `engine/script/gsp.js` |
 | 系统管道（DOM-free，ECS 前置） | `engine/pipeline.js` |
 | 引擎 ECS 基元（组件/查询） | `engine/ecs.js` |

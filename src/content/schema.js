@@ -3,8 +3,9 @@
 // 未知字段一律保留（向前兼容，避免丢数据）。
 import { isRef, refKind, refId } from "./ids.js";
 import { normalizeProjectile } from "../engine/projectile.js";
-import { normalizeBuffs } from "../engine/buff.js";
-import { normalizeTargeting } from "../engine/targeting.js";
+import { normalizeBuffs } from "../engine/buff.js";import { normalizeTargeting } from "../engine/targeting.js";
+import { normalizeItemDef } from "../engine/item.js";
+import { normalizeEffect } from "../engine/effect.js";
 import { CFG } from "../core/config.js";
 
 export const CONTENT_VERSION = 2;
@@ -39,7 +40,7 @@ export function normalizeNpc(n) {
   // skills 在旧数据里是错位的台词文本：过滤为数组（保留合法字符串）
   o.skills = Array.isArray(o.skills) ? o.skills.map(String) : [];
   if (!Array.isArray(o.drops)) o.drops = [];
-  o.drops = o.drops.map(d => ({ name: str(d && d.name, ""), count: num(d && d.count, 1) })).filter(d => d.name);
+  o.drops = o.drops.map(d => normalizeDrop(d)).filter(d => d.name);
   o.talks = arr(o.talks).map(String);
   // 货物箱（商人）：「背包」组件的数据源。stock 为显式货源，auto 为按分类自动补货。
   // 无 inventory / 空货物 = 无背包 = 非商人（shopGoods 返回 null，不开店）。
@@ -76,7 +77,14 @@ export function normalizeBuffList(list) {
   return normalizeBuffs(list);
 }
 
+// 特效定义表（内容内置，技能/Buff/指示按 id 引用）。具体语义见 engine/effect.js。
+export function normalizeEffectList(list) {
+  return arr(list).filter(f => f && (f.id || f.name)).map(f => normalizeEffect(f));
+}
+
 // ---- Item / Skill ----
+// 物品模板：在旧字段基础上支持 kind/rarity/stackable/mods/equip/use/affixPool/socketCount 等。
+// 实体字段（attack/hp/attrA...）与 mods 双向同步，保证旧读取点继续可用。
 export function normalizeItem(it) {
   const o = clone(it) || {};
   o.name = str(o.name, "新物品");
@@ -88,6 +96,25 @@ export function normalizeItem(it) {
   o.attack = num(o.attack, 0); o.defence = num(o.defence, 0);
   o.attrA = num(o.attrA, 0); o.attrB = num(o.attrB, 0); o.attrC = num(o.attrC, 0);
   o.icon = str(o.icon, ""); o.desc = str(o.desc, "");
+  // 扩展：模板/实例体系所需字段（缺省时按旧字段推断）。
+  const d = normalizeItemDef(o);
+  d.type = o.type; d.subtype = o.subtype;
+  return d;
+}
+
+// 掉落定义：兼容 { name, count }，并支持 chance/min/max/rarity/affixes。
+export function normalizeDrop(d) {
+  const o = clone(d) || {};
+  o.name = str(o.name, "");
+  if (!o.name) return o;
+  o.chance = o.chance == null ? 100 : num(o.chance, 100);
+  const c = num(o.count, 1);
+  o.count = c;
+  o.min = o.min != null ? num(o.min, c) : c;
+  o.max = o.max != null ? num(o.max, o.min) : o.min;
+  if (o.max < o.min) o.max = o.min;
+  o.rarity = o.rarity ? str(o.rarity) : null;
+  o.affixes = Array.isArray(o.affixes) ? o.affixes.map(String) : null;
   return o;
 }
 
@@ -113,9 +140,21 @@ export function normalizeSkill(sk) {
   o.targeting = normalizeTargeting(o.targeting);
   o.cooldown = Math.max(0, num(o.cooldown, 0));
   // 阶段 C/D：命中时施加的 buff（列表，元素为 buff id；支持 {id,stacks,chance} 形式）。
+  // 特效：fx 可为字符串（命中特效 id）或对象 { cast, hit, target, ground }（各为特效 id）。
+  o.fx = normalizeFxRef(o.fx);
   o.onHit = normalizeOnHit(o.onHit);
   o.desc = str(o.desc, "");
   return o;
+}
+
+// 规整技能/物品的特效引用：统一为对象形式 { cast, hit, target, ground }。
+function normalizeFxRef(v) {
+  if (!v) return null;
+  if (typeof v === "string") return { hit: v };
+  if (typeof v !== "object") return null;
+  const out = {};
+  for (const k of ["cast", "hit", "target", "ground"]) if (v[k]) out[k] = str(v[k]);
+  return Object.keys(out).length ? out : null;
 }
 
 // 规整技能的 onHit 配置：统一为 { buffs, heal, knockback }。

@@ -1,0 +1,54 @@
+[
+  {
+    "id": "ring_target",
+    "name": "攻击目标红圈",
+    "shape": "ring",
+    "color": "#e04040",
+    "layer": "under",
+    "anchor": "unit",
+    "loop": true,
+    "life": 0.5,
+    "fps": 12,
+    "scale": 1.0,
+    "frames": []
+  },
+  {
+    "id": "ring_interact",
+    "name": "可交互蓝圈",
+    "shape": "ring",
+    "color": "#4080ff",
+    "layer": "under",
+    "anchor": "unit",
+    "loop": true,
+    "life": 0.5,
+    "fps": 12,
+    "scale": 1.0,
+    "frames": []
+  },
+  {
+    "id": "move_marker",
+    "name": "点击落点光圈",
+    "shape": "marker",
+    "color": "#ffe08a",
+    "layer": "under",
+    "anchor": "world",
+    "loop": false,
+    "life": 0.45,
+    "fps": 12,
+    "scale": 1.0,
+    "frames": []
+  },
+  {
+    "id": "item_highlight",
+    "name": "物品高亮",
+    "shape": "glow",
+    "color": "#ffe08a",
+    "layer": "under",
+    "anchor": "item",
+    "loop": true,
+    "life": 0.5,
+    "fps": 12,
+    "scale": 1.0,
+    "frames": []
+  }
+]
