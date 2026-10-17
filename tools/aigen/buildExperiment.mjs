@@ -209,5 +209,9 @@ const manifest = readJSON(path.join(DEF, "maps_manifest.json"));
 if (!manifest.includes(MAP_NAME)) manifest.push(MAP_NAME);
 writeJSON(path.join(OUT, "assets/maps_manifest.json"), manifest);
 
+// 刷新 versions/index.json：静态服务器（http.server / nginx / Pages）列不出目录，
+// 前端只能靠这个清单发现磁盘版本。不刷新的话新版本在选区里看不到。
+import("./gen-versions-index.mjs").then((m) => m.writeVersionsIndex()).catch(() => {});
+
 console.log("已写入", OUT);
 console.log("地图:", MAP_NAME, "id:", MAP_ID, "units:", patch.maps[MAP_NAME].units.length, "npcs:", Object.keys(patch.content.npcs).length, "skills:", Object.keys(patch.content.skills).length);

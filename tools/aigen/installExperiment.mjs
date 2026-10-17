@@ -93,3 +93,6 @@ for (const [f, d] of log) console.log(" ", f, d);
 console.log("\n=== chars.json ===");
 for (const k in chars) console.log(" ", k, "stand 方向数", chars[k].stand.length);
 console.log("\n版本目录:", VER);
+
+// 落盘后刷新版本清单，保证静态部署能发现该版本。
+import("./gen-versions-index.mjs").then((m) => m.writeVersionsIndex()).catch(() => {});

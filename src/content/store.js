@@ -63,9 +63,24 @@ export function diskVersionsReady() { return _diskReady; }
 export function isDiskVersion(id) { return !!_diskVersions.find(x => x.id === id); }
 export function isDiskReadonly(id) { const d = _diskVersions.find(x => x.id === id); return !!(d && (d.readonly || d.builtin)); }
 
+// 静态版本清单：versions/index.json（由 tools/gen-versions-index.mjs 生成）。
+// 静态服务器（http.server / nginx / Pages）列不出目录，没有它前端就发现不了
+// 磁盘上的版本——这正是「AI 素材试验场」在 8082 上看不到的原因。
+let _staticVersions = null;
+async function listStaticVersions() {
+  if (_staticVersions) return _staticVersions;
+  try {
+    const r = await fetch("versions/index.json", { cache: "no-cache" });
+    if (!r.ok) return (_staticVersions = []);
+    const j = await r.json();
+    _staticVersions = Array.isArray(j && j.versions) ? j.versions : [];
+  } catch (e) { _staticVersions = []; }
+  return _staticVersions;
+}
+
 // 合并列出（磁盘优先）：供版本管理界面使用。
 // - 磁盘后端可用（本地模式）：**只列磁盘版本**，不再混入浏览器版本（本地一律落盘）。
-// - 无后端（静态部署）：只列浏览器版本。
+// - 无后端（静态部署）：先看静态清单 versions/index.json，再并入浏览器版本。
 // 磁盘上的原版 default 统一以虚拟的 DEFAULT_VERSION 入口呈现。
 export async function listAllVersions() {
   const ok = await refreshDiskVersions();
@@ -77,7 +92,15 @@ export async function listAllVersions() {
     }
     return out;
   }
+  // 静态部署：磁盘版本只读可玩（无写入后端），与浏览器版本合并展示。
+  const seen = new Set();
+  for (const d of await listStaticVersions()) {
+    if (d.id === DISK_DEFAULT_ID) continue;
+    seen.add(d.id);
+    out.push({ id: d.id, name: d.name, builtin: !!d.builtin, readonly: !!d.readonly, source: "static", updatedAt: d.updatedAt || 0 });
+  }
   for (const p of loadIndex().packs) {
+    if (seen.has(p.id)) continue;
     out.push({ id: p.id, name: p.name, builtin: false, readonly: false, source: "browser", updatedAt: p.updatedAt || 0 });
   }
   return out;
@@ -159,6 +182,25 @@ function diskAssetURL(id, logicalKey) {
   return "versions/" + id + "/assets/" + rel;
 }
 
+// 静态部署下按 versions/index.json 的清单装配磁盘版本（只读、可玩）：
+// 直接 fetch versions/<id>/patch.json，并用清单里的 assets 列表构造图片覆盖。
+async function loadStaticPack(id) {
+  const vs = await listStaticVersions();
+  const meta = vs.find(v => v.id === id);
+  if (!meta) return null;
+  let patch = {};
+  try {
+    const r = await fetch("versions/" + encodeURIComponent(id) + "/patch.json", { cache: "no-cache" });
+    if (r.ok) patch = await r.json();
+  } catch (e) { }
+  const p = normalizePack({
+    format: "gsxy.pack", version: 2, id: meta.id, name: meta.name,
+    base: "default", patch: patch || {}, images: {},
+  });
+  applyDiskImages(meta.id, meta.assets || [], p);
+  return p;
+}
+
 // 读取：磁盘版本从 versions/<id>/ 读补丁 + 图片覆盖（图片以 URL 表示）；
 // 浏览器版本从 localStorage/IndexedDB 读。异步。
 export async function loadPack(id) {
@@ -174,6 +216,11 @@ export async function loadPack(id) {
   }
   let stored = null;
   try { stored = JSON.parse(localStorage.getItem(PACK_PREFIX + id) || "null"); } catch (e) { }
+  // 静态部署：按 versions/index.json 清单直读磁盘版本（无写入后端，只读可玩）。
+  if (!stored) {
+    const stat = await loadStaticPack(id);
+    if (stat) return stat;
+  }
   // 回退：若本地无记录但磁盘后端可用，仍尝试按 id 直读磁盘版本。
   if (!stored && await diskAvailable()) {
     const d = await loadDiskVersion(id);

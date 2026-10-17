@@ -24,4 +24,10 @@ export function playBGM(g, name) {
   } catch (e) { }
 }
 
-export function applyVolumes(g) { if (g.bgm) g.bgm.volume = g.settings.bgm; saveSettings(g); }
+// 应用音量：BGM 立即改，音效在下次播放时按 g.settings.sfx 生效（一次性音效，不追溯）。
+// 参数是**游戏状态**（读 g.settings / g.bgm），传入 runtime 会因没有 settings 而失效。
+export function applyVolumes(g) {
+  if (!g || !g.settings) return;
+  if (g.bgm) { try { g.bgm.volume = g.settings.bgm; } catch (e) { } }
+  saveSettings(g);
+}

@@ -113,5 +113,5 @@ export function drawSettingsPanel() {
   ctx.fillStyle = "#1a140e"; ctx.font = "12px 'Microsoft YaHei',SimHei,sans-serif"; ctx.fillText("音乐静音", bx + 10, y + 165);
   ctx.fillStyle = G.settings.sfx > 0 ? "#8fbf6a" : "#a05050"; ctx.fillRect(bx + 90, y + 150, 80, 22);
   ctx.fillStyle = "#1a140e"; ctx.fillText("音效静音", bx + 100, y + 165);
-  ctx.fillStyle = "#888"; ctx.font = "11px sans-serif"; ctx.fillText("点击音量条调节　F10 / Esc 关闭", x + 20, y + h - 12);
+  ctx.fillStyle = "#888"; ctx.font = "11px sans-serif"; ctx.fillText("点击或拖动音量条调节　Esc 关闭", x + 20, y + h - 12);
 }
