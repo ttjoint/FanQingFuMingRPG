@@ -304,6 +304,22 @@ table.ed-table tbody tr.on td.ed-thumb img{border-color:#f0d060}
   border:1px solid #2c3038;border-radius:4px;image-rendering:pixelated}
 /* 帧序列：格子略小、一行放得下多张 */
 .ed-imgthumbs.frames img{width:72px;height:72px}
+
+/* 图片占位块：没有图片 / 加载失败时显示的**空图案**。
+   尺寸与真实预览图一致，切换时布局不跳；虚线框让它一眼看出是"空位"而非坏图。 */
+.ed-imgslot{display:inline-flex;position:relative;vertical-align:middle}
+.ed-imgph{width:96px;height:96px;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:4px;background:#0d1014;border:1px dashed #333a45;border-radius:4px;
+  color:#5c636e;overflow:hidden}
+.ed-imgph.small{width:72px;height:72px}
+.ed-imgph-icon{font-size:22px;line-height:1;opacity:.5;filter:grayscale(1)}
+.ed-imgph-text{font-size:10px;line-height:1.2;text-align:center;padding:0 4px;
+  word-break:break-all;max-width:100%}
+/* 左侧列表格子里的占位：跟随单元格大小，只留图标 */
+.ed-thumb .ed-imgph,.ed-imgph.cell{width:26px;height:26px;min-width:26px;min-height:26px;
+  border-radius:2px;border-style:dashed}
+.ed-thumb .ed-imgph-icon,.ed-imgph.cell .ed-imgph-icon{font-size:12px;opacity:.45}
+.ed-thumb .ed-imgph-text,.ed-imgph.cell .ed-imgph-text{display:none}
 .ed-imgthumbs .ed-imghint{color:#6b737e;font-size:11px}
 
 /* ================= 资源选择弹窗 ================= */
@@ -353,6 +369,22 @@ table.ed-table tbody tr.on td.ed-thumb img{border-color:#f0d060}
 }
 .ed-decor-big{max-width:180px;max-height:180px;object-fit:contain;background:#0a0b0d;
   border:1px solid #2c3038;border-radius:4px;image-rendering:pixelated}
+/* ---- 音频详情：波形 + 进度 + 元数据 ---- */
+.ed-wavewrap{position:relative;margin:4px 0 8px}
+.ed-wave{display:block;width:100%;height:88px;border:1px solid #2c3038;border-radius:4px;
+  background:#0b0d11;cursor:pointer}
+.ed-wave-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#6b727c;font-size:12px;pointer-events:none}
+.ed-wave-time{font-size:12px;color:#9aa3b0;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* 音高滑块 */
+.ed-pitch{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.ed-pitch input[type=range]{accent-color:#e8be52}
+/* 键值表：文件名/路径/大小/时长/采样率… */
+.ed-kv{display:grid;grid-template-columns:88px 1fr;gap:4px 10px;margin:2px 0 4px;font-size:12px}
+.ed-kv dt{color:#6b737e;text-align:right}
+.ed-kv dd{margin:0;color:#c8ced8;word-break:break-all}
+.ed-kv dd.mono{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#9aa3b0}
+
 /* ---- 行走图选择弹窗（模型网格） ---- */
 .ed-modelgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:6px;padding:8px}
 .ed-modelcell{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 4px;

@@ -5,6 +5,34 @@ import { assetSrc, audioSrc } from "./assets-index.js";
 
 let dlSeq = 0;
 
+/**
+ * 图片占位块：没有图片 / 图片加载失败时显示的**空图案**。
+ * 之前是显示 <img> 加载失败的破图（浏览器默认的问号/裂图），或者只放一行灰字，
+ * 视觉上很脏。这里统一成一个虚线框 + 灰图标 + 提示文字，
+ * 尺寸跟真实预览图一致（96px，frames 用 72px），所以切换时布局不会跳。
+ * @param {string} [text] 提示文字，默认「无图片」
+ * @param {boolean} [small] 是否用帧序列的较小尺寸
+ */
+export function imgPlaceholder(text, small) {
+  return h("div", { class: "ed-imgph" + (small ? " small" : ""), title: text || "无图片" },
+    h("span", { class: "ed-imgph-icon" }, "🖼"),
+    h("span", { class: "ed-imgph-text" }, text || "无图片"));
+}
+
+/**
+ * 把一个 <img> 挂上「加载失败 → 换成占位图」的行为。
+ * 返回的 replace() 可在需要时手动切换。图片加载失败很常见
+ * （数据里引用了不存在/改名过的文件），不能让它一直显示破图。
+ */
+export function guardImage(im, text, small) {
+  const ph = imgPlaceholder(text, small);
+  ph.style.display = "none";
+  const host = h("span", { class: "ed-imgslot" }, im, ph);
+  im.onerror = () => { im.style.display = "none"; ph.style.display = ""; };
+  im.onload = () => { im.style.display = ""; ph.style.display = "none"; };
+  return host;
+}
+
 // 支持点分路径键（如 "projectile.frames"），自动在缺省时创建中间对象。
 function pathGet(obj, k) {
   if (k.indexOf(".") < 0) return obj[k];
@@ -192,12 +220,12 @@ export function renderForm(host, schema, obj, onChange) {
       const drawThumbs = () => {
         clear(thumbs);
         const m = pathGet(obj, f.k);
-        if (!m) { thumbs.append(h("div", { class: "ed-imghint" }, "（未设置）")); return; }
+        if (!m) { thumbs.append(imgPlaceholder("未选择行走图")); return; }
         const src = f.modelSrc ? f.modelSrc(m) : null;
         if (src) {
-          const im = h("img", { src, title: String(m) });
-          im.onerror = () => { im.style.opacity = "0.12"; };
-          thumbs.append(im);
+          thumbs.append(guardImage(h("img", { src, title: String(m) }), "该模型无预览"));
+        } else {
+          thumbs.append(imgPlaceholder("该模型无预览"));
         }
         thumbs.append(h("span", { class: "ed-modelname" }, String(m)));
       };
@@ -228,13 +256,13 @@ export function renderForm(host, schema, obj, onChange) {
         const raw = isFrames ? (Array.isArray(pathGet(obj, f.k)) ? pathGet(obj, f.k) : []) : [pathGet(obj, f.k)];
         const list = raw.filter(x => x != null && x !== "");
         if (!list.length) {
-          thumbs.append(h("div", { class: "ed-imghint" }, "（未设置）"));
+          thumbs.append(imgPlaceholder(isFrames ? "未选择帧图" : "未设置图片", isFrames));
           return;
         }
         for (const v of list) {
-          const im = h("img", { src: assetSrc(v, f.dir), title: String(v) });
-          im.onerror = () => { im.style.opacity = "0.12"; };
-          thumbs.append(im);
+          // 引用不存在 / 改名过的文件时给占位图，而不是浏览器的破图
+          thumbs.append(guardImage(h("img", { src: assetSrc(v, f.dir), title: String(v) }),
+            "文件不存在：" + String(v), isFrames));
         }
       };
       const btn = h("button", { class: "ed-btn" }, isFrames ? "选择帧…" : "更换…");
@@ -357,15 +385,16 @@ export function renderForm(host, schema, obj, onChange) {
     // 图片字段：若有 f.img(obj)，在控件下方显示预览（随输入/选择实时刷新）
     if (typeof f.img === "function") {
       const im = h("img", { class: "ed-fieldimg" });
-      const ph = h("span", { class: "ed-imghint" }, "（无图片）");
-      const wrap = h("div", { class: "ed-imgwrap" }, im, ph);
+      const ph = imgPlaceholder("无图片");
+      const host = h("span", { class: "ed-imgslot" }, im, ph);
+      const wrap = h("div", { class: "ed-imgwrap" }, host);
       const refresh = () => {
         const s = f.img(obj);
         if (s) { im.src = s; im.style.display = ""; ph.style.display = "none"; }
         else { im.removeAttribute("src"); im.style.display = "none"; ph.style.display = ""; }
       };
-      im.onerror = () => { im.style.opacity = "0.15"; };
-      im.onload = () => { im.style.opacity = "1"; };
+      im.onerror = () => { im.style.display = "none"; ph.style.display = ""; };
+      im.onload = () => { im.style.display = ""; ph.style.display = "none"; };
       refreshers.push(refresh); refresh();
       groupHost.append(wrap);
     }
@@ -473,16 +502,34 @@ export function renderListEditor(host, opts) {
           tr.insertBefore(td, tr.firstChild);
         }
         const src = opts.thumb(it);
-        let im = /** @type {HTMLImageElement|null} */ (td.firstElementChild);
+        let im = td.querySelector("img");
+        // 列表格子里的占位（26px 左右的小方块），不用破图也不用纯留白
+        let cellPh = /** @type {HTMLElement|null} */ (td.querySelector(".ed-imgph"));
         if (src) {
-          if (!im || im.tagName !== "IMG") {
+          if (!im) {
             im = h("img", { loading: "lazy", decoding: "async" });
-            im.onerror = () => { im.style.opacity = "0.12"; };
-            clear(td); td.append(im);
+            im.onerror = () => { im.style.display = "none"; if (cellPh) cellPh.style.display = ""; };
+            im.onload = () => { im.style.display = ""; if (cellPh) cellPh.style.display = "none"; };
+            clear(td);
+            cellPh = imgPlaceholder("", true);
+            cellPh.style.display = "none";
+            td.append(im, cellPh);
           }
           const want = new URL(String(src), location.href).href;
-          if (im.src !== want) im.src = String(src);
-        } else if (im) im.remove();
+          if (im.src !== want) {
+            im.style.display = "";
+            if (cellPh) cellPh.style.display = "none";
+            im.src = String(src);
+          }
+        } else {
+          if (im) im.remove();
+          if (!cellPh) {
+            cellPh = imgPlaceholder("", true);
+            cellPh.classList.add("cell");
+            td.append(cellPh);
+          }
+          cellPh.style.display = "";
+        }
       }
       const off = hasThumb ? 1 : 0;
       for (let i = 0; i < columns.length; i++) {

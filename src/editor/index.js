@@ -5,7 +5,8 @@ import { G, A } from "../core/state.js";
 import { setAssetOverrides, assetURL } from "../core/assets.js";
 import { h, clear, deep } from "./dom.js";
 import { injectStyle } from "./style.js";
-import { renderForm, renderListEditor, mkSplitResizer, editorShell } from "./fields.js";
+import { renderForm, renderListEditor, mkSplitResizer, editorShell, imgPlaceholder } from "./fields.js";
+import { waveBar, decodePeaks, fmtTime, fmtSize } from "./audio-view.js";
 import { mountMapEditor } from "./map-editor.js";
 import { modeControl, makeLineEditor, decorState } from "./decor-line.js";
 import { applyPatch, diffContent } from "../content/contentdb.js";
@@ -1179,47 +1180,168 @@ function tabAudio() {
 
   let au = null;
   const stop = () => { if (au) { au.pause(); au = null; } };
+  // 每次重绘详情前先清理上一个详情的副作用（波形窗口监听 / AudioContext）
+  let detailCleanup = null;
 
   const drawDetail = () => {
     stop();
+    if (detailCleanup) { try { detailCleanup(); } catch (e) { } detailCleanup = null; }
     clear(right);
     if (!selPath) { right.append(h("div", { class: "ed-empty" }, "左侧选择一个音频文件")); return; }
     const over = !!ED.sounds[selPath];
     right.append(h("h3", { style: "margin-top:0" }, selPath.split("/").pop()));
     right.append(rhint(selPath));
 
-    const g1 = h("div", { class: "ed-group" });
-    g1.append(h("div", { class: "ed-grouptitle" }, "试听"));
-    const playBtn = h("button", { class: "ed-btn" }, "▶ 播放");
     // 资源根是 versions/<id>/，裸写 assets/... 会 404 → 统一走 audioSrc 解析
     const src = ED.sounds[selPath] || audioSrc(selPath, selPath.includes("/sound/") ? "sound" : "music");
-    playBtn.onclick = () => {
-      if (au) { stop(); playBtn.textContent = "▶ 播放"; return; }
-      au = new Audio(src);
-      au.onended = () => { au = null; playBtn.textContent = "▶ 播放"; };
-      au.onerror = () => { au = null; playBtn.textContent = "▶ 播放"; alert("无法播放：" + selPath); };
-      au.play().then(() => { playBtn.textContent = "■ 停止"; }).catch(() => { au = null; });
+
+    // ---------- 试听：波形 + 进度条 + 变调 ----------
+    const g1 = h("div", { class: "ed-group" });
+    g1.append(h("div", { class: "ed-grouptitle" }, "试听预览"));
+
+    const playBtn = h("button", { class: "ed-btn" }, "▶ 播放");
+    const timeEl = h("span", { class: "ed-wave-time" }, "0:00.0 / --:--");
+    const srcEl = h("span", { class: "ed-hint", style: "margin-left:10px" },
+      "来源：" + (over ? "本版本上传" : "默认版本"));
+
+    const wave = waveBar({
+      msg: "正在解码波形…",
+      onSeek: t => {
+        if (!au || !isFinite(au.duration)) return;
+        au.currentTime = t * au.duration;
+        wave.setProgress(t);
+        timeEl.textContent = fmtTime(au.currentTime) + " / " + fmtTime(au.duration);
+      },
+    });
+    g1.append(wave.el);
+    g1.append(h("div", { class: "ed-row" }, playBtn, timeEl, srcEl));
+
+    // 音高（只影响编辑器预览，不影响游戏内播放）
+    const pitch = h("input", { type: "range", min: "-12", max: "12", step: "1", value: "0" });
+    pitch.style.flex = "1";
+    const pitchVal = h("span", { class: "ed-wave-time", style: "min-width:150px" }, "原调");
+    const pitchReset = h("button", { class: "ed-btn ghost", title: "回到原调" }, "↺");
+    const pitchRow = h("div", { class: "ed-row wide" },
+      h("label", null, "音高"), h("div", { class: "ed-pitch" }, pitch, pitchVal, pitchReset));
+    const applyPitch = () => {
+      const semi = parseFloat(pitch.value) || 0;
+      const rate = Math.pow(2, semi / 12);
+      pitchVal.textContent = semi === 0 ? "原调" : (semi > 0 ? "+" : "") + semi + " 半音（×" + rate.toFixed(2) + "）";
+      if (au) {
+        // 变调而非变速：preservesPitch=false 才会真的改变音高
+        au.playbackRate = rate;
+        try { au.preservesPitch = false; } catch (e) { /* 旧浏览器忽略 */ }
+        try { au.mozPreservesPitch = false; } catch (e) { /* 同上 */ }
+        try { au.webkitPreservesPitch = false; } catch (e) { /* 同上 */ }
+      }
     };
-    const meta = h("span", { class: "ed-hint", style: "margin-left:10px" }, "来源：" + (over ? "本版本上传" : "默认版本"));
-    g1.append(h("div", { class: "ed-row" }, playBtn, meta));
+    pitch.oninput = applyPitch;
+    pitchReset.onclick = () => { pitch.value = "0"; applyPitch(); };
+    g1.append(pitchRow);
+    g1.append(h("div", { class: "ed-ghint" }, "音高只作用于编辑器里的试听，不会写进数据、也不影响游戏内播放。"));
     right.append(g1);
 
+    // ---------- 元数据 ----------
     const g2 = h("div", { class: "ed-group" });
-    g2.append(h("div", { class: "ed-grouptitle" }, "替换音频"));
+    g2.append(h("div", { class: "ed-grouptitle" }, "文件信息"));
+    const info = h("dl", { class: "ed-kv" });
+    const kv = (k, v, cls) => {
+      info.append(h("dt", null, k), h("dd", { class: cls || "" }, v));
+    };
+    kv("文件名", selPath.split("/").pop());
+    kv("路径", selPath, "mono");
+    const sizeDd = h("dd", null, "…"), lenDd = h("dd", null, "…");
+    const fmtDd = h("dd", null, "…"), rateDd = h("dd", null, "…"), chDd = h("dd", null, "…");
+    info.append(h("dt", null, "文件大小"), sizeDd,
+      h("dt", null, "时长"), lenDd,
+      h("dt", null, "格式"), fmtDd,
+      h("dt", null, "采样率"), rateDd,
+      h("dt", null, "声道"), chDd);
+    g2.append(info);
+    right.append(g2);
+
+    // ---- 元数据加载：HEAD 取大小/类型，Audio 取时长，WebAudio 解码出波形+采样率 ----
+    let dead = false;
+    let audioCtx = null;
+    const loadMeta = async () => {
+      // 1) 文件大小 / MIME
+      try {
+        const r = await fetch(src, { method: "HEAD" });
+        if (!dead && r.ok) {
+          const len = parseInt(r.headers.get("content-length") || "", 10);
+          sizeDd.textContent = isFinite(len) ? fmtSize(len) : "未知";
+          const ct = r.headers.get("content-type") || "";
+          fmtDd.textContent = ct || (selPath.match(/\.[^.]+$/) || [""])[0];
+        }
+      } catch (e) { if (!dead) { sizeDd.textContent = "未知"; } }
+      // 2) 波形 + 时长 + 采样率 + 声道（需要 WebAudio 解码）
+      try {
+        const AC = window.AudioContext || /** @type {any} */ (window).webkitAudioContext;
+        audioCtx = new AC();
+        const d = await decodePeaks(audioCtx, src, 220);
+        if (dead || !d) return;
+        wave.setPeaks(d);
+        lenDd.textContent = fmtTime(d.duration) + "（" + d.duration.toFixed(2) + " 秒）";
+        rateDd.textContent = d.sampleRate.toLocaleString() + " Hz";
+        chDd.textContent = d.channels === 1 ? "单声道" : (d.channels === 2 ? "立体声" : d.channels + " 声道");
+        timeEl.textContent = "0:00.0 / " + fmtTime(d.duration);
+      } catch (e) {
+        if (!dead) {
+          wave.setMsg("无法解码波形（仍可播放）");
+          // 退化：只用 <audio> 拿时长
+          const a = new Audio(src);
+          a.onloadedmetadata = () => {
+            if (dead) return;
+            lenDd.textContent = fmtTime(a.duration) + "（" + a.duration.toFixed(2) + " 秒）";
+            timeEl.textContent = "0:00.0 / " + fmtTime(a.duration);
+          };
+          a.onerror = () => { if (!dead) lenDd.textContent = "无法读取"; };
+        }
+      }
+    };
+    loadMeta();
+
+    // ---- 播放：波形进度同步 ----
+    playBtn.onclick = () => {
+      if (au) { stop(); playBtn.textContent = "▶ 播放"; wave.setProgress(0); return; }
+      au = new Audio(src);
+      applyPitch();   // 新建的 Audio 要重新套用当前音高
+      // 注意：这些回调里不能直接用外层 au —— stop() 会把它置 null，
+      // 但已排队的事件仍可能触发（切文件/重复点时），必须先判空。
+      const self = au;
+      au.onloadedmetadata = () => {
+        if (dead || !self) return;
+        timeEl.textContent = fmtTime(self.currentTime) + " / " + fmtTime(self.duration);
+      };
+      au.ontimeupdate = () => {
+        if (dead || !self || !isFinite(self.duration) || self.duration <= 0) return;
+        const t = self.currentTime / self.duration;
+        wave.setProgress(t);
+        timeEl.textContent = fmtTime(self.currentTime) + " / " + fmtTime(self.duration);
+      };
+      au.onended = () => { if (au === self) { au = null; playBtn.textContent = "▶ 播放"; wave.setProgress(0); } };
+      au.onerror = () => { if (au === self) { au = null; playBtn.textContent = "▶ 播放"; wave.setMsg("无法播放该文件"); } };
+      au.play().then(() => { playBtn.textContent = "■ 停止"; }).catch(() => { au = null; });
+    };
+    // 页面切走时清掉解码器，避免 AudioContext 越积越多
+    detailCleanup = () => { dead = true; wave.destroy(); if (audioCtx) { try { audioCtx.close(); } catch (e) { } audioCtx = null; } };
+
+    const g3 = h("div", { class: "ed-group" });
+    g3.append(h("div", { class: "ed-grouptitle" }, "替换音频"));
     const file = h("input", { type: "file", accept: "audio/*", style: "display:none" });
     file.onchange = async () => {
       const f = file.files[0]; if (!f) return;
       ED.sounds[selPath] = await readImageFile(f);   // 复用：FileReader → data URL
       mark(); drawList(); drawDetail();
     };
-    g2.append(h("div", { class: "ed-row" },
+    g3.append(h("div", { class: "ed-row" },
       h("button", { class: "ed-btn", onclick: () => file.click() }, "上传替换…"), file,
       over ? h("button", { class: "ed-btn danger", onclick: () => { delete ED.sounds[selPath]; mark(); drawList(); drawDetail(); } }, "还原为原版") : null));
-    right.append(g2);
+    right.append(g3);
 
     // 引用情况：这个音频被谁用了（地图音乐 / 标题结局 / 技能音效 …）
-    const g3 = h("div", { class: "ed-group" });
-    g3.append(h("div", { class: "ed-grouptitle" }, "被引用处"));
+    const g4 = h("div", { class: "ed-group" });
+    g4.append(h("div", { class: "ed-grouptitle" }, "被引用处"));
     const name = selPath.split("/").pop();
     const refs = [];
     for (const [mid, mp] of Object.entries(ED.maps || {})) {
@@ -1228,8 +1350,8 @@ function tabAudio() {
     const gm = (ED.content.game && ED.content.game.music) || {};
     if (gm.start === name) refs.push("标题音乐");
     if (gm.end === name) refs.push("结局音乐");
-    g3.append(h("div", { class: "ed-ghint" }, refs.length ? refs.join("、") : "（暂无引用）"));
-    right.append(g3);
+    g4.append(h("div", { class: "ed-ghint" }, refs.length ? refs.join("、") : "（暂无引用）"));
+    right.append(g4);
   };
 
   clear(listWrap);
@@ -1364,8 +1486,14 @@ function tabAssets() {
     right.append(h("h3", { style: "margin-top:0" }, fileName(selPath)));
     right.append(rhint(selPath));
     const big = h("img", { class: "ed-decor-big", src: ED.images[selPath] || assetSrc(selPath), style: "max-width:100%;max-height:320px" });
-    big.onerror = () => { big.style.opacity = "0.12"; };
-    right.append(h("div", { style: "display:flex;justify-content:center;background:#0a0b0d;border:1px solid #22262d;border-radius:4px;padding:12px;margin:8px 0" }, big));
+    // 加载失败 → 换成留空的占位图案（不要浏览器默认的破图）
+    const bigPh = imgPlaceholder("图片加载失败：" + fileName(selPath));
+    bigPh.style.minHeight = "160px";
+    bigPh.style.minWidth = "220px";
+    bigPh.style.display = "none";
+    big.onerror = () => { big.style.display = "none"; bigPh.style.display = ""; };
+    big.onload = () => { big.style.display = ""; bigPh.style.display = "none"; };
+    right.append(h("div", { style: "display:flex;justify-content:center;align-items:center;background:#0a0b0d;border:1px solid #22262d;border-radius:4px;padding:12px;margin:8px 0" }, big, bigPh));
     right.append(h("div", { class: "ed-row" }, h("span", null, "来源：" + (overridden ? "本版本上传的覆盖图" : "默认版本原图"))));
 
     const file = h("input", { type: "file", accept: "image/*", style: "display:none" });
