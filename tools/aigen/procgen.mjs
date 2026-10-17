@@ -124,19 +124,38 @@ function ironSword(size) {
 
 /** 长枪：长木杆 + 叶形枪头 + 红缨。 */
 function spear(size) {
+  // 关键洞察（经视觉模型 A/B 对比得出）：
+  // 32×32 内竖直物品受高度限制，斜置能拿到对角线长度（≈1.41 倍），
+  // 「长杆」的比例才成立。手绘乌木剑正是斜置，因此被模型判为「最像枪」。
+  // 之前竖直版本反复被判为「匕首」，加长枪头也没用——方向错了。
   const c = canvas(size), s = size / 32;
-  const cx = 15 * s;
-  // 杆（略斜，从右下到左上）
-  line(c, cx + 2 * s, 30 * s, cx - 1 * s, 13 * s, P.wood, Math.max(2, 1.6 * s));
-  line(c, cx + 2.8 * s, 30 * s, cx - 0.2 * s, 13 * s, P.woodD, Math.max(1, s));
-  // 枪头（叶形，明显比杆宽）
-  poly(c, [[cx - 1 * s, 13 * s], [cx + 2 * s, 9 * s], [cx + 1.5 * s, 3 * s], [cx - 1.5 * s, 5 * s]], P.steel);
-  line(c, cx + 0.8 * s, 5 * s, cx + 0.2 * s, 12 * s, P.steelL, Math.max(1, s));
-  line(c, cx - 1 * s, 8 * s, cx - 0.3 * s, 12 * s, P.steelD, Math.max(1, s));
-  // 缨（向左下垂的红穗，与枪头分开）
-  line(c, cx - 0.6 * s, 13.5 * s, cx - 4 * s, 17 * s, P.red, Math.max(1, s));
-  line(c, cx - 0.6 * s, 14.5 * s, cx - 3.2 * s, 19 * s, P.redD, Math.max(1, s));
-  line(c, cx - 0.4 * s, 14 * s, cx - 4.4 * s, 15.5 * s, P.red, Math.max(1, s));
+  // 杆：从左下 (4,30) 斜向右上 (20,7)，贯穿对角线
+  const x0 = 4 * s, y0 = 30 * s, x1 = 20 * s, y1 = 7 * s;
+  line(c, x0, y0, x1, y1, P.wood, Math.max(2, 1.4 * s));
+  // 木纹暗侧（沿杆偏右下偏移）
+  line(c, x0 + 0.7 * s, y0, x1 + 0.7 * s, y1, P.woodD, Math.max(1, s * 0.7));
+  // 枪头：沿同一方向延伸的窄长刃，宽约为杆的 3 倍
+  const dx = (x1 - x0), dy = (y1 - y0);
+  const len = Math.hypot(dx, dy), ux = dx / len, uy = dy / len;
+  const px = -uy, py = ux;                         // 垂直方向单位向量
+  const w = 3.4 * s;                                // 刃半宽（偏宽才能在 32px 下辨认出金属头）
+  const tipX = x1 + ux * 10 * s, tipY = y1 + uy * 10 * s;
+  poly(c, [
+    [x1 + px * w, y1 + py * w],
+    [x1 + px * w * 0.55 + ux * 6.5 * s, y1 + py * w * 0.55 + uy * 6.5 * s],
+    [tipX, tipY],
+    [x1 - px * w * 0.55 + ux * 6.5 * s, y1 - py * w * 0.55 + uy * 6.5 * s],
+    [x1 - px * w, y1 - py * w],
+  ], P.steel);
+  // 中脊高光
+  // 中脊高光 + 两侧亮面：让金属头在缩小后仍明显区别于木杆
+  line(c, x1 + ux * 0.5 * s, y1 + uy * 0.5 * s, tipX - ux * 0.8 * s, tipY - uy * 0.8 * s, P.steelL, Math.max(1, s * 0.9));
+  line(c, x1 + px * 1.8 * s + ux * s, y1 + py * 1.8 * s + uy * s, tipX - ux * 2 * s, tipY - uy * 2 * s, P.steelL, Math.max(1, s * 0.6));
+  // 接环（垂直于杆的金色横箍）
+  line(c, x1 + px * 2.4 * s, y1 + py * 2.4 * s, x1 - px * 2.4 * s, y1 - py * 2.4 * s, P.gold, Math.max(1, s));
+  // 红缨：从接环向下（屏幕下方）垂
+  line(c, x1 - px * 1.2 * s, y1 - py * 1.2 * s + 1 * s, x1 - px * 2.2 * s, y1 - py * 2.2 * s + 4 * s, P.red, Math.max(1, s));
+  line(c, x1 - px * 0.4 * s, y1 - py * 0.4 * s + 1 * s, x1 - px * 1.4 * s, y1 - py * 1.4 * s + 4.5 * s, P.redD, Math.max(1, s * 0.9));
   outline(c);
   return c;
 }
@@ -144,20 +163,28 @@ function spear(size) {
 /** 古书：线装书，封面斜置 + 书页侧层次 + 书脊。 */
 function book(size) {
   const c = canvas(size), s = size / 32;
-  // 书页侧面（先在底层，往右错开形成厚度）
-  poly(c, [[23 * s, 7 * s], [27.5 * s, 9 * s], [28 * s, 25 * s], [24.5 * s, 26.5 * s]], P.paper);
-  for (let i = 0; i < 5; i++)
-    line(c, 24 * s, (9 + i * 3.3) * s, 27.5 * s, (10 + i * 3.3) * s, P.paperD, Math.max(1, s * 0.8));
-  // 封面
-  poly(c, [[6 * s, 8 * s], [24 * s, 6 * s], [24.5 * s, 25 * s], [7 * s, 27 * s]], P.paperD);
-  // 封面内框（让它不像一块纯色）
-  poly(c, [[8.5 * s, 10.5 * s], [21.5 * s, 9 * s], [22 * s, 22.5 * s], [9 * s, 24 * s]], P.paper);
-  // 书名签（红竖条）
-  poly(c, [[11 * s, 11 * s], [14.5 * s, 10.6 * s], [14.8 * s, 20 * s], [11.3 * s, 20.4 * s]], P.red);
-  for (let i = 0; i < 3; i++)
-    line(c, 11.8 * s, (12.5 + i * 2.6) * s, 14 * s, (12.3 + i * 2.6) * s, P.redD, Math.max(1, s * 0.7));
-  // 书脊线（左侧粗竖线）
-  line(c, 6.5 * s, 8.5 * s, 7.5 * s, 26.5 * s, P.woodD, Math.max(1, 1.4 * s));
+  // 透视：书是斜放的扁平体，不是立方块。
+  // 先画「书页堆」——右侧的厚度，露出多条平行线是“书”最强特征
+  poly(c, [
+    [20 * s, 8 * s], [27 * s, 12 * s], [27 * s, 22 * s], [20 * s, 26 * s],
+  ], P.paper);
+  for (let i = 0; i < 6; i++) {
+    const t = 9.5 + i * 2.4;
+    line(c, 20 * s, t * s, 27 * s, (t + 3.6) * s, P.paperD, Math.max(1, s * 0.7));
+  }
+  // 封面（左半，稍窄于书页堆，形成错位）
+  poly(c, [
+    [5 * s, 10 * s], [20 * s, 8 * s], [20 * s, 26 * s], [5 * s, 24 * s],
+  ], P.paperD);
+  // 封面上的纹饰框
+  poly(c, [
+    [7 * s, 12 * s], [18 * s, 10.5 * s], [18 * s, 23.5 * s], [7 * s, 22 * s],
+  ], P.wood);
+  // 书名签（红竖条，偏左）
+  poly(c, [[8.5 * s, 13 * s], [11.5 * s, 12.7 * s], [11.5 * s, 20.5 * s], [8.5 * s, 20.8 * s]], P.red);
+  line(c, 10 * s, 13.2 * s, 10 * s, 20.3 * s, P.gold, Math.max(1, s * 0.7));
+  // 书脊（最左粗深色竖带）
+  poly(c, [[5 * s, 10 * s], [6.6 * s, 9.8 * s], [6.6 * s, 24.2 * s], [5 * s, 24 * s]], P.woodD);
   outline(c);
   return c;
 }
