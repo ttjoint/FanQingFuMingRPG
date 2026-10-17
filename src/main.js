@@ -6,7 +6,9 @@ import { loadJSON, loadImg, getImg, preloadChar, setAssetOverrides } from "./cor
 import { DEFAULT_CONFIG } from "./core/config.js";
 import { screenToWorld } from "./core/utils.js";
 import { buildContentDB, applyPatch } from "./content/contentdb.js";
-import { buildMapData } from "./world/map.js";
+import { buildMapData, loadMap, setPlayer } from "./world/map.js";
+import { castSkill } from "./systems/combat.js";
+import { spawnProjectile } from "./systems/projectiles.js";
 import { fromLegacyMap } from "./content/mapDoc.js";
 import { loadPack, defaultPack, loadIndex } from "./content/store.js";
 import { getRuntime } from "./runtime/context.js";
@@ -25,7 +27,32 @@ import { BUILD } from "./core/constants.js";
 console.log("[gsxy] build:", BUILD);
 
 // 调试入口（控制台 / E2E 脚本可用）：window.__GAME__
-globalThis.__GAME__ = { G, A, MAPS, runtime, screenToWorld, advanceDialog: ans => advanceDialog(runtime, ans), update, render };
+globalThis.__GAME__ = {
+  G, A, MAPS, runtime, screenToWorld, advanceDialog: ans => advanceDialog(runtime, ans), update, render,
+  // 调试/测试用：直接切地图。正常流程由脚本系统的 LoadMap 指令驱动。
+  // 直接进入指定地图（跳过片头/菜单）。供调试与 e2e 使用：
+  // 把场景强制切到 "game" 并装配主角，否则画面仍停留在菜单。
+  // 调试用：对目标释放技能。
+  // 注意：带 projectile 的技能走的是「攻击提交」路径（spawnProjectile），
+  // 不是 castSkill——castSkill 只处理 AOE/治疗/多目标，不会生成弹道。
+  cast: (skillName, target) => {
+    const sk = (A.skills || []).find(s => s.name === skillName);
+    const tgt = target || (G.npcs || []).find(n => !n.dead);
+    if (!sk || !G.player || !tgt) return null;
+    if (sk.projectile) {
+      spawnProjectile(runtime, G.player, tgt, sk, { params: { atk: G.stats.attack, hitRate: 100 } });
+      return { skill: sk.name, target: tgt.name, mode: "projectile" };
+    }
+    castSkill(runtime, G.player, tgt, sk, { atk: G.stats.attack, hitRate: 100 });
+    return { skill: sk.name, target: tgt.name, mode: "cast" };
+  },
+  gotoMap: (name, row, col, dir) => {
+    G.scene = "game"; G.savePanel = false; G.dialog = null; G.script = null;
+    loadMap(runtime, name);
+    setPlayer(runtime, row ?? 1, col ?? 1, dir);
+    if (G.player) G.player.action = "stand";
+  },
+};
 
 let last = performance.now();
 function loop(now) {

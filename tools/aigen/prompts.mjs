@@ -93,7 +93,10 @@ export function buildPrompt(kind, subject, opts) {
 
 /** 把目标尺寸规范化成 [w,h]。 */
 export function sizeOf(size) {
-  return Array.isArray(size) ? [size, size] : [size, size];
+  // size 可以是数字（方形）或 [w, h]（非方形，如头像 63×80）。
+  // 旧实现把数组又包了一层，导致解构出的是数组而不是数字 → NaN。
+  if (Array.isArray(size)) return [size[0], size[1] != null ? size[1] : size[0]];
+  return [size, size];
 }
 
 /** 背景感知的抠图色键：亮背景用白，暗背景用黑。返回 [r,g,b]。 */
