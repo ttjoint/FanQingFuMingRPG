@@ -135,36 +135,170 @@ function toast(msg) {
 const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["ais", "AI"], ["buffs", "Buff"], ["items", "物品"], ["skills", "技能"], ["effects", "特效"], ["affixes", "词缀"], ["config", "升级数值"], ["game", "标题结局"], ["assets", "图片素材"]];
 let navEl;
 
+// 标签页图标（纯文本，无需图标字体）。
+const TAB_ICONS = {
+  maps: "🗺", decor: "🌳", scripts: "📜", npcs: "👤", ais: "🧠", buffs: "✨",
+  items: "⚔", skills: "⚡", effects: "💥", affixes: "🔧", config: "📈",
+  game: "🎬", assets: "🖼",
+};
+
+// 窄屏(<900px)判定：导航/属性栏变抽屉。用 matchMedia 便于监听变化。
+const MOBILE_MQ = "(max-width: 900px)";
+const isNarrow = () => window.matchMedia(MOBILE_MQ).matches;
+
 function buildShell() {
   clear(root);
-  const nameIn = h("input", { type: "text", value: ED.name, style: "width:150px" });
+  const nameIn = h("input", { type: "text", value: ED.name, style: "width:150px", title: "版本名称" });
   nameIn.oninput = () => { ED.name = nameIn.value; mark(); };
+
+  // 窄屏抽屉开关
+  const navToggle = h("button", {
+    class: "ed-btn ghost ed-btnicon ed-drawerbtn", title: "切换导航",
+    onclick: () => toggleDrawer(navEl),
+  }, "☰");
+  const sideToggle = h("button", {
+    class: "ed-btn ghost ed-btnicon ed-drawerbtn", title: "切换属性栏",
+    onclick: () => toggleDrawer(sideEl),
+  }, "⧉");
+
   const bar = h("div", { class: "ed-bar" },
+    navToggle,
     h("span", { class: "ed-title" }, "内容编辑器"),
-    h("span", { class: "ed-hint" }, "版本："), nameIn,
+    h("span", { class: "ed-verlab" }, "版本"), nameIn,
+    h("span", { class: "ed-sep" }),
+    h("div", { class: "ed-grp" },
+      h("button", { class: "ed-btn primary", title: "保存 (Ctrl+S)", onclick: () => doSave() }, "保存"),
+      h("button", { class: "ed-btn", title: "导出内容包", onclick: () => exportPack(exportObj()) }, "导出"),
+      h("button", { class: "ed-btn", title: "导入内容包", onclick: () => pickJSON(async o => { try { const p = await importPack(o); ED = createProject(A.defaults, p); setActive(p.id); dirty = true; buildShell(); selectTab(curTab); toast("已导入为版本「" + p.name + "」"); } catch (e) { alert(String(e.message || e)); } }) }, "导入")),
     h("span", { class: "ed-spacer" }),
-    h("button", { class: "ed-btn primary", onclick: () => doSave() }, "保存"),
-    h("button", { class: "ed-btn", onclick: () => exportPack(exportObj()) }, "导出"),
-    h("button", { class: "ed-btn", onclick: () => pickJSON(async o => { try { const p = await importPack(o); ED = createProject(A.defaults, p); setActive(p.id); dirty = true; buildShell(); selectTab(curTab); toast("已导入为版本「" + p.name + "」"); } catch (e) { alert(String(e.message || e)); } }) }, "导入"),
-    h("button", { class: "ed-btn", onclick: () => closeEditor() }, "关闭并返回"));
+    h("button", { class: "ed-btn", title: "关闭编辑器，返回游戏菜单 (Esc)", onclick: () => closeEditor() }, "关闭并返回"),
+    sideToggle);
+
   navEl = h("div", { class: "ed-nav" });
   mainEl = h("div", { class: "ed-main" });
   sideEl = h("div", { class: "ed-side" });
   statusEl = h("div", { class: "ed-toast" });
-  root.append(bar, h("div", { class: "ed-body" }, navEl, mainEl, sideEl), statusEl);
+  const scrim = h("div", { class: "ed-scrim", onclick: () => closeDrawers() });
+
+  // 可拖拽分栏（桌面端）：左导航 / 右属性栏都能调宽，宽度记在 localStorage。
+  const rszNav = mkResizer("nav", navEl, "--ed-nav-w", 120, 320);
+  const rszSide = mkResizer("side", sideEl, "--ed-side-w", 240, 640);
+
+  root.append(bar,
+    h("div", { class: "ed-body" }, navEl, rszNav, mainEl, rszSide, sideEl, scrim),
+    statusEl);
+  restoreWidths();
   renderNav();
+  bindHotkeys();
+}
+
+// ---- 分栏拖拽 ----
+function restoreWidths() {
+  for (const [k, prop] of [["nav", "--ed-nav-w"], ["side", "--ed-side-w"]]) {
+    const v = localStorage.getItem("ed.width." + k);
+    if (v) root.style.setProperty(prop, v + "px");
+  }
+}
+
+function mkResizer(key, target, prop, min, max) {
+  const el = h("div", { class: "ed-resizer", title: "拖动调整宽度 / 双击恢复默认" });
+  let startX = 0, startW = 0;
+  const onMove = e => {
+    const dx = e.clientX - startX;
+    // 左侧导航向右拖 = 变宽；右侧属性栏向右拖 = 变窄。
+    const w = key === "nav" ? startW + dx : startW - dx;
+    target.style.width = Math.max(min, Math.min(max, w)) + "px";
+  };
+  const onUp = () => {
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+    el.classList.remove("dragging");
+    document.body.classList.remove("ed-resizing");
+    localStorage.setItem("ed.width." + key, String(parseInt(target.style.width, 10) || ""));
+  };
+  el.addEventListener("mousedown", e => {
+    if (isNarrow()) return;
+    e.preventDefault();
+    startX = e.clientX; startW = target.getBoundingClientRect().width;
+    el.classList.add("dragging");
+    document.body.classList.add("ed-resizing");
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+  el.addEventListener("dblclick", () => {
+    // 双击恢复 CSS 默认宽度
+    target.style.width = "";
+    root.style.removeProperty(prop);
+    localStorage.removeItem("ed.width." + key);
+  });
+  return el;
+}
+
+// ---- 窄屏抽屉 ----
+function toggleDrawer(el) {
+  const on = !el.classList.contains("open");
+  closeDrawers();
+  if (on) { el.classList.add("open"); const sc = root.querySelector(".ed-scrim"); if (sc) sc.classList.add("on"); }
+}
+function closeDrawers() {
+  for (const el of [navEl, sideEl]) if (el) el.classList.remove("open");
+  const sc = root && root.querySelector(".ed-scrim"); if (sc) sc.classList.remove("on");
+}
+
+// ---- 键盘快捷键（桌面习惯） ----
+let hotkeysBound = false;
+function bindHotkeys() {
+  if (hotkeysBound) return;
+  hotkeysBound = true;
+  document.addEventListener("keydown", e => {
+    if (G.scene !== "editor" || !root) return;
+    const el = /** @type {any} */ (e.target);
+    const tag = (el && el.tagName) || "";
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(tag) || !!(el && el.isContentEditable);
+    // Ctrl+S / Cmd+S：保存（输入框内也生效）
+    if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+      e.preventDefault(); doSave(); return;
+    }
+    // Esc：优先关抽屉，其次关编辑器
+    if (e.key === "Escape") {
+      if (navEl && (navEl.classList.contains("open") || sideEl.classList.contains("open"))) {
+        closeDrawers(); e.preventDefault(); return;
+      }
+      if (!typing) { e.preventDefault(); closeEditor(); }
+      return;
+    }
+    if (typing) return;
+    // Ctrl+1..9 / Ctrl+0：切换标签页
+    if ((e.ctrlKey || e.metaKey) && /^[0-9]$/.test(e.key)) {
+      const idx = e.key === "0" ? 9 : (parseInt(e.key, 10) - 1);
+      const t = TABS[idx];
+      if (t) { e.preventDefault(); selectTab(t[0]); }
+    }
+  });
 }
 
 function renderNav() {
   clear(navEl);
-  for (const [k, label] of TABS) navEl.append(h("button", { class: curTab === k ? "on" : "", onclick: () => selectTab(k) }, label));
+  TABS.forEach(([k, label], i) => {
+    const b = h("button", {
+      class: curTab === k ? "on" : "",
+      title: label + (i < 9 ? "  (Ctrl+" + (i + 1) + ")" : "  (Ctrl+0)"),
+      onclick: () => { selectTab(k); if (isNarrow()) closeDrawers(); },
+    }, h("span", { class: "navico" }, TAB_ICONS[k] || "•"), h("span", { class: "navlab" }, label));
+    navEl.append(b);
+  });
 }
 
 function selectTab(k) {
   if (mapEditor) { mapEditor.destroy(); mapEditor = null; }
   curTab = k; renderNav();
   clear(mainEl); clear(sideEl);
-  if (k !== "maps" && k !== "decor") sideEl.style.display = "none"; else sideEl.style.display = "";
+  mainEl.className = "ed-main";
+  // 属性栏只在地图/装饰物页有意义；桌面端隐藏时同步隐藏拖拽手柄。
+  const needSide = k === "maps" || k === "decor";
+  sideEl.style.display = needSide ? "" : "none";
+  const sideRsz = root.querySelectorAll(".ed-resizer")[1];
+  if (sideRsz) sideRsz.style.display = (needSide && !isNarrow()) ? "" : "none";
   ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, ais: tabAis, buffs: tabBuffs, items: tabItems, skills: tabSkills, effects: tabEffects, affixes: tabAffixes, config: tabConfig, game: tabGame, assets: tabAssets })[k]();
 }
 

@@ -233,39 +233,95 @@ export function renderForm(host, schema, obj, onChange) {
 export function renderListEditor(host, opts) {
   const { list, schema, columns, makeNew } = opts;
   let sel = opts.sel != null ? opts.sel : 0;
+  // 桌面端筛选：按名称/任意列文本模糊匹配（真实索引仍用 list 下标）。
+  let query = "";
+  const match = it => {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    for (const c of columns) {
+      const v = c.get ? c.get(it) : it[c.k];
+      if (v != null && String(v).toLowerCase().includes(q)) return true;
+    }
+    return false;
+  };
   const redraw = () => {
     sel = opts.sel != null ? opts.sel : 0;   // 每次重绘都从 opts 同步选中项（行点击/新建/删除后才会切换）
     clear(host);
+
+    // ---- 工具栏 ----
+    const searchIn = h("input", { type: "text", placeholder: "搜索…", value: query, style: "min-width:160px" });
+    const cntEl = h("span", { class: "ed-count" });
+    const updateCount = () => {
+      const vis = list.filter(match).length;
+      cntEl.textContent = "共 " + list.length + (query ? " / 显示 " + vis : "") + " 项";
+    };
+    searchIn.oninput = () => { query = searchIn.value; drawTable(); updateCount(); };
     host.append(h("div", { class: "ed-tools" },
       h("button", { class: "ed-btn", onclick: () => { list.push(makeNew()); opts.sel = list.length - 1; opts.onStructural && opts.onStructural(); redraw(); } }, "＋ 新建"),
       h("button", { class: "ed-btn", onclick: () => { if (sel == null || !list[sel]) return; list.splice(sel + 1, 0, JSON.parse(JSON.stringify(list[sel]))); opts.sel = sel + 1; opts.onStructural && opts.onStructural(); redraw(); } }, "复制"),
       h("button", { class: "ed-btn danger", onclick: () => { if (sel == null || !list[sel]) return; list.splice(sel, 1); opts.sel = Math.max(0, sel - 1); opts.onStructural && opts.onStructural(); redraw(); } }, "删除"),
+      h("div", { class: "ed-search" }, searchIn),
+      cntEl,
     ));
+
+    // ---- 主区域：桌面双栏（表格 | 编辑表单），窄屏上下堆叠 ----
+    const split = h("div", { class: "ed-split" });
+    const left = h("div", { class: "ed-split-list" });
+    const right = h("div", { class: "ed-split-form" });
+    split.append(left, right);
+    host.append(split);
+
     const tbl = h("table", { class: "ed-table" });
     const head = h("tr");
     for (const c of columns) head.append(h("th", null, c.label));
     tbl.append(h("thead", null, head));
     const body = h("tbody");
-    list.forEach((it, i) => {
-      const tr = h("tr", { class: i === sel ? "on" : "", onclick: () => { opts.sel = i; redraw(); } });
-      for (const c of columns) tr.append(h("td", null, c.get ? c.get(it) : (it[c.k] == null ? "" : String(it[c.k]))));
-      body.append(tr);
-    });
     tbl.append(body);
-    host.append(tbl);
-    if (list[sel]) {
-      host.append(h("h3", null, "编辑：" + (list[sel].name || list[sel].id || ("#" + sel))));
-      const form = h("div", { class: "ed-grid" });
-      host.append(form);
-      const syncNames = () => {
-        const trs = body.children;
-        for (let i = 0; i < trs.length; i++) {
-          const tds = trs[i].children;
-          for (let j = 0; j < columns.length; j++) tds[j].textContent = columns[j].get ? columns[j].get(list[i]) : (list[i][columns[j].k] == null ? "" : String(list[i][columns[j].k]));
+    // 表格放进专用滚动容器，sticky 表头才能生效；左栏高度不随行数撑高。
+    left.append(h("div", { class: "ed-tablescroll" }, tbl));
+
+    let formHost = null;
+    const drawTable = () => {
+      clear(body);
+      list.forEach((it, i) => {
+        if (!match(it)) return;
+        const tr = h("tr", { class: i === sel ? "on" : "", onclick: () => { opts.sel = i; drawSelection(); fadeAll(); tr.className = "on"; } });
+        for (const c of columns) tr.append(h("td", null, c.get ? c.get(it) : (it[c.k] == null ? "" : String(it[c.k]))));
+        body.append(tr);
+      });
+      if (!body.children.length) body.append(h("tr", null, h("td", { colspan: columns.length }, h("div", { class: "ed-empty" }, "没有匹配的项"))));
+    };
+    const fadeAll = () => { for (const tr of body.children) tr.className = ""; };
+
+    // 重绘右侧表单（选中项变化时调用，不重建左侧列表，保留滚动位置）
+    const drawSelection = () => {
+      clear(right);
+      const cur = list[sel];
+      if (!cur) { right.append(h("div", { class: "ed-empty" }, "左侧选择一个条目开始编辑")); return; }
+      right.append(h("h3", null, "编辑：" + (cur.name || cur.id || ("#" + sel))));
+      formHost = h("div", { class: "ed-grid" });
+      right.append(formHost);
+      renderForm(formHost, schema, cur, () => {
+        opts.onChange && opts.onChange();
+        // 表单里改名要让左侧表格即时反映（只更新文本，不重建 DOM，避免输入框失焦）
+        let row = 0;
+        for (let i = 0; i < list.length; i++) {
+          if (!match(list[i])) continue;
+          const tr = body.children[row++];
+          if (!tr) continue;
+          for (let j = 0; j < columns.length; j++) {
+            const c = columns[j];
+            const td = tr.children[j];
+            if (!td) continue;
+            td.textContent = c.get ? c.get(list[i]) : (list[i][c.k] == null ? "" : String(list[i][c.k]));
+          }
         }
-      };
-      renderForm(form, schema, list[sel], () => { opts.onChange && opts.onChange(); syncNames(); });
-    }
+      });
+    };
+
+    drawTable();
+    updateCount();
+    drawSelection();
   };
   redraw();
   return { redraw, getSel: () => opts.sel };

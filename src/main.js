@@ -65,7 +65,10 @@ function loop(now) {
 }
 
 function fit() {
-  const s = Math.max(1, Math.floor(Math.min(window.innerWidth / VW, window.innerHeight / VH) * 2) / 2);
+  // 允许缩小到 0.5（原来最小 1.0）：窄屏/小窗口下 640x480 画面会超出视口，
+  // 缩到 0.5 仍能完整显示，避免画面被裁掉。
+  const raw = Math.min(window.innerWidth / VW, window.innerHeight / VH);
+  const s = Math.max(0.5, Math.floor(raw * 2) / 2);
   cv.style.width = (VW * s) + "px"; cv.style.height = (VH * s) + "px";
 }
 window.addEventListener("resize", fit); fit();
