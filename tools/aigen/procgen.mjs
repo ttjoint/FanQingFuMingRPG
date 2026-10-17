@@ -210,7 +210,82 @@ function potion(size) {
   return c;
 }
 
-export const SHAPES = { ironSword, spear, book, jadePendant, potion };
+/** 宝石：多面切割轮廓 + 高光。`hue` 决定颜色，4 种宝石共用同一形状。 */
+function gem(size, hue) {
+  const c = canvas(size), s = size / 32;
+  const cx = 16 * s, cy = 18 * s;
+  const cols = {
+    red: { base: [206, 56, 64], d: [140, 28, 40], l: [246, 132, 132] },
+    blue: { base: [72, 118, 210], d: [40, 68, 148], l: [140, 186, 246] },
+    yellow: { base: [226, 178, 62], d: [162, 116, 28], l: [250, 224, 138] },
+    purple: { base: [148, 86, 196], d: [98, 50, 140], l: [202, 158, 236] },
+  }[hue];
+  // 主体：上平、下尖的多面体
+  poly(c, [
+    [cx - 7 * s, cy - 5 * s], [cx + 7 * s, cy - 5 * s],
+    [cx + 9 * s, cy - 1 * s], [cx, cy + 9 * s], [cx - 9 * s, cy - 1 * s],
+  ], cols.base);
+  // 台面（顶部亮带）
+  poly(c, [[cx - 7 * s, cy - 5 * s], [cx + 7 * s, cy - 5 * s], [cx + 9 * s, cy - 1 * s], [cx - 9 * s, cy - 1 * s]], cols.l);
+  // 右侧暗面
+  poly(c, [[cx + 9 * s, cy - 1 * s], [cx, cy + 9 * s], [cx, cy - 1 * s]], cols.d);
+  // 刻面棱线
+  line(c, cx - 7 * s, cy - 5 * s, cx - 4 * s, cy - 1 * s, cols.l, Math.max(1, s * 0.7));
+  line(c, cx + 7 * s, cy - 5 * s, cx + 4 * s, cy - 1 * s, cols.d, Math.max(1, s * 0.7));
+  line(c, cx - 4 * s, cy - 1 * s, cx, cy + 9 * s, cols.d, Math.max(1, s * 0.6));
+  // 高光点
+  disc(c, cx - 3.5 * s, cy - 3 * s, 1.2 * s, [255, 255, 255]);
+  outline(c);
+  return c;
+}
+
+export const SHAPES = {
+  ironSword, spear, book, jadePendant, potion,
+  gemRed: (z) => gem(z, "red"),
+  gemBlue: (z) => gem(z, "blue"),
+  gemYellow: (z) => gem(z, "yellow"),
+  gemPurple: (z) => gem(z, "purple"),
+};
+
+/**
+ * 规范化为游戏内图标规格：内容缩放到不超过 maxContent 并居中，四周至少留 margin。
+ * 现有手绘素材就是 32×32 + 内容 bbox ≤30×30 + 与边留 1px，这里保持一致。
+ */
+export function normalizeIcon(img, size = 32, margin = 1) {
+  const maxContent = size - margin * 2;
+  // 内容包围盒
+  let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x++) {
+      if (img.data[(y * img.width + x) * 4 + 3] > 16) {
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y);
+        x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+      }
+    }
+  }
+  if (x1 < 0) return img;                       // 空图
+  const cw = x1 - x0 + 1, ch = y1 - y0 + 1;
+  // 按 30px 适配，允许放大：程序化图形是矢量描述的，放大后仍在像素网格上
+  const scale = Math.min(maxContent / cw, maxContent / ch);
+  const tw = Math.max(1, Math.round(cw * scale));
+  const th = Math.max(1, Math.round(ch * scale));
+
+  const out = Buffer.alloc(size * size * 4, 0);
+  const ox = Math.floor((size - tw) / 2);
+  const oy = Math.floor((size - th) / 2);
+  // 最近邻采样：程序化图形本身就在像素网格上，不应模糊
+  for (let y = 0; y < th; y++) {
+    for (let x = 0; x < tw; x++) {
+      const sx = x0 + Math.min(cw - 1, Math.floor(x / scale));
+      const sy = y0 + Math.min(ch - 1, Math.floor(y / scale));
+      const si = (sy * img.width + sx) * 4;
+      const di = ((oy + y) * size + ox + x) * 4;
+      out[di] = img.data[si]; out[di + 1] = img.data[si + 1];
+      out[di + 2] = img.data[si + 2]; out[di + 3] = img.data[si + 3];
+    }
+  }
+  return { width: size, height: size, data: out };
+}
 
 // ── CLI ──
 // 用 pathToFileURL 比较（直接拼 file:// 在中文路径下会被百分号编码，判等永远失败）
@@ -229,7 +304,7 @@ if (isMain) {
   const outDir = path.join("_aigen", "proc");
   fs.mkdirSync(outDir, { recursive: true });
   const names = Object.keys(SHAPES);
-  const imgs = names.map((n) => SHAPES[n](size));
+  const imgs = names.map((n) => normalizeIcon(SHAPES[n](size), size));
   names.forEach((n, i) => fs.writeFileSync(path.join(outDir, n + ".png"), encodePNG(imgs[i])));
 
   // 横向对照表（8x 放大）
