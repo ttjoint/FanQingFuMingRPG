@@ -1,6 +1,6 @@
 // ContentDB：内容定义的规范模型（Record<id, Def>），由旧 assets 数据构建，
 // 也可由打包补丁（patch）覆盖。构建脚本、运行时、编辑器共用这一份结构。
-import { CONTENT_VERSION, normalizeNpc, normalizeItem, normalizeSkill, normalizeConfig, normalizeMapDoc, normalizeDecorTemplates, normalizeFactions, normalizeAis, normalizeBuffList, normalizeEffectList } from "./schema.js";
+import { CONTENT_VERSION, normalizeNpc, normalizeItem, normalizeSkill, normalizeConfig, normalizeMapDoc, normalizeDecorTemplates, normalizeFactions, normalizeAis, normalizeBuffList, normalizeEffectList, normalizeAffixList } from "./schema.js";
 
 const deep = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
 export const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -22,6 +22,7 @@ export function buildContentDB(assets, mapDocs) {
     ais: normalizeAis(assets.ais),                   // AI 配置表（内容内置，单位按 id 引用）
     buffs: normalizeBuffList(assets.buffs),          // Buff/Debuff 配置表（内容内置，技能按 id 引用）
     effects: normalizeEffectList(assets.effects),    // 特效定义表（内容内置，技能/Buff/指示按 id 引用）
+    affixes: normalizeAffixList(assets.affixes),     // 词缀表（物品实例随机词缀的来源）
     game: deep(assets.game) || {}, transitions: deep(assets.transitions) || {}, mapsIndex: deep(assets.mapsIndex) || {},
     mapsManifest: (assets.mapsManifest || []).slice(), mapDocs: docs,
     decorTemplates: normalizeDecorTemplates(assets.decorTemplates || {}),   // 跨地图共享的装饰物模板
@@ -40,6 +41,7 @@ export function contentToLegacy(content) {
     ais: content.ais || [],
     buffs: content.buffs || [],
     effects: content.effects || [],
+    affixes: content.affixes || [],
     transitions: content.transitions, mapsIndex: content.mapsIndex, mapsManifest: content.mapsManifest,
     decorTemplates: content.decorTemplates || {},
   };
@@ -67,6 +69,7 @@ export function diffContent(base, next) {
   if (!eq(base.ais, next.ais)) patch.content.ais = deep(next.ais);   // AI 配置表（整表替换）
   if (!eq(base.buffs, next.buffs)) patch.content.buffs = deep(next.buffs);   // Buff 配置表（整表替换）
   if (!eq(base.effects, next.effects)) patch.content.effects = deep(next.effects);   // 特效定义表（整表替换）
+  if (!eq(base.affixes, next.affixes)) patch.content.affixes = deep(next.affixes);   // 词缀表（整表替换）
   // 装饰物模板（按贴图键）：只存非空且变化的条目
   {
     const b = base.decorTemplates || {}, n = next.decorTemplates || {};
@@ -102,6 +105,7 @@ export function applyPatch(base, patch) {
   if (c.ais !== undefined) out.ais = normalizeAis(c.ais);
   if (c.buffs !== undefined) out.buffs = normalizeBuffList(c.buffs);
   if (c.effects !== undefined) out.effects = normalizeEffectList(c.effects);
+  if (c.affixes !== undefined) out.affixes = normalizeAffixList(c.affixes);
   {
     if (!out.decorTemplates) out.decorTemplates = {};
     const mod = c.decorTemplates || {};

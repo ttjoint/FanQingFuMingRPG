@@ -2,12 +2,12 @@
 import { G } from "../core/state.js";
 import { getRuntime } from "../runtime/context.js";
 import { itemByName } from "../core/registry.js";
-import { setSlot, reindex, applyBonus, equipSlotFor, useEntry } from "../systems/inventory.js";
+import { setSlot, reindex, applyBonus, equipSlotFor, useEntry, socketInto, unsocketFrom, enhanceEntry } from "../systems/inventory.js";
 import { buyItem, buyInto, sellCursor } from "../systems/shop.js";
 import { playSound } from "../systems/audio.js";
 import { entryOf } from "../core/layout.js";
 
-export function handleSlotClick(slot, button) {
+export function handleSlotClick(slot, button, shift) {
   const rt = getRuntime();
   if (slot.kind === "shop") {
     const name = G.shop.goods[slot.key];
@@ -18,7 +18,12 @@ export function handleSlotClick(slot, button) {
     return;
   }
   const entry = entryOf(slot);
-  if (button === 2) { if (entry) useEntry(G, entry, slot.kind, slot.key); return; }
+  if (button === 2) {
+    if (!entry) return;
+    // 装备格：Shift+右键 = 强化；普通右键 = 卸下（沿用原行为）。
+    if (slot.kind === "equip" && shift) { enhanceEntry(G, entry); return; }
+    useEntry(G, entry, slot.kind, slot.key); return;
+  }
   // 手上是从商店拿起的商品：只有“空格或可叠放的同类格”左键才算购入，否则放下
   if (G.cursor && G.cursor.fromShop) {
     if (button !== 0) { G.cursor = null; return; }
@@ -31,17 +36,23 @@ export function handleSlotClick(slot, button) {
   }
   if (!G.cursor) {
     if (!entry) return;
-    if (slot.kind === "equip") { const it = itemByName(entry.name); if (it) applyBonus(G, it, -1); }
+    if (slot.kind === "equip") { const it = itemByName(entry.name); if (it) applyBonus(G, it, -1, entry); }
     G.cursor = entry; setSlot(G, slot.kind, slot.key, null); reindex(G); playSound(G, "pick_item.wav");
   } else if (!entry) {
     if (G.cursor.fromShop) { if (buyItem(rt, G.cursor.name, 1)) G.cursor = null; return; }
     setSlot(G, slot.kind, slot.key, G.cursor); G.cursor = null; reindex(G); playSound(G, "drop_item.wav");
   } else {
     if (G.cursor.fromShop) { if (buyItem(rt, G.cursor.name, 1)) G.cursor = null; return; }
+    // 手上是宝石、目标是装备：尝试镶嵌（而不是交换）。
     if (slot.kind === "equip") {
+      const gemIt = itemByName(G.cursor.name);
+      if (gemIt && (gemIt.kind === "gem" || gemIt.type === 9)) {
+        if (socketInto(G, entry, G.cursor, null, null)) { G.cursor = null; playSound(G, "drop_item.wav"); return; }
+        // 镶嵌失败（如孔满）则回落到普通交换提示。
+      }
       const it = itemByName(G.cursor.name), tgt = equipSlotFor(G, it);
       if (tgt !== slot.key) { G.tip = "不能放入该装备格"; G.tipT = 2; return; }
-      const ei = itemByName(entry.name); if (ei) applyBonus(G, ei, -1); applyBonus(G, it, +1);
+      const ei = itemByName(entry.name); if (ei) applyBonus(G, ei, -1, entry); applyBonus(G, it, +1, G.cursor);
     }
     setSlot(G, slot.kind, slot.key, G.cursor); G.cursor = entry; reindex(G);
   }

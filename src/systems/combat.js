@@ -293,7 +293,7 @@ export function killNPC(ctx, n) {
   // 掉落由数据驱动（npcs.json 的 drops 字段）。经掉落表 roll，支持几率/数量区间/词缀。
   const defs = {};
   for (const it of (A.items || [])) defs[it.name] = it;
-  for (const e of rollDrops(n.drops || [], defs)) dropGround(G, e, n.x, n.y);
+  for (const e of rollDrops(n.drops || [], defs, null, A.affixes || [])) dropGround(G, e, n.x, n.y);
   for (const k in G.missions) { const m = G.missions[k];
     if (m.type === 1 && m.target === n.name && m.state === 4) { m.got++; if (m.got >= m.need) m.state = 1; } }
   const ds = n.name + "_死.gsp";

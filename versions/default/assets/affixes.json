@@ -1,0 +1,13 @@
+[
+  {"id":"af_power","name":"锋利的","prefix":"锋利的","rarity":"magic","mods":{"atk":4},"weight":20,"slots":["weapon"]},
+  {"id":"af_keen","name":"锐利的","prefix":"锐利的","rarity":"magic","mods":{"atk":7},"weight":12,"slots":["weapon"]},
+  {"id":"af_blood","name":"嗜血的","prefix":"嗜血的","rarity":"rare","mods":{"atk":9,"hp":-5},"weight":6,"slots":["weapon"]},
+  {"id":"af_guard","name":"坚固的","prefix":"坚固的","rarity":"magic","mods":{"def":4},"weight":20,"slots":["armor"]},
+  {"id":"af_sturdy","name":"厚重的","prefix":"厚重的","rarity":"magic","mods":{"def":7},"weight":12,"slots":["armor"]},
+  {"id":"af_vital","name":"坚韧的","prefix":"坚韧的","rarity":"rare","mods":{"hp":30},"weight":8,"slots":["armor","trinket"]},
+  {"id":"af_swift","name":"轻灵的","prefix":"轻灵的","rarity":"magic","mods":{"spd":6},"weight":16,"slots":["trinket","armor"]},
+  {"id":"af_accurate","name":"精准的","prefix":"精准的","rarity":"magic","mods":{"hit":6},"weight":16,"slots":["weapon","trinket"]},
+  {"id":"af_wise","name":"聪慧的","prefix":"聪慧的","rarity":"magic","mods":{"mp":20},"weight":14,"slots":["trinket"]},
+  {"id":"af_mighty","name":"威猛的","prefix":"威猛的","rarity":"rare","mods":{"atk":5,"def":5},"weight":5,"slots":["weapon","armor"]},
+  {"id":"af_divine","name":"神圣的","prefix":"神圣的","rarity":"unique","mods":{"atk":10,"def":10,"hit":10},"weight":1,"slots":["weapon","armor","trinket"]}
+]

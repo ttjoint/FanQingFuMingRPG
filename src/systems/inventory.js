@@ -7,7 +7,9 @@
 import { itemByName } from "../core/registry.js";
 import { CFG } from "../core/config.js";
 import { syncMissions } from "./missions.js";
-import { instanceStats, equipSlotOf, canStack as canStackEntries, normalizeInstance } from "../engine/item.js";
+import { instanceStats, equipSlotOf, canStack as canStackEntries, normalizeInstance,
+  socketGem as socketGemPure, unsocketGem as unsocketGemPure, canSocket,
+  enhance as enhancePure, canEnhance, enhanceCost, wearDurability, isBroken } from "../engine/item.js";
 
 // 条目是否为「有实例的单件」。
 export function isInstanceEntry(e) { return !!(e && e.inst); }
@@ -138,6 +140,8 @@ export function addExp(g, n) {
 // 兼容旧签名：applyBonus(g, it, sign)（it 为模板）；新签名还可传 entry 以计入词缀。
 export function applyBonus(g, it, sign, entry) {
   if (!it) return;
+  // 已损坏的装备不再提供属性。
+  if (sign > 0 && entry && isBroken(entry, it)) return;
   const st = entry ? instanceStats(entry, it, CFG.itemEnhance) : { atk: it.attack || 0, def: it.defence || 0, hit: it.attrA || 0 };
   g.stats.attack += sign * (st.atk || 0);
   g.stats.defence += sign * (st.def || 0);
@@ -201,6 +205,83 @@ export function useEntry(g, entry, kind, key) {
 }
 
 export function useItemSlot(g, i) { const s = g.hotbar[i]; if (s) useEntry(g, s, "hotbar", i); }
+
+// ---- 镶嵌 / 强化 / 耐久 ----
+// 装备中条目的属性变更需「先减旧加成、再应用变更、再加新加成」，否则面板数值会漂移。
+function findEquipKey(g, entry) {
+  for (const k in g.equip) if (g.equip[k] === entry) return k;
+  return null;
+}
+function withStatRefresh(g, entry, mutate) {
+  const key = findEquipKey(g, entry);
+  const it = itemByName(entry.name);
+  if (key && it) applyBonus(g, it, -1, entry);   // 减掉旧值
+  const r = mutate();
+  if (key && it) applyBonus(g, it, +1, entry);   // 加回新值
+  reindex(g);
+  return r;
+}
+
+// 把背包里的一颗宝石（条目）镶嵌到目标装备的孔中。
+export function socketInto(g, equipEntry, gemEntry, gemKind, gemKey) {
+  if (!equipEntry || !gemEntry) return false;
+  const r = canSocket(equipEntry, gemEntry);
+  if (!r.ok) { g.tip = r.reason; g.tipT = 2; return false; }
+  if (findEquipKey(g, equipEntry) != null) {
+    withStatRefresh(g, equipEntry, () => socketGemPure(equipEntry, gemEntry));
+  } else socketGemPure(equipEntry, gemEntry);
+  // 消耗一颗宝石。
+  if (gemKind && gemKey != null) {
+    const slot = gemKind === "hotbar" ? g.hotbar[gemKey] : gemKind === "pack" ? g.pack[gemKey] : null;
+    if (slot) { slot.count -= 1; if (slot.count <= 0) setSlot(g, gemKind, gemKey, null); }
+  } else removeItem(g, gemEntry.name, 1);
+  g.tip = "镶嵌 " + gemEntry.name; g.tipT = 2;
+  reindex(g);
+  return true;
+}
+
+// 从装备指定孔取出宝石 → 返回宝石条目（调用方负责放入背包）。
+export function unsocketFrom(g, equipEntry, slotIdx) {
+  if (!equipEntry) return null;
+  let gem = null;
+  if (findEquipKey(g, equipEntry) != null) {
+    gem = withStatRefresh(g, equipEntry, () => unsocketGemPure(equipEntry, slotIdx));
+  } else gem = unsocketGemPure(equipEntry, slotIdx);
+  if (!gem) { g.tip = "该孔没有宝石"; g.tipT = 2; return null; }
+  const f = freeSlot(g);
+  if (f) setSlot(g, f.kind, f.i, gem); else { g.tip = "背包已满，宝石丢失"; g.tipT = 2; return null; }
+  reindex(g);
+  g.tip = "取下 " + gem.name; g.tipT = 2;
+  return gem;
+}
+
+// 强化：花费金币 +1，返回是否成功。
+export function enhanceEntry(g, entry) {
+  const cfg = Object.assign({}, CFG.items, CFG.itemEnhance);
+  const r = canEnhance(entry, cfg);
+  if (!r.ok) { g.tip = r.reason; g.tipT = 2; return false; }
+  const cost = enhanceCost(itemByName(entry.name), entry.inst.enhance, cfg);
+  if ((g.stats.money || 0) < cost) { g.tip = "金币不足（需 " + cost + "）"; g.tipT = 2; return false; }
+  g.stats.money -= cost;
+  if (findEquipKey(g, entry) != null) withStatRefresh(g, entry, () => enhancePure(entry, cfg));
+  else enhancePure(entry, cfg);
+  g.tip = "强化成功 +" + entry.inst.enhance; g.tipT = 2;
+  reindex(g);
+  return true;
+}
+
+// 磨损装备（命中/被击时调用）；装备磨损会同步降低其属性。
+export function wearEquip(g, key, amount) {
+  const e = g.equip[key];
+  if (!e || !e.inst) return;
+  const it = itemByName(e.name);
+  const before = isBroken(e, it), dur = e.inst.durability;
+  if (!dur) return;
+  withStatRefresh(g, e, () => wearDurability(e, amount));
+  if (e.inst.durability !== dur && !before && isBroken(e, it)) {
+    g.tip = e.name + " 已损坏"; g.tipT = 2;
+  }
+}
 
 // 供外部（掉落 / 商店）判断两个条目是否可堆叠合并。
 export { canStackEntries };

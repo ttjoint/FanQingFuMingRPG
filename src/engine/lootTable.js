@@ -8,7 +8,7 @@
 //     - affixes：本次必然追加的词缀 id 列表（可选）
 // 掉落判定与实例生成都在此完成，产出的是「条目」{ name, count, inst? }。
 
-import { newInstance, newInstanceId } from "./item.js";
+import { newInstance, newInstanceId, rollAffixes } from "./item.js";
 
 function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : (d == null ? 0 : d); }
 
@@ -26,7 +26,7 @@ export function normalizeDrop(d) {
 }
 
 // 单条掉落判定：返回条目数组（可能为空）。
-export function rollDrop(d, def, rng) {
+export function rollDrop(d, def, rng, affixPool) {
   const r = typeof rng === "function" ? rng : Math.random;
   const drop = normalizeDrop(d);
   if (!drop.name) return [];
@@ -41,24 +41,30 @@ export function rollDrop(d, def, rng) {
   // 需要实例：装备类不可堆叠，逐件生成实例。
   const out = [];
   for (let i = 0; i < count; i++) {
-    out.push({ name: drop.name, count: 1, inst: makeDropInstance(def, drop, r) });
+    out.push({ name: drop.name, count: 1, inst: makeDropInstance(def, drop, r, affixPool) });
   }
   return out;
 }
 
-export function makeDropInstance(def, drop, rng) {
+export function makeDropInstance(def, drop, rng, affixPool) {
   const r = typeof rng === "function" ? rng : Math.random;
   const inst = newInstance(def, { rand: r, id: newInstanceId(r) });
+  // 词缀：显式指定的优先；否则按稀有度从词缀表随机（需传入 affixPool）。
   if (drop && drop.affixes && drop.affixes.length) inst.affixes = drop.affixes.slice();
+  else if (affixPool && affixPool.length) {
+    const rarity = (drop && drop.rarity) || (def && def.rarity) || "common";
+    const got = rollAffixes(affixPool, rarity, r, { slot: def && def.equipSlot });
+    if (got.length) inst.affixes = got;
+  }
   return inst;
 }
 
-// 整表 roll：defs 为 { name -> 模板 } 查询表（可为 null）。
-export function rollDrops(drops, defs, rng) {
+// 整表 roll：defs 为 { name -> 模板 } 查询表（可为 null）。affixPool 为词缀定义数组（可选）。
+export function rollDrops(drops, defs, rng, affixPool) {
   const out = [];
   for (const d of drops || []) {
     const def = defs && defs[d && (d.name || d.id)];
-    const got = rollDrop(d, def, rng);
+    const got = rollDrop(d, def, rng, affixPool);
     for (const e of got) mergeOrPush(out, e);
   }
   return out;

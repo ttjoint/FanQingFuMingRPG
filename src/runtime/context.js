@@ -69,6 +69,7 @@ export function createRuntime() {
       A.buffTable = buildBuffTable(A.buffs);                               // { byId, list }，运行时只读
       A.effects = legacy.effects || [];                                    // 特效定义表（内容内置）
       A.effectTable = buildEffectTable(A.effects);                         // { byId, get, list }，运行时只读
+      A.affixes = legacy.affixes || [];                                    // 词缀表（物品实例随机词缀来源）
       A.decorTemplates = legacy.decorTemplates || {};   // 跨地图共享的装饰物模板（手画地基线/单一深度）
 
       A.mapsManifest = content.mapsManifest;

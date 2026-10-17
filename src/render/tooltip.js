@@ -20,12 +20,31 @@ export function itemInfoLines(it, entry) {
   if (def) L.push("防御 +" + def);
   if (hit) L.push("命中 +" + hit);
   if (entry && entry.inst) {
-    for (const af of entry.inst.affixes || []) if (af && af.name) L.push("· " + af.name);
+    for (const af of entry.inst.affixes || []) {
+      if (!af) continue;
+      const nm = affixModsText(af.mods);
+      L.push("· " + (af.prefix || af.name || "词缀") + (nm ? "（" + nm + "）" : ""));
+    }
     if (entry.inst.enhance) L.push("强化 +" + entry.inst.enhance);
+    const socks = entry.inst.sockets || [];
+    if (socks.length) {
+      const used = socks.filter(s => s && s.name).map(s => s.name);
+      L.push("镶嵌孔（" + used.length + "/" + socks.length + "）" + (used.length ? "：" + used.join("、") : ""));
+    }
     if (it.maxDurability) L.push("耐久 " + (entry.inst.durability != null ? entry.inst.durability : it.maxDurability) + "/" + it.maxDurability);
   }
+  if (it.gem && it.gem.mods) { const t = affixModsText(it.gem.mods); if (t) L.push("宝石：" + t); }
   if (it.desc) L.push(it.desc);
   return L;
+}
+
+// 把属性对象格式化为「攻击 +5、防御 +3」这类短文本（用于词缀/宝石行）。
+export function affixModsText(m) {
+  const o = m || {};
+  const parts = [];
+  const add = (v, label) => { const n = Number(v) || 0; if (n) parts.push(label + "" + (n > 0 ? "+" : "") + n); };
+  add(o.hp, "生命"); add(o.mp, "精力"); add(o.atk, "攻击"); add(o.def, "防御"); add(o.hit, "命中"); add(o.spd, "速度");
+  return parts.join("、");
 }
 
 export function rarityLabel(r) {

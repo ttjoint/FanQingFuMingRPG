@@ -29,6 +29,7 @@ ContentDB {
   skills:   Record<string, SkillDef>,    skillOrder: string[],
   scripts:  Record<string, string>,
   factions: FactionDef[], ais: AiDef[], buffs: BuffDef[], effects: EffectDef[],
+  affixes: AffixDef[],                   // 词缀表（物品实例随机词缀来源）
   game: GameDoc, transitions, mapsIndex,
   mapsManifest: string[],
   mapDocs: Record<string, MapDoc>,
@@ -56,7 +57,7 @@ Patch {
   content?: {
     npcs?: Record<id, Def>, removedNpcs?: id[],
     items?/skills?/scripts? 同理,
-    factions?/ais?/buffs?/effects?,   // 整表替换
+    factions?/ais?/buffs?/effects?/affixes?,   // 整表替换
     config?/game?/mapsIndex?/transitions?,
   },
   maps?: Record<mapId, MapDoc>,
@@ -131,6 +132,26 @@ Pack {
 
 关键函数：`normalizeItemDef / newInstance / normalizeInstance / instanceStats / displayName /
 rarityColor / canStack / equipSlotOf / kindFromType / typeFromKind`。
+
+**镶嵌 / 强化 / 耐久 / 词缀**（同为 `engine/item.js` 纯函数，`systems/inventory.js` 负责扣物与属性重算）：
+
+| 能力 | 引擎函数 | 运行时封装 |
+|---|---|---|
+| 镶嵌宝石 | `canSocket` / `socketGem` | `socketInto(g, equip, gem, kind, key)` |
+| 取下宝石 | `unsocketGem` | `unsocketFrom(g, equip, slot)` |
+| 强化 | `canEnhance` / `enhance` / `enhanceCost` | `enhanceEntry(g, entry)`（扣金币） |
+| 耐久磨损 | `wearDurability` / `isBroken` | `wearEquip(g, key, amount)` |
+| 词缀 roll | `normalizeAffix` / `rollAffix` / `rollAffixes` | 掉落时由 `lootTable` 调用 |
+
+- `inst.sockets` 是与 `socketCount` 等长的数组，空位 `null`，已镶为 `{ name, gem:{mods} }`；
+  宝石属性计入 `instanceStats`（与词缀累加）。
+- 强化每级按 `config.itemEnhance.enhancePerLevel` 加成（默认 +2 攻/防），上限与价格来自 `config.items`
+  的 `maxEnhance / enhancePriceBase / enhancePriceMul`。
+- **已损坏（耐久为 0）的装备不再提供属性**（`applyBonus` 内置判断）。
+- 词缀条数按稀有度：`common 0 / magic 1 / rare 2 / unique 3`，从 `assets/affixes.json` 按 `weight` 抽取、
+  按 `slots`（weapon/armor/trinket）过滤并去重。
+
+**物品类型扩展**：`type 9 = gem（宝石）/ 10 = material（材料）`，宝石可堆叠。
 
 ## 5c. 掉落表（lootTable）
 

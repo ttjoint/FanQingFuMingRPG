@@ -170,7 +170,7 @@ export function addInput() {
     }
     if (G.gameOver) return;
     const slot = slotAt(sp.x, sp.y);
-    if (slot) { handleSlotClick(slot, e.button); return; }
+    if (slot) { handleSlotClick(slot, e.button, e.shiftKey); return; }
     if (G.shop && insideShopClose(sp.x, sp.y)) { closeShop(getRuntime()); G.hold = null; return; }   // 底部“关闭”按钮
     if (G.shop && insideShop(sp.x, sp.y)) {   // 商店窗内非格子：商品拖拽=放下，背包物品=卖出
       if (G.cursor) { if (G.cursor.fromShop) G.cursor = null; else sellCursor(getRuntime()); }

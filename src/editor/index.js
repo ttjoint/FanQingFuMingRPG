@@ -132,7 +132,7 @@ function toast(msg) {
 }
 
 // ---------- 外壳 ----------
-const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["ais", "AI"], ["buffs", "Buff"], ["items", "物品"], ["skills", "技能"], ["effects", "特效"], ["config", "升级数值"], ["game", "标题结局"], ["assets", "图片素材"]];
+const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["ais", "AI"], ["buffs", "Buff"], ["items", "物品"], ["skills", "技能"], ["effects", "特效"], ["affixes", "词缀"], ["config", "升级数值"], ["game", "标题结局"], ["assets", "图片素材"]];
 let navEl;
 
 function buildShell() {
@@ -165,7 +165,7 @@ function selectTab(k) {
   curTab = k; renderNav();
   clear(mainEl); clear(sideEl);
   if (k !== "maps" && k !== "decor") sideEl.style.display = "none"; else sideEl.style.display = "";
-  ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, ais: tabAis, buffs: tabBuffs, items: tabItems, skills: tabSkills, effects: tabEffects, config: tabConfig, game: tabGame, assets: tabAssets })[k]();
+  ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, ais: tabAis, buffs: tabBuffs, items: tabItems, skills: tabSkills, effects: tabEffects, affixes: tabAffixes, config: tabConfig, game: tabGame, assets: tabAssets })[k]();
 }
 
 // ---------- 地图 ----------
@@ -403,7 +403,7 @@ function npcSchema() {
 }
 const ITEM_SCHEMA = [
   { k: "name", label: "名称", type: "text" },
-  { k: "type", label: "类型", type: "select", numeric: true, options: [[0, "消耗品"], [1, "武器"], [2, "防具"], [3, "饰品"], [4, "技能书"], [7, "包裹"], [8, "剧情物品"]] },
+  { k: "type", label: "类型", type: "select", numeric: true, options: [[0, "消耗品"], [1, "武器"], [2, "防具"], [3, "饰品"], [4, "技能书"], [7, "包裹"], [8, "剧情物品"], [9, "宝石"], [10, "材料"]] },
   { k: "subtype", label: "子类", type: "number" }, { k: "price", label: "价格", type: "number" },
   { k: "reqLevel", label: "需求等级", type: "number" }, { k: "hp", label: "生命+", type: "number" },
   { k: "mp", label: "精力+", type: "number" }, { k: "attack", label: "攻击+", type: "number" },
@@ -415,6 +415,10 @@ const ITEM_SCHEMA = [
   { k: "maxStack", label: "最大堆叠", type: "number", def: 0 },
   { k: "socketCount", label: "镶嵌孔数", type: "number", def: 0 },
   { k: "maxDurability", label: "最大耐久", type: "number", def: 0 },
+  { k: "gem.mods.atk", label: "宝石·攻击+", type: "number" },
+  { k: "gem.mods.def", label: "宝石·防御+", type: "number" },
+  { k: "gem.mods.hp", label: "宝石·生命+", type: "number" },
+  { k: "gem.mods.hit", label: "宝石·命中+", type: "number" },
   { k: "fx.aura", label: "特效·装备光环", type: "select" },
   { k: "fx.use", label: "特效·使用时", type: "select" },
 ];
@@ -499,6 +503,27 @@ function tabEffects() {
   listTab("特效（" + list.length + "）", list, EFFECT_SCHEMA,
     [{ k: "id", label: "id" }, { k: "layer", label: "层级" }, { k: "anchor", label: "锚点" }, { k: "loop", label: "循环" }],
     () => ({ id: "fx_" + (list.length + 1), name: "新特效", layer: "over", anchor: "world", frames: [], fps: 12, loop: false, holdFirst: 0, holdLast: 0, life: 0, ox: 0, oy: 0, scale: 1, color: "", radius: 18 }));
+}
+
+const AFFIX_SCHEMA = [
+  { k: "id", label: "id", type: "text" },
+  { k: "name", label: "名称", type: "text" },
+  { k: "prefix", label: "名称前缀", type: "text" },
+  { k: "rarity", label: "稀有度", type: "select", options: [["magic", "精良"], ["rare", "稀有"], ["unique", "传说"]] },
+  { k: "weight", label: "抽取权重", type: "number", def: 10 },
+  { k: "slots", label: "适用槽(每行一个)", type: "lines", rows: 3 },
+  { k: "mods.atk", label: "攻击+", type: "number" },
+  { k: "mods.def", label: "防御+", type: "number" },
+  { k: "mods.hp", label: "生命+", type: "number" },
+  { k: "mods.mp", label: "精力+", type: "number" },
+  { k: "mods.hit", label: "命中+", type: "number" },
+  { k: "mods.spd", label: "速度+", type: "number" },
+];
+function tabAffixes() {
+  const list = ED.content.affixes || (ED.content.affixes = []);
+  listTab("词缀（" + list.length + "）", list, AFFIX_SCHEMA,
+    [{ k: "name", label: "名称" }, { k: "rarity", label: "稀有度" }, { k: "weight", label: "权重" }, { k: "mods.atk", label: "攻击" }, { k: "mods.def", label: "防御" }],
+    () => ({ id: "af_" + (list.length + 1), name: "新词缀", prefix: "新的", rarity: "magic", weight: 10, slots: [], mods: { atk: 1 } }));
 }
 
 function tabBuffs() {

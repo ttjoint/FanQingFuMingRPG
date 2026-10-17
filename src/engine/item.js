@@ -59,6 +59,7 @@ export function normalizeItemDef(def, opts) {
   o.equipSlot = (o.equip && o.equip.slot) || o.equipSlot || null;
   if (!o.equipSlot) o.equipSlot = equipSlotOf(o);   // 按 kind 推断（weapon/armor/trinket）
   o.use = o.use || null;
+  o.gem = o.gem || null;   // 宝石类物品：{ mods:{...} }，镶嵌后计入属性
   o.tags = Array.isArray(o.tags) ? o.tags.slice() : [];
   if (opts && opts.keepLegacyType === false) delete o.type;
   return o;
@@ -74,6 +75,8 @@ export function kindFromType(type) {
     case 4: return "scroll";
     case 7: return "pack";
     case 8: return "quest";
+    case 9: return "gem";
+    case 10: return "material";
     default: return "misc";
   }
 }
@@ -88,6 +91,8 @@ export function typeFromKind(kind) {
     case "scroll": return 4;
     case "pack": return 7;
     case "quest": return 8;
+    case "gem": return 9;
+    case "material": return 10;
     default: return 0;
   }
 }
@@ -95,7 +100,7 @@ export function typeFromKind(kind) {
 // 是否默认可堆叠：消耗品 / 任务道具 / 技能书 / 材料 可叠，装备类不可。
 export function defaultStackable(def) {
   const k = def.kind || kindFromType(def.type);
-  return k === "consumable" || k === "quest" || k === "scroll" || k === "material" || k === "misc";
+  return k === "consumable" || k === "quest" || k === "scroll" || k === "material" || k === "gem" || k === "misc";
 }
 
 // 装备槽位：优先 equip.slot / equipSlot，其次按 kind 推断（兼容旧 type 判断）。
@@ -164,6 +169,13 @@ export function instanceStats(entry, def, opts) {
     out.hp += num(m.hp); out.mp += num(m.mp); out.atk += num(m.atk);
     out.def += num(m.def); out.hit += num(m.hit); out.spd += num(m.spd);
   }
+  // 镶嵌宝石同样提供属性（宝石条目形如 { name, gem:{mods} } 或直接 { mods }）。
+  for (const g of inst.sockets || []) {
+    if (!g) continue;
+    const m = (g.gem && g.gem.mods) || g.mods || {};
+    out.hp += num(m.hp); out.mp += num(m.mp); out.atk += num(m.atk);
+    out.def += num(m.def); out.hit += num(m.hit); out.spd += num(m.spd);
+  }
   const per = o.enhancePerLevel || 0;
   if (per && inst.enhance) {
     const e = inst.enhance * per;
@@ -190,4 +202,124 @@ export function displayName(entry, def, opts) {
 export function rarityColor(rarity, palette) {
   const p = palette || { common: "#d8d0b8", magic: "#6fb3ff", rare: "#ffd75e", unique: "#ff8a3d", quest: "#9de07a" };
   return p[rarity] || p.common;
+}
+
+// ---- 镶嵌 ----
+// 装备实例的 inst.sockets 是长度 = 模板 socketCount 的数组，空位为 null。
+// 宝石条目：{ name, gem? }。返回 { ok, reason, slot }；不修改装备，只判断能否镶。
+export function canSocket(entry, gemEntry) {
+  const inst = entry && entry.inst;
+  if (!inst) return { ok: false, reason: "该物品没有实例，不可镶嵌" };
+  if (!gemEntry) return { ok: false, reason: "没有宝石" };
+  const sockets = inst.sockets || [];
+  if (!sockets.length) return { ok: false, reason: "该装备没有镶嵌孔" };
+  const slot = sockets.indexOf(null);
+  if (slot < 0) return { ok: false, reason: "镶嵌孔已满" };
+  return { ok: true, slot };
+}
+
+// 镶嵌：把 gemEntry 放进第一个空孔。返回是否成功（不修改 gemEntry 自身）。
+export function socketGem(entry, gemEntry) {
+  const r = canSocket(entry, gemEntry);
+  if (!r.ok) return r;
+  entry.inst.sockets[r.slot] = { name: gemEntry.name, gem: gemEntry.gem || { mods: gemEntry.mods || {} } };
+  return { ok: true, slot: r.slot };
+}
+
+// 取出指定孔的宝石，返回宝石条目（无则 null）。
+export function unsocketGem(entry, slot) {
+  const inst = entry && entry.inst;
+  if (!inst || !Array.isArray(inst.sockets)) return null;
+  const i = num(slot, -1);
+  if (i < 0 || i >= inst.sockets.length) return null;
+  const gem = inst.sockets[i];
+  if (!gem) return null;
+  inst.sockets[i] = null;
+  return { name: gem.name, count: 1, gem: gem.gem || undefined };
+}
+
+// ---- 强化 ----
+// 强化价格：基础价 * 倍率^当前等级（纯函数，便于 UI 预览）。
+export function enhanceCost(def, curLevel, cfg) {
+  const c = cfg || {};
+  const base = num(c.enhancePriceBase, 50), mul = num(c.enhancePriceMul, 1.6);
+  const lv = Math.max(0, num(curLevel, 0));
+  return Math.max(1, Math.round(base * Math.pow(mul, lv)));
+}
+
+// 能否强化（等级上限 / 有实例）。
+export function canEnhance(entry, cfg) {
+  const c = cfg || {};
+  const inst = entry && entry.inst;
+  if (!inst) return { ok: false, reason: "该物品没有实例，不可强化" };
+  const max = num(c.maxEnhance, 10);
+  if (num(inst.enhance, 0) >= max) return { ok: false, reason: "已达强化上限 +" + max };
+  return { ok: true };
+}
+
+// 强化 +1，返回是否成功。
+export function enhance(entry, cfg) {
+  const r = canEnhance(entry, cfg);
+  if (!r.ok) return r;
+  entry.inst.enhance = num(entry.inst.enhance, 0) + 1;
+  return { ok: true, level: entry.inst.enhance };
+}
+
+// ---- 耐久 ----
+// 扣耐久，返回扣后耐久（不低于 0）。durability 为 0/缺省表示无耐久概念。
+export function wearDurability(entry, amount) {
+  const inst = entry && entry.inst;
+  if (!inst || !inst.durability) return inst ? num(inst.durability, 0) : 0;
+  inst.durability = Math.max(0, num(inst.durability, 0) - Math.max(0, num(amount, 0)));
+  return inst.durability;
+}
+
+// 是否已损坏（有耐久属性但降到 0）。def 可传入模板以读取 maxDurability。
+export function isBroken(entry, def) {
+  const inst = entry && entry.inst;
+  if (!inst) return false;
+  const max = num((def && def.maxDurability) || inst.maxDurability, 0);
+  return max > 0 && num(inst.durability, 0) <= 0;
+}
+
+// ---- 词缀 roll ----
+// 归一化一条词缀定义：{ id, name, prefix, rarity, mods, weight, slots }。
+export function normalizeAffix(a) {
+  const o = Object.assign({}, a || {});
+  o.id = String(o.id || o.name || "");
+  o.name = String(o.name || o.id || "");
+  o.prefix = o.prefix != null ? String(o.prefix) : "";
+  o.rarity = o.rarity || "magic";
+  const m = o.mods || {};
+  o.mods = { hp: num(m.hp), mp: num(m.mp), atk: num(m.atk), def: num(m.def), hit: num(m.hit), spd: num(m.spd) };
+  o.weight = Math.max(0, num(o.weight, 10));
+  o.slots = Array.isArray(o.slots) ? o.slots.slice() : null;
+  return o;
+}
+
+// 按权重从候选词缀里抽一个（rng 返回 [0,1)）。无候选返回 null。
+export function rollAffix(pool, rng, opts) {
+  const r = typeof rng === "function" ? rng : Math.random;
+  const o = opts || {};
+  const slot = o.slot || null;
+  const list = (pool || []).map(normalizeAffix).filter(a => !slot || !a.slots || a.slots.indexOf(slot) >= 0);
+  const total = list.reduce((s, a) => s + a.weight, 0);
+  if (!list.length || total <= 0) return null;
+  let t = r() * total;
+  for (const a of list) { t -= a.weight; if (t <= 0) return a; }
+  return list[list.length - 1];
+}
+
+// 按 rarity 决定词缀条数，并返回去重后的词缀数组。
+const AFFIX_COUNT = { common: 0, magic: 1, rare: 2, unique: 3, quest: 0 };
+export function rollAffixes(pool, rarity, rng, opts) {
+  const r = typeof rng === "function" ? rng : Math.random;
+  const n = AFFIX_COUNT[rarity] || 0;
+  const out = [], used = {};
+  for (let i = 0; i < n * 4 && out.length < n; i++) {
+    const a = rollAffix(pool, r, opts);
+    if (!a || used[a.id]) continue;
+    used[a.id] = true; out.push(a);
+  }
+  return out;
 }

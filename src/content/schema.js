@@ -4,7 +4,7 @@
 import { isRef, refKind, refId } from "./ids.js";
 import { normalizeProjectile } from "../engine/projectile.js";
 import { normalizeBuffs } from "../engine/buff.js";import { normalizeTargeting } from "../engine/targeting.js";
-import { normalizeItemDef } from "../engine/item.js";
+import { normalizeItemDef, normalizeAffix } from "../engine/item.js";
 import { normalizeEffect } from "../engine/effect.js";
 import { CFG } from "../core/config.js";
 
@@ -80,6 +80,11 @@ export function normalizeBuffList(list) {
 // 特效定义表（内容内置，技能/Buff/指示按 id 引用）。具体语义见 engine/effect.js。
 export function normalizeEffectList(list) {
   return arr(list).filter(f => f && (f.id || f.name)).map(f => normalizeEffect(f));
+}
+
+// 词缀表（物品实例随机词缀的来源）。具体语义见 engine/item.js 的 normalizeAffix。
+export function normalizeAffixList(list) {
+  return arr(list).filter(a => a && (a.id || a.name)).map(a => normalizeAffix(a));
 }
 
 // ---- Item / Skill ----

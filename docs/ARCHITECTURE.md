@@ -91,7 +91,8 @@
 | 引擎空间哈希（近邻查询） | `engine/spatialhash.js` |
 | 引擎等距深度切块（对象逐块深度 + 屋顶覆盖） | `engine/depth.js` |
 | 引擎椭圆碰撞（DOM-free） | `engine/collision.js` |
-| 引擎物品模板/实例（词缀·镶嵌·强化） | `engine/item.js` |
+| 引擎物品模板/实例（词缀·镶嵌·强化·耐久） | `engine/item.js` |
+| 引擎词缀表与按稀有度 roll | `engine/item.js` · `assets/affixes.json` |
 | 引擎掉落表（兼容旧格式 + 稀有度/词缀） | `engine/lootTable.js` |
 | 引擎特效（图层/锚点/帧动画/循环） | `engine/effect.js` |
 | 地面掉落物轻量实体 + NPC 背包 | `systems/ground.js` |

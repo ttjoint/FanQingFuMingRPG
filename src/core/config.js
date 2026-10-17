@@ -12,7 +12,9 @@ export const DEFAULT_CONFIG = {
   economy: { sellRate: 0.5 },
   inventory: { packItem: "包裹", packSize: 25 },
   // 掉落物：存在时长 / 散布 / 拾取与保护 / 地面堆叠合并半径。
-  items: { dropTtl: 0, dropScatter: 22, pickupRadius: 20, pickupDelay: 0, stackRadius: 18 },
+  items: { dropTtl: 0, dropScatter: 22, pickupRadius: 20, pickupDelay: 0, stackRadius: 18, maxEnhance: 10, enhancePriceBase: 50, enhancePriceMul: 1.6, socketFailChance: 0, durabilityLossOnHit: 0.5 },
+  // 强化等级每级对 atk/def 的加成（applyBonus/instanceStats 读它）。
+  itemEnhance: { enhancePerLevel: 2 },
   // 特效/指示：层级、颜色、开关（可由内容覆盖）。
   fx: { uiRings: true, moveMarker: true, itemHighlight: true,
         ring: { target: "#e04040", interact: "#4080ff", move: "#ffe08a" } },

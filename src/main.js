@@ -48,7 +48,7 @@ window.addEventListener("resize", fit); fit();
 const DATA_FILES = [
   "atlas.json", "chars.json", "anchors.json", "npcs.json", "items.json", "skills.json",
   "scripts.json", "factions.json", "ais.json", "buffs.json", "config.json", "game.json",
-  "effects.json", "transitions.json", "maps_index.json", "maps_manifest.json",
+  "effects.json", "affixes.json", "transitions.json", "maps_index.json", "maps_manifest.json",
 ];
 
 // 从指定版本文件夹读取数据文件：先取原版，再（若存在）用版本自身 assets/ 覆盖。
@@ -94,6 +94,7 @@ export async function boot() {
     ais: data["ais.json"] || [],
     buffs: data["buffs.json"] || [],
     effects: data["effects.json"] || [],
+    affixes: data["affixes.json"] || [],
     config: data["config.json"] || DEFAULT_CONFIG,
     game: data["game.json"] || {},
     transitions: data["transitions.json"] || {},
