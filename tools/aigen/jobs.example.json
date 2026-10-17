@@ -1,0 +1,24 @@
+{
+  "outDir": "_aigen/cand",
+  "_comment": "批量生成候选素材。name 为输出文件名；kind 见 cli.mjs kinds；可覆盖 size/gen/seed/steps/cfg/extra/negative/keepBg。",
+  "jobs": [
+    { "name": "item_铁剑", "kind": "item", "subject": "ancient chinese iron straight sword, simple hilt, steel blade", "seed": 101 },
+    { "name": "item_长枪", "kind": "item", "subject": "chinese ancient spear, long shaft, leaf shaped steel head", "seed": 102 },
+    { "name": "item_木盾", "kind": "item", "subject": "wooden round shield with iron boss, chinese ancient", "seed": 103 },
+    { "name": "item_药瓶", "kind": "item", "subject": "small ceramic medicine bottle, red cork, healing potion, chinese ancient", "seed": 104 },
+    { "name": "item_玉佩", "kind": "item", "subject": "jade pendant amulet, carved, green jade, chinese ancient", "seed": 105 },
+    { "name": "item_古书", "kind": "item", "subject": "ancient chinese bamboo scroll book, tied with cord", "seed": 106 },
+    { "name": "item_红宝石", "kind": "item", "subject": "red ruby gemstone, faceted, glowing", "seed": 107 },
+    { "name": "item_蓝宝石", "kind": "item", "subject": "blue sapphire gemstone, faceted, glowing", "seed": 108 },
+
+    { "name": "skill_烈焰斩", "kind": "skill", "subject": "flaming sword slash, fire arc", "seed": 201 },
+    { "name": "skill_御心术", "kind": "skill", "subject": "meditation healing aura, calm blue energy, lotus", "seed": 202 },
+    { "name": "skill_龙家剑法", "kind": "skill", "subject": "dragon shaped sword energy, swirling blade", "seed": 203 },
+
+    { "name": "face_剑客", "kind": "face", "subject": "young chinese swordsman, determined eyes, headband, dark hair", "seed": 301 },
+    { "name": "face_老者", "kind": "face", "subject": "old chinese martial arts master, white beard, wise eyes", "seed": 302 },
+
+    { "name": "unit_村民", "kind": "unit", "subject": "chinese ancient villager, simple hemp clothes, standing idle", "seed": 401 },
+    { "name": "unit_兵卒", "kind": "unit", "subject": "chinese ancient soldier, leather armor, holding spear, standing idle", "seed": 402 }
+  ]
+}
