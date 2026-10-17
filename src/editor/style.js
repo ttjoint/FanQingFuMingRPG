@@ -70,8 +70,19 @@ body.ed-resizing *{cursor:col-resize!important}
 
 /* ================= 表单 ================= */
 .ed-row{display:flex;align-items:center;gap:8px;margin:6px 0}
-.ed-row label{width:104px;color:#9aa2ad;flex:0 0 auto;font-size:12px;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ed-row label{width:104px;color:#9aa2ad;flex:0 0 auto;font-size:13px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  text-align:right;padding-right:2px;line-height:1.5}
+/* 整行字段：大段文本 / 复杂控件独占一行，label 仍在左、控件占满右侧剩余宽度 */
+.ed-row.wide{display:block;margin:10px 0}
+.ed-row.wide>label{display:block;width:auto;text-align:left;margin-bottom:4px}
+.ed-row.wide>textarea{width:100%;box-sizing:border-box;min-height:76px}
+.ed-row.wide>input,.ed-row.wide>select{width:100%;box-sizing:border-box}
+/* 字段分组：一个语义段一个小标题 */
+.ed-group{margin:0 0 14px;padding:8px 10px 4px;border:1px solid #232830;border-radius:5px;background:#14171c}
+.ed-grouptitle{color:#f0d060;font-size:12px;font-weight:600;letter-spacing:.4px;
+  margin:0 0 6px;padding-bottom:4px;border-bottom:1px solid #232830;opacity:.92}
+.ed-ghint{color:#7f8792;font-size:11px;margin:-2px 0 6px}
 .ed-row input,.ed-row select,.ed-row textarea{flex:1;min-width:0}
 input[type=text],input[type=number],select,textarea{background:#0c0e11;color:#e6e6e6;
   border:1px solid #3a414c;border-radius:4px;padding:4px 7px;
@@ -80,9 +91,17 @@ input[type=text]:focus,input[type=number]:focus,select:focus,textarea:focus{
   outline:none;border-color:#5a7ab8;box-shadow:0 0 0 2px rgba(90,122,184,.22)}
 input[type=checkbox]{width:15px;height:15px;accent-color:#4f8f4f;cursor:pointer;flex:0 0 auto}
 textarea{resize:vertical;min-height:60px;font-family:Consolas,"Microsoft YaHei",monospace;line-height:1.5}
+/* 代码/JSON/文本编辑器：字号由 .ed-editor 上的 --ed-fs 控制（编辑区内可调） */
+.ed-editor{font-size:var(--ed-fs,12px)!important;line-height:1.55;tab-size:2}
+.ed-fsbar{display:flex;align-items:center;gap:6px;font-size:11px;color:#7f8792;margin-left:auto}
+.ed-fsbar button{background:#22272f;border:1px solid #3a414c;color:#c8ccd4;border-radius:3px;
+  width:22px;height:20px;line-height:1;cursor:pointer;font-size:12px;padding:0}
+.ed-fsbar button:hover{background:#2c333d;border-color:#5a7ab8}
+.ed-fsval{min-width:34px;text-align:center;color:#aeb6c0}
 select{cursor:pointer}
 .ed-field{display:flex;flex-direction:column;gap:4px;margin:8px 0}
-.ed-field>label{color:#9aa2ad;font-size:12px}
+.ed-field>label{color:#9aa2ad;font-size:13px;line-height:1.5}
+.ed-field.wide>label{margin-bottom:2px}
 .ed-checkrow{display:flex;align-items:center;gap:8px;margin:6px 0}
 .ed-checkrow label{color:#c8ccd4;font-size:12px;cursor:pointer;user-select:none}
 
@@ -293,6 +312,20 @@ table.ed-table tbody tr.on td.ed-thumb img{border-color:#f0d060}
 }
 .ed-decor-big{max-width:180px;max-height:180px;object-fit:contain;background:#0a0b0d;
   border:1px solid #2c3038;border-radius:4px;image-rendering:pixelated}
+/* ---- 行走图选择弹窗（模型网格） ---- */
+.ed-modelgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:6px;padding:8px}
+.ed-modelcell{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 4px;
+  border:1px solid #2c3038;border-radius:4px;background:#15181d;cursor:pointer;
+  transition:background .1s,border-color .1s}
+.ed-modelcell:hover{background:#1d232b;border-color:#3a414c}
+.ed-modelcell.on{background:#2b3a52;border-color:#f0d060}
+.ed-modelcell img{width:40px;height:56px;object-fit:contain}
+.ed-modelcell span{font-size:11px;color:#aeb6c0;max-width:100%;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.ed-modelcell.on span{color:#fff}
+/* 行走图字段里显示的模型名 */
+.ed-modelname{font-size:12px;color:#aeb6c0;align-self:center}
+
 `;
 
 export function injectStyle() {

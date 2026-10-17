@@ -5,7 +5,7 @@ import { G, A } from "../core/state.js";
 import { setAssetOverrides, assetURL } from "../core/assets.js";
 import { h, clear, deep } from "./dom.js";
 import { injectStyle } from "./style.js";
-import { renderForm, renderListEditor, mkSplitResizer } from "./fields.js";
+import { renderForm, renderListEditor, mkSplitResizer, editorShell } from "./fields.js";
 import { mountMapEditor } from "./map-editor.js";
 import { modeControl, makeLineEditor, decorState } from "./decor-line.js";
 import { applyPatch, diffContent } from "../content/contentdb.js";
@@ -21,10 +21,11 @@ import {
 import { PACK_FORMAT, PACK_VERSION } from "../content/schema.js";
 import { newNpcTemplate } from "../content/npcFields.js";
 import { buildAssetIndexAsync, searchAssets, groupOf, fileName, assetIndex } from "./assets-index.js";
+import { decorThumb, decorPreview } from "./atlas-preview.js";
 import { setImagesWriter } from "./asset-picker.js";
 
 let root = null, ED = null, dirty = false, curTab = "maps";
-let mainEl, sideEl, statusEl, mapEditor = null;
+let mainEl, sideEl, statusEl, mapEditor = null, sideRszEl = null;
 
 const mark = () => { dirty = true; };
 
@@ -194,6 +195,7 @@ function buildShell() {
   // 可拖拽分栏（桌面端）：左导航 / 右属性栏都能调宽，宽度记在 localStorage。
   const rszNav = mkResizer("nav", navEl, "--ed-nav-w", 120, 320);
   const rszSide = mkResizer("side", sideEl, "--ed-side-w", 240, 640);
+  sideRszEl = rszSide;
 
   root.append(bar,
     h("div", { class: "ed-body" }, navEl, rszNav, mainEl, rszSide, sideEl, scrim),
@@ -305,11 +307,13 @@ function selectTab(k) {
   curTab = k; renderNav();
   clear(mainEl); clear(sideEl);
   mainEl.className = "ed-main";
-  // 属性栏只在地图/装饰物页有意义；桌面端隐藏时同步隐藏拖拽手柄。
-  const needSide = k === "maps" || k === "decor";
+  // 属性栏只在地图页有意义（装饰物页已改为页内 split 布局，不再用全局属性栏，
+  // 否则右侧会同时出现"全局属性栏拖拽条"和"页内 split 拖拽条"两条，视觉重复）。
+  const needSide = k === "maps";
   sideEl.style.display = needSide ? "" : "none";
-  const sideRsz = root.querySelectorAll(".ed-resizer")[1];
-  if (sideRsz) sideRsz.style.display = (needSide && !isNarrow()) ? "" : "none";
+  // 用显式引用而非 querySelectorAll 下标（页内 split 也会产生 .ed-resizer，
+  // 按下标取会错位）。
+  if (sideRszEl) sideRszEl.style.display = (needSide && !isNarrow()) ? "" : "none";
   ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, ais: tabAis, buffs: tabBuffs, items: tabItems, skills: tabSkills, effects: tabEffects, affixes: tabAffixes, config: tabConfig, game: tabGame, assets: tabAssets })[k]();
 }
 
@@ -403,9 +407,9 @@ function tabDecor() {
     clear(tr);
     tr.dataset.k = x.key;
     const td = h("td", { class: "ed-thumb" });
-    const im = h("img", { src: assetSrc(x.sprite[0]), loading: "lazy" });
-    im.onerror = () => { im.style.opacity = "0.12"; };
-    td.append(im);
+    // 装饰物不是独立图片文件，而是共用图集 assets/obj.png 的一块，
+    // sprite = [sx, sy, sw, sh, dxa, dya]。这里从图集实时切出缩略图。
+    td.append(decorThumb(x, { max: 34 }));
     tr.append(td,
       h("td", null, String(x.count)),
       h("td", null, [...x.maps].join("、")),
@@ -432,8 +436,8 @@ function tabDecor() {
     if (!cur) { right.append(h("div", { class: "ed-empty" }, "左侧选择一个模板")); return; }
     const s = cur.sprite, tiles = cur.tiles, tpl = tplOf(cur.key, true);
     // 贴图大图预览
-    const big = h("img", { class: "ed-decor-big", src: assetSrc(s[0]), title: cur.key });
-    big.onerror = () => { big.style.opacity = "0.12"; };
+    const big = decorPreview(cur, 280, 200);
+    big.title = cur.key;
     right.append(h("div", { class: "ed-row", style: "align-items:flex-start;gap:12px" },
       big,
       h("div", null,
@@ -510,7 +514,7 @@ function tabScripts() {
     right.append(h("div", { class: "ed-row", style: "margin:0 0 6px" }, h("strong", null, cur),
       h("span", { class: "ed-count" }, String(lineCount(scripts[cur])) + " 行")));
     ta.value = scripts[cur] || "";
-    right.append(ta);
+    right.append(editorShell(ta, { key: "ed.fs.scripts" }));
     right.append(info);
   };
   ta.oninput = () => { if (!cur) return; scripts[cur] = ta.value; mark(); drawTable(); };
@@ -628,7 +632,7 @@ function tabAis() {
         mark(); drawTable();
       } catch (e) { err.textContent = "JSON 语法错误：" + e.message; err.style.color = "#e66"; }
     };
-    right.append(ta, err);
+    right.append(editorShell(ta, { key: "ed.fs.ais" }), err);
   };
 
   const redraw = () => { drawTable(); drawDetail(); };
@@ -673,26 +677,37 @@ function assetSrc2(ref, dir) {
   return assetSrc("assets/" + String(dir).replace(/\/$/, "") + "/" + s.replace(/\.bmp$/i, ".png"));
 }
 
+// NPC 字段按语义分组呈现：身份 → 数值 → 行为 → 内容 → 掉落/交易 → 台词。
+// 带 group 的项是分隔项（无 k）；大段文本（lines/textarea）会自动独占整行。
 const NPC_SCHEMA_FIELDS = [
+  { group: "身份" },
   { k: "id", label: "编号", type: "number" }, { k: "name", label: "名称", type: "text" },
-  { k: "model", label: "行走图(pmg)", type: "text" }, { k: "portrait", label: "头像", type: "text" },
-  { k: "script", label: "对话脚本(gsp)", type: "text" }, { k: "hp", label: "生命", type: "number" },
-  { k: "attack", label: "攻击", type: "number" }, { k: "defence", label: "防御", type: "number" },
+  { k: "model", label: "行走图", type: "model" }, { k: "portrait", label: "头像", type: "image", dir: "face" },
+
+  { group: "数值" },
   { k: "level", label: "等级", type: "number" }, { k: "exp", label: "经验", type: "number" },
+  { k: "hp", label: "生命", type: "number" }, { k: "attack", label: "攻击", type: "number" },
+  { k: "defence", label: "防御", type: "number" },
   { k: "speed", label: "移动速度", type: "number", def: 45 }, { k: "runSpeed", label: "追击速度", type: "number", def: 70 },
+
+  { group: "行为" },
   { k: "hostile", label: "主动敌对", type: "checkbox" },
   { k: "ai", label: "AI 配置", type: "select" },
+  { k: "script", label: "对话脚本", type: "select" },
   { k: "skills", label: "技能", type: "strlist" },
+
+  { group: "掉落与交易" },
   { k: "drops", label: "掉落物品", type: "drops" },
   { k: "inventory", label: "货物背包(商人)", type: "inventory" },
-  { k: "talks", label: "闲话(每行一句)", type: "lines", rows: 4 },
+
+  { group: "台词" },
+  { k: "talks", label: "闲话", hint: "每行一句，随机抽取", type: "lines", rows: 5 },
 ];
 function npcSchema() {
   return NPC_SCHEMA_FIELDS.map(f => {
     const o = /** @type {any} */ ({ ...f });
-    if (f.k === "model") { o.list = Object.keys(A.chars || {}); o.img = n => roleSrc(n.model); }
-    if (f.k === "portrait") { o.type = "image"; o.dir = "face"; }
-    if (f.k === "script") o.list = Object.keys(ED.content.scripts || {});
+    if (f.k === "model") { o.models = Object.keys(A.chars || {}); o.modelSrc = m => roleSrc(m); }
+    if (f.k === "script") { o.options = [["", "（无）"]].concat(Object.keys(ED.content.scripts || {}).map(x => [x, x])); }
     if (f.k === "ai") o.options = [["", "（默认）"]].concat((ED.content.ais || []).map(a => [a.id, a.id + (a.name && a.name !== a.id ? " " + a.name : "")]));
     if (f.k === "drops") o.items = ED.items.map(x => x.name);
     if (f.k === "inventory") o.items = ED.items.map(x => x.name);
@@ -701,25 +716,38 @@ function npcSchema() {
   });
 }
 const ITEM_SCHEMA = [
+  { group: "基本" },
   { k: "name", label: "名称", type: "text" },
   { k: "type", label: "类型", type: "select", numeric: true, options: [[0, "消耗品"], [1, "武器"], [2, "防具"], [3, "饰品"], [4, "技能书"], [7, "包裹"], [8, "剧情物品"], [9, "宝石"], [10, "材料"]] },
-  { k: "subtype", label: "子类", type: "number" }, { k: "price", label: "价格", type: "number" },
-  { k: "reqLevel", label: "需求等级", type: "number" }, { k: "hp", label: "生命+", type: "number" },
-  { k: "mp", label: "精力+", type: "number" }, { k: "attack", label: "攻击+", type: "number" },
-  { k: "defence", label: "防御+", type: "number" }, { k: "attrA", label: "攻速+", type: "number" },
-  { k: "attrB", label: "属性B", type: "number" }, { k: "attrC", label: "属性C", type: "number" },
-  { k: "icon", label: "图标", type: "image", dir: "items_icons" }, { k: "desc", label: "说明", type: "textarea", rows: 2 },
+  { k: "subtype", label: "子类", type: "number" },
   { k: "rarity", label: "稀有度", type: "select", options: [["common", "普通"], ["magic", "精良"], ["rare", "稀有"], ["unique", "传说"], ["quest", "任务"]] },
+  { k: "price", label: "价格", type: "number" }, { k: "reqLevel", label: "需求等级", type: "number" },
+  { k: "icon", label: "图标", type: "image", dir: "items_icons" },
+
+  { group: "属性加成" },
+  { k: "hp", label: "生命+", type: "number" }, { k: "mp", label: "精力+", type: "number" },
+  { k: "attack", label: "攻击+", type: "number" }, { k: "defence", label: "防御+", type: "number" },
+  { k: "attrA", label: "攻速+", type: "number" },
+  { k: "attrB", label: "属性B", type: "number" }, { k: "attrC", label: "属性C", type: "number" },
+
+  { group: "堆叠与耐久" },
   { k: "stackable", label: "可堆叠", type: "checkbox" },
   { k: "maxStack", label: "最大堆叠", type: "number", def: 0 },
   { k: "socketCount", label: "镶嵌孔数", type: "number", def: 0 },
   { k: "maxDurability", label: "最大耐久", type: "number", def: 0 },
-  { k: "gem.mods.atk", label: "宝石·攻击+", type: "number" },
-  { k: "gem.mods.def", label: "宝石·防御+", type: "number" },
-  { k: "gem.mods.hp", label: "宝石·生命+", type: "number" },
-  { k: "gem.mods.hit", label: "宝石·攻速+", type: "number" },
-  { k: "fx.aura", label: "特效·装备光环", type: "select" },
-  { k: "fx.use", label: "特效·使用时", type: "select" },
+
+  { group: "宝石词条", hint: "仅 type=宝石 时生效" },
+  { k: "gem.mods.atk", label: "攻击+", type: "number" },
+  { k: "gem.mods.def", label: "防御+", type: "number" },
+  { k: "gem.mods.hp", label: "生命+", type: "number" },
+  { k: "gem.mods.hit", label: "攻速+", type: "number" },
+
+  { group: "特效" },
+  { k: "fx.aura", label: "装备光环", type: "select" },
+  { k: "fx.use", label: "使用时", type: "select" },
+
+  { group: "说明" },
+  { k: "desc", label: "物品说明", type: "textarea", rows: 4 },
 ];
 const SKILL_SCHEMA = [
   { k: "name", label: "名称", type: "text" },
@@ -758,25 +786,36 @@ function skillSchema() {
 
 // Buff 配置表字段。
 const BUFF_SCHEMA = [
+  { group: "基本" },
   { k: "id", label: "id", type: "text" },
   { k: "name", label: "名称", type: "text" },
   { k: "icon", label: "图标", type: "image", dir: "buff_icons" },
+
+  { group: "时长与叠层" },
   { k: "duration", label: "持续(秒)", type: "number", def: 10 },
   { k: "maxStacks", label: "最大层数", type: "number", min: 1, def: 1 },
   { k: "stackMode", label: "叠层方式", type: "select", options: [["refresh", "刷新时长"], ["stack", "叠加层数"]] },
-  { k: "mods.atk", label: "每层·攻击", type: "number", def: 0 },
-  { k: "mods.def", label: "每层·防御", type: "number", def: 0 },
-  { k: "mods.hpMax", label: "每层·生命上限", type: "number", def: 0 },
-  { k: "mods.mpMax", label: "每层·精力上限", type: "number", def: 0 },
-  { k: "mods.speed", label: "每层·速度", type: "number", def: 0 },
-  { k: "mods.hit", label: "每层·攻速", type: "number", def: 0 },
-  { k: "dot.dps", label: "每层·每秒伤害", type: "number", def: 0 },
-  { k: "hot.hps", label: "每层·每秒治疗", type: "number", def: 0 },
-  { k: "tags", label: "标签(每行一个)", type: "lines", rows: 2 },
-  { k: "fx.aura", label: "特效·光环(循环)", type: "select" },
-  { k: "fx.onApply", label: "特效·施加时", type: "select" },
-  { k: "fx.onExpire", label: "特效·到期时", type: "select" },
-  { k: "desc", label: "说明", type: "textarea", rows: 2 },
+
+  { group: "每层属性修正" },
+  { k: "mods.atk", label: "攻击", type: "number", def: 0 },
+  { k: "mods.def", label: "防御", type: "number", def: 0 },
+  { k: "mods.hpMax", label: "生命上限", type: "number", def: 0 },
+  { k: "mods.mpMax", label: "精力上限", type: "number", def: 0 },
+  { k: "mods.speed", label: "速度", type: "number", def: 0 },
+  { k: "mods.hit", label: "攻速", type: "number", def: 0 },
+
+  { group: "持续效果" },
+  { k: "dot.dps", label: "每秒伤害", type: "number", def: 0 },
+  { k: "hot.hps", label: "每秒治疗", type: "number", def: 0 },
+
+  { group: "表现" },
+  { k: "fx.aura", label: "光环(循环)", type: "select" },
+  { k: "fx.onApply", label: "施加时", type: "select" },
+  { k: "fx.onExpire", label: "到期时", type: "select" },
+
+  { group: "说明与标签" },
+  { k: "tags", label: "标签", hint: "每行一个", type: "lines", rows: 3 },
+  { k: "desc", label: "说明", type: "textarea", rows: 4 },
 ];
 
 const EFFECT_SCHEMA = [

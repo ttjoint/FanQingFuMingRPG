@@ -1,6 +1,6 @@
 // 表单向导：由 schema 生成可编辑控件，供 NPC / 物品 / 技能 / 数值 / 结局等复用。
 import { h, clear } from "./dom.js";
-import { openAssetPicker } from "./asset-picker.js";
+import { openAssetPicker, openModelPicker } from "./asset-picker.js";
 import { assetSrc } from "./assets-index.js";
 
 let dlSeq = 0;
@@ -142,32 +142,77 @@ export function renderForm(host, schema, obj, onChange) {
   clear(host);
   const refreshers = [];
   const flag = f => { if (onChange) onChange(f); for (const r of refreshers) r(); };
+  // 字段分组：schema 里写 `{ group: "标题" }` 作为分隔项，其后字段都归入该组；
+  // 也可在单个字段上写 `f.group`，等价于在它前面插入分组。
+  // 这样「已有字段」可以按语义重新编排顺序（身份 / 数值 / 表现 / 关联…）。
+  let groupHost = host;
+  const startGroup = (title, hint) => {
+    groupHost = h("div", { class: "ed-group" });
+    groupHost.append(h("div", { class: "ed-grouptitle" }, title));
+    if (hint) groupHost.append(h("div", { class: "ed-ghint" }, hint));
+    host.append(groupHost);
+  };
+  let curGroup = null;
   for (const f of schema) {
+    if (f && f.group != null && !f.k) { curGroup = f.group; startGroup(f.group, f.hint); continue; }
+    if (f.group != null && f.group !== curGroup) { curGroup = f.group; startGroup(f.group, f.hint); }
     const lab = h("label", null, f.label || f.k);
     let ctl;
     const v = valOf(f, obj);
     if (f.type === "drops") {
       const box = h("div", { class: "ed-drops" });
       renderDrops(box, obj, f, onChange);
-      host.append(h("div", { class: "ed-field" }, lab, box));
+      groupHost.append(h("div", { class: "ed-field wide" }, lab, box));
       continue;
     }
     if (f.type === "inventory") {
       const box = h("div", { class: "ed-drops" });
       renderInventory(box, obj, f, onChange);
-      host.append(h("div", { class: "ed-field" }, lab, box));
+      groupHost.append(h("div", { class: "ed-field wide" }, lab, box));
       continue;
     }
     if (f.type === "strlist") {
       const box = h("div", { class: "ed-drops" });
       renderStrList(box, obj, f, onChange);
-      host.append(h("div", { class: "ed-field" }, lab, box));
+      groupHost.append(h("div", { class: "ed-field wide" }, lab, box));
       continue;
     }
     if (f.type === "buffeffects") {
       const box = h("div", { class: "ed-drops" });
       renderBuffEffects(box, obj, f, onChange);
-      host.append(box);
+      groupHost.append(h("div", { class: "ed-field wide" }, h("label", null, f.label || f.k), box));
+      continue;
+    }
+    if (f.type === "model") {
+      // 行走图（.pmg 模型名）：值是一个模型名字符串，对应 chars.json 里的一套帧。
+      // 用原生 datalist 在不少浏览器里点了箭头打不开，所以改成「缩略图 + 选择…」弹窗，
+      // 与图片字段保持一致的交互。f.models 为可选模型名，f.modelSrc(name) 给缩略图。
+      const box = h("div", { class: "ed-imgfield" });
+      const thumbs = h("div", { class: "ed-imgthumbs" });
+      const drawThumbs = () => {
+        clear(thumbs);
+        const m = pathGet(obj, f.k);
+        if (!m) { thumbs.append(h("div", { class: "ed-imghint" }, "（未设置）")); return; }
+        const src = f.modelSrc ? f.modelSrc(m) : null;
+        if (src) {
+          const im = h("img", { src, title: String(m) });
+          im.onerror = () => { im.style.opacity = "0.12"; };
+          thumbs.append(im);
+        }
+        thumbs.append(h("span", { class: "ed-modelname" }, String(m)));
+      };
+      const btn = h("button", { class: "ed-btn" }, "选择…");
+      btn.onclick = () => openModelPicker({
+        title: f.label || f.k,
+        models: f.models || [],
+        modelSrc: f.modelSrc,
+        value: pathGet(obj, f.k),
+        onPick: v => { pathSet(obj, f.k, v); drawThumbs(); flag(f); },
+      });
+      const reset = h("button", { class: "ed-btn ghost", onclick: () => { pathSet(obj, f.k, ""); drawThumbs(); flag(f); } }, "清除");
+      box.append(thumbs, h("div", { class: "ed-row" }, btn, reset));
+      groupHost.append(h("div", { class: "ed-field wide" }, lab, box));
+      drawThumbs();
       continue;
     }
     if (f.type === "image" || f.type === "frames") {
@@ -204,7 +249,7 @@ export function renderForm(host, schema, obj, onChange) {
       });
       const reset = h("button", { class: "ed-btn ghost", onclick: () => { pathSet(obj, f.k, isFrames ? [] : ""); drawThumbs(); flag(f); } }, "清除");
       box.append(thumbs, h("div", { class: "ed-row" }, btn, reset));
-      host.append(h("div", { class: "ed-field" }, lab, box));
+      groupHost.append(h("div", { class: "ed-field wide" }, lab, box));
       drawThumbs();
       continue;
     }
@@ -250,7 +295,10 @@ export function renderForm(host, schema, obj, onChange) {
       ctl.setAttribute("list", id);
       host.append(dl);
     }
-    host.append(h("div", { class: "ed-row" }, lab, ctl));
+    // 布局：文本域这类"大段内容"独占一整行且加高；其余单行控件与 label 同排。
+    // label 右对齐、字号与控件一致（见 style.js 的 .ed-row > label）。
+    const wide = f.type === "textarea" || f.type === "lines" || f.wide === true;
+    groupHost.append(h("div", { class: wide ? "ed-row wide" : "ed-row" }, lab, ctl));
     // 图片字段：若有 f.img(obj)，在控件下方显示预览（随输入/选择实时刷新）
     if (typeof f.img === "function") {
       const im = h("img", { class: "ed-fieldimg" });
@@ -264,7 +312,7 @@ export function renderForm(host, schema, obj, onChange) {
       im.onerror = () => { im.style.opacity = "0.15"; };
       im.onload = () => { im.style.opacity = "1"; };
       refreshers.push(refresh); refresh();
-      host.append(wrap);
+      groupHost.append(wrap);
     }
   }
 }
@@ -319,7 +367,9 @@ export function renderListEditor(host, opts) {
     return false;
   };
   const redraw = () => {
-    sel = opts.sel != null ? opts.sel : 0;   // 每次重绘都从 opts 同步选中项（行点击/新建/删除后才会切换）
+    // 选中项以内部 sel 为准（只有新建/复制/删除才改它）。
+    // 之前这里每帧从 opts.sel 重置，导致「点了左侧某行，右侧不跟着变」。
+    if (sel == null || sel >= list.length) sel = list.length ? 0 : null;
     clear(host);
 
     // ---- 工具栏 ----
@@ -378,7 +428,7 @@ export function renderListEditor(host, opts) {
       clear(body);
       list.forEach((it, i) => {
         if (!match(it)) return;
-        const tr = h("tr", { class: i === sel ? "on" : "", onclick: () => { opts.sel = i; drawSelection(); fadeAll(); tr.className = "on"; } });
+        const tr = h("tr", { class: i === sel ? "on" : "", onclick: () => { sel = i; opts.sel = i; drawSelection(); fadeAll(); tr.className = "on"; } });
         fillRow(tr, it);
         body.append(tr);
       });
@@ -414,4 +464,49 @@ export function renderListEditor(host, opts) {
   };
   redraw();
   return { redraw, getSel: () => opts.sel };
+}
+
+/**
+ * 给一个 textarea 套上「可调字号」的编辑器外壳。
+ * 字号记在 localStorage（`ed.fontsize`），A-/A+ 与数字显示；
+ * Ctrl+滚轮 也能调，方便大屏/小屏下换到舒服的字号。
+ * @param {HTMLTextAreaElement} ta
+ * @param {{extra?:Node[], key?:string}} [opts]
+ * @returns {HTMLDivElement} 包含工具栏与 textarea 的容器（撑满父级高度）
+ */
+export function editorShell(ta, opts) {
+  const o = opts || {};
+  const storeKey = o.key || "ed.fontsize";
+  const MIN = 10, MAX = 28;
+  let fs = parseInt(localStorage.getItem(storeKey) || "", 10);
+  if (!(fs >= MIN && fs <= MAX)) fs = 12;
+
+  const wrap = h("div", { class: "ed-editorwrap", style: "display:flex;flex-direction:column;flex:1 1 auto;min-height:0" });
+  const val = h("span", { class: "ed-fsval" }, fs + "px");
+  const apply = () => {
+    ta.style.setProperty("--ed-fs", fs + "px");
+    ta.classList.add("ed-editor");
+    val.textContent = fs + "px";
+    localStorage.setItem(storeKey, String(fs));
+  };
+  const step = d => { fs = Math.max(MIN, Math.min(MAX, fs + d)); apply(); };
+  const bar = h("div", { class: "ed-tools", style: "padding:4px 0" });
+  const fsbar = h("div", { class: "ed-fsbar" },
+    h("button", { title: "缩小字号", onclick: () => step(-1) }, "A-"),
+    val,
+    h("button", { title: "放大字号", onclick: () => step(1) }, "A+"),
+    h("button", { title: "恢复 12px", onclick: () => { fs = 12; apply(); } }, "↺"));
+  if (o.extra) for (const n of o.extra) bar.append(n);
+  bar.append(fsbar);
+  wrap.append(bar, ta);
+
+  // Ctrl / Cmd + 滚轮调字号
+  ta.addEventListener("wheel", e => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    step(e.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
+
+  apply();
+  return wrap;
 }

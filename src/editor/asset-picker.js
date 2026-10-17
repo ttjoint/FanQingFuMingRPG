@@ -195,3 +195,71 @@ function stripDir(keys, dir) {
 /** @type {(key: string, dataUrl: string) => void} */
 let ED_IMAGES_SET = () => {};
 export function setImagesWriter(fn) { ED_IMAGES_SET = fn; }
+
+// ---------------------------------------------------------------------------
+// 行走图（.pmg 模型名）选择器
+//
+// NPC 的 model 字段存的是 chars.json 里的**模型名**，不是资源路径，所以不能走
+// 图片选择器。这里给一个缩略图网格：每格显示该模型的站立首帧 + 名字，
+// 搜索按模型名模糊匹配。
+// ---------------------------------------------------------------------------
+/**
+ * @param {{title?:string, models:string[], modelSrc?:(m:string)=>string|null,
+ *          value?:string, onPick:(v:string)=>void}} o
+ */
+export function openModelPicker(o) {
+  const src = o.modelSrc || (() => null);
+  const mask = h("div", { class: "ed-modal-mask" });
+  const box = h("div", { class: "ed-modal" });
+  const close = () => mask.remove();
+
+  const searchIn = h("input", { type: "text", placeholder: "搜索模型名…" });
+  const listEl = h("div", { class: "ed-modal-list" });
+  const gridEl = h("div", { class: "ed-modelgrid" });
+  listEl.append(gridEl);
+
+  let cur = o.value || (o.models[0] || "");
+  const preview = h("div", { class: "ed-modal-prev" });
+  const prevImg = h("img", { style: "max-width:200px;max-height:200px;image-rendering:pixelated" });
+  const prevName = h("div", { class: "ed-modal-path" });
+  preview.append(prevImg, prevName);
+
+  const drawGrid = () => {
+    clear(gridEl);
+    const q = searchIn.value.trim().toLowerCase();
+    const show = q ? o.models.filter(m => m.toLowerCase().includes(q)) : o.models;
+    for (const m of show) {
+      const s = src(m);
+      const cell = h("div", { class: "ed-modelcell" + (m === cur ? " on" : ""), title: m });
+      const im = h("img", { src: s || "", style: "image-rendering:pixelated" });
+      if (!s) { im.style.visibility = "hidden"; im.style.width = "40px"; im.style.height = "40px"; }
+      cell.append(im, h("span", null, m));
+      cell.onclick = () => {
+        cur = m;
+        for (const c of gridEl.children) c.classList.remove("on");
+        cell.classList.add("on");
+        const ps = src(m);
+        if (ps) { prevImg.src = ps; prevImg.style.display = ""; } else prevImg.style.display = "none";
+        prevName.textContent = m;
+      };
+      gridEl.append(cell);
+    }
+    if (!show.length) gridEl.append(h("div", { class: "ed-empty" }, "没有匹配的模型"));
+  };
+  searchIn.oninput = drawGrid;
+
+  box.append(h("div", { class: "ed-modal-head" },
+    h("div", { class: "ed-modal-title" }, o.title || "选择行走图"),
+    h("div", { class: "ed-search" }, searchIn)));
+  box.append(h("div", { class: "ed-modal-body" }, listEl, preview));
+  box.append(h("div", { class: "ed-modal-foot" },
+    h("button", { class: "ed-btn ghost", onclick: close }, "取消"),
+    h("button", { class: "ed-btn", onclick: () => { if (cur) o.onPick(cur); close(); } }, "确定")));
+  mask.append(box);
+  mask.addEventListener("mousedown", e => { if (e.target === mask) close(); });
+  document.body.append(mask);
+  drawGrid();
+  const ps = src(cur);
+  if (ps) { prevImg.src = ps; } else prevImg.style.display = "none";
+  prevName.textContent = cur;
+}
