@@ -142,7 +142,14 @@ registerAction("chase", (rt, bb, params, dt) => {
 // 攻击：面向目标、按 cooldown 触发一次挥砍；命中在挥砍中段结算。
 registerAction("attack", (rt, bb, params, dt) => {
   const n = bb.self, t = bb.target;
-  if (!t || t.dead) return {};
+  if (!t || t.dead) {
+    // 目标已经没了（死亡/被清空）。**必须把挥砍计时清掉**：
+    // npcAI 在 n.atkT > 0 时会跳过 stepAi 直接重入本动作（挥砍提交机制），
+    // 若这里只 return 而不收尾，atkT 就永远不会归零 → 单位永久卡在挥砍帧，
+    // 既不移动也不索敌（表现为"游戏卡死、什么都不能动"）。
+    n.atkT = 0; n.swingT = 0; n.hitPending = false; n.swingTarget = null; n.animSpeed = 1;
+    return {};
+  }
   n.path = null;
   n.dir = dirFromVec(t.x - n.x, t.y - n.y);
   if (n.atkT > 0) {   // 挥砍提交：播完这一刀

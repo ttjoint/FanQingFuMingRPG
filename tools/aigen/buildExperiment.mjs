@@ -119,12 +119,18 @@ function buildMap() {
     { sprite: [0, 0, 64, 64, ORIGIN_X + (15 - 5) * HALF_W, (15 + 5) * HALF_H], tiles: [[0, 0, 0, 0]], soft: "rock_a.png" },
   ];
 
+  // 怪物分布：入口在 (entry 3,3)，**必须离入口足够远**。
+  // 早先最近一只在 (5,6)（约 86px），正好落在 caster 的 260 索敌半径内，
+  // 玩家一进场景就被贴身缠住、8 秒被打死 → 看起来像"卡死"。
+  // 这里统一放到场地中后部，给玩家落地后观察与走位的余地。
+  // 所有怪与入口(3,3)的距离必须 >= 340px：
+  // caster 的 aggroRange 是 260，留 80px 反应余量，玩家落地后有观察/走位空间。
   const spawns = [
-    { npc: 9001, row: 5, col: 6 },
-    { npc: 9001, row: 8, col: 12 },
-    { npc: 9001, row: 13, col: 8 },
-    { npc: 9002, row: 6, col: 15 },
-    { npc: 9002, row: 15, col: 14 },
+    { npc: 9001, row: 6, col: 14 },
+    { npc: 9001, row: 14, col: 6 },
+    { npc: 9001, row: 11, col: 15 },
+    { npc: 9002, row: 16, col: 8 },
+    { npc: 9002, row: 15, col: 16 },
   ];
 
   return {
