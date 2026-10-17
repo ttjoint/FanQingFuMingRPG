@@ -158,6 +158,11 @@ export function stepAi(plan, bb, rt, dt) {
   // 冷却计时
   for (const k in st.cd) if (st.cd[k] > 0) st.cd[k] = Math.max(0, st.cd[k] - dt);
 
+  // 仇恨衰减（若运行时提供）：长时间未被攻击则清除 lastAttacker，
+  // 同时递减“撤回冷却”（returning）。
+  // **必须在索敌之前**：否则 returning 总比 pickTarget 晚一帧才生效。
+  if (rt.decayAggro) rt.decayAggro(bb, dt);
+
   // 目标生命周期：死亡 / 超出 leash / 不再敌对（如阵营被动态改变）则丢弃
   const had = bb.target;
   if (had && (had.dead || rt.lost(bb, had) || (rt.canKeep && !rt.canKeep(bb, had)))) {
@@ -177,10 +182,16 @@ export function stepAi(plan, bb, rt, dt) {
     st.aggroT = (st.aggroT || 0) + dt;
   }
 
-  // 仇恨衰减（若运行时提供）：长时间未被攻击则清除 lastAttacker。
-  if (rt.decayAggro) rt.decayAggro(bb, dt);
-
   const { action, params } = decide(plan, bb, ctx);
+  // 撤回拦截：放弃目标后、冷却未结束前，**无条件先走回出生点**。
+  // 不能指望 chase 内部的 returnTo：chase 需要 hasTarget，而撤回时 target 已经为空，
+  // 规则会落到 idle/wander，结果就是“站在原地抽搐或原地乱猬”而永远回不了家。
+  if (!bb.target && st.returning > 0 && rt.run) {
+    const res0 = rt.run(bb, "return", { speed: "walk" }, dt);
+    applyPatch(st, res0 && res0.statePatch);
+    if (res0 && res0.done) st.returning = 0;
+    return res0;
+  }
   const res = rt.run(bb, action, params, dt);
   applyPatch(st, res && res.statePatch);
   return res;
@@ -195,6 +206,6 @@ export function makeBlackboard(unit) {
     target: null,
     home: { x: unit.x, y: unit.y },
     hp: 0, hpMax: 1, mp: 0, mpMax: 1,
-    state: { aggroT: 0, lostT: 0, cd: {}, wanderT: 0, wanderDest: null },   // 可序列化的 AI 状态
+    state: { aggroT: 0, lostT: 0, cd: {}, wanderT: 0, wanderDest: null, returning: 0, returnSince: null },   // 可序列化的 AI 状态
   };
 }

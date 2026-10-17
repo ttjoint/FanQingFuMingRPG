@@ -139,12 +139,36 @@ export function loadMap(ctx, name) {
   G.currentMap = name;
   G.map = data;
   playBGM(G, data.music);
-  // 切图：清除目标锁定与仇恨（旧地图的单位引用全部作废）
-  G.lockTarget = null;
-  if (G.player) { G.player.target = null; G.player.lastAttacker = null; }
-  G.npcs = [];
-  G.ground = [];
-  // 出生 NPC（可带实例覆盖）
+
+  // ---- 场景级状态重置 ----
+  // 切图/重进 = 全新场景，上一张图的一切瞬时状态都必须丢弃，
+  // 否则会残留：怪物还在追旧仇恨、上一张图的投射物飞进来、特效/飘字停在半空、
+  // 对话/脚本还卡着、商店面板关不掉。
+  // 需要持久化的内容（背包/属性/任务/剧情标记）不在 G 的这些瞬时字段里，不受影响。
+  G.lockTarget = null;             // 锁定圈作废（旧图单位引用已失效）
+  G.npcs = [];                     // 旧图的怪全部丢弃（下面按 spawns 重建 → 归位/复活）
+  G.ground = [];                   // 地面掉落属瞬时物件，不跨图
+  G.projectiles = [];              // 飞行中的投射物
+  G.fx = [];                       // 特效实例（含持续 buff 光环、命中特效）
+  G.effects = [];                  // 旧版帧动画特效数组（与 G.fx 并存，两者都要清）
+  G.moveMarker = null;             // 点击落点光圈
+  G.uiFx = null;                   // 指示圈缓存
+  G.shop = null;                   // 商店面板
+  G.savePanel = false;
+  G.dialog = null;                 // 对话
+  G.script = null;                 // 脚本执行栈（脚本上下文绑定旧图单位）
+  G.tip = ""; G.tipT = 0;
+  G.lastCell = null;               // 防止落地格与旧图重复
+  G.triggerCD = 0;
+  G.deathT = 0;
+  if (G.player) {
+    const p = G.player;
+    p.target = null; p.lastAttacker = null; p.aggroAt = null;
+    p.path = null; p.chaseTarget = null; p.chaseCell = null;
+    p.atkT = 0; p.swingT = 0; p.hitPending = false; p.swingTarget = null;
+    p.animSpeed = 1; p.pickup = null; p.running = false;
+  }
+  // 出生 NPC（可带实例覆盖）。每次进图都重新 spawn → 怪物回到出生点、血量重置。
   for (const s of data.spawns) {
     const npc = spawnNPC(ctx, s.npc, s.row, s.col, s.overrides);
     if (npc) G.npcs.push(npc);

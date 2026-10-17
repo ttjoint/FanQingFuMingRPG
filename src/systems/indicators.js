@@ -77,6 +77,10 @@ export function computeIndicators(ctx) {
   if (g.lockTarget && !lockValid(g)) g.lockTarget = null;
   const locked = g.lockTarget || null;
   const ui = { target: null, interact: null, move: g.moveMarker || null, item: null, locked: null };
+  // 锁定圈**不受对话框/商店/脚本影响**：右键对话时锁定圈必须保持。
+  // （旧实现把 ui.locked 写在 !g.dialog 分支里，一按右键对话圈就没）
+  // 解除条件只有三个：目标死亡、目标离开视野、切图/重建场景。
+  if (locked && g.scene === "game") ui.locked = locked;
   if (fx.uiRings !== false && g.scene === "game" && !g.shop && !g.dialog && !g.script) {
     const m = g.mouse;
     const wx = m.wx, wy = m.wy;
@@ -88,7 +92,6 @@ export function computeIndicators(ctx) {
     // 锁定目标：持久画圈，不受鼠标是否悬停影响。
     // **任何**存活单位都应能锁定并显示圈：敌对红圈，其余蓝圈。
     // （早先只认"敌对 or 可交互"，导致中立的普通 NPC 锁上了却不画圈。）
-    if (locked) ui.locked = locked;
 
     // 地面物品高亮：鼠标划过，或已被玩家选中准备拾取。
     for (let i = (g.ground || []).length - 1; i >= 0; i--) {

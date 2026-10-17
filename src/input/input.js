@@ -91,9 +91,9 @@ export function handleLeft(wx, wy) {
   if (onCell) { cell = c; exact = { x: wx, y: wy }; }                       // 可走格 → 精确停在点击像素
   else { const n = nearestWalkablePixel(getRuntime(), wx, wy); if (!n) return; cell = { row: n.row, col: n.col }; exact = { x: n.x, y: n.y }; }   // 不可走 → 贴近的最近可走像素
   if (!G.player) return;
-  if (Math.hypot(exact.x - G.player.x, exact.y - G.player.y) < 24) { G.player.path = null; G.player.target = null; clearLock(G); return; }   // 已很近→原地不动，防抖动
+  if (Math.hypot(exact.x - G.player.x, exact.y - G.player.y) < 24) { G.player.path = null; G.player.target = null; return; }   // 已很近→原地不动，防抖动
   G.player.target = null;
-  clearLock(G);   // 点空地 = 取消锁定
+  // 注意：点地板**不再取消锁定**。锁定圈只会在目标死亡 / 离开视野 / 切图时解除。
   setPlayerRun(G, true);   // 左键=跑（但精力为 0 时自动降为走路）
   setMoveMarker(G, exact.x, exact.y);   // 点击地面：落点光圈动画
   const cc = worldToCell(G.player.x, G.player.y);
@@ -120,7 +120,7 @@ export function handleRight(wx, wy) {
     }
     return;
   }
-  clearLock(G);   // 右键空地 = 取消锁定
+  // 注意：右键点空地**不再取消锁定**（见 handleLeft 同处注释）。
   const c = worldToCell(wx, wy);
   const onCell = !!(G.map && walkable(c.row, c.col));
   let cell, exact;
@@ -222,7 +222,8 @@ export function addInput() {
     G.mouse.sx = sp.x; G.mouse.sy = sp.y; G.mouse.wx = sp.x + G.cam.x; G.mouse.wy = sp.y + G.cam.y;
   });
   // 鼠标离开画布（出屏幕范围）= 丢失锁定。
-  cv.addEventListener("mouseleave", () => { G.mouse.onCanvas = false; clearLock(G); });
+  // 鼠标离开画布只停悬停提示，**不取消锁定**（锁定只由死亡/离开视野/切图解除）。
+  cv.addEventListener("mouseleave", () => { G.mouse.onCanvas = false; });
   cv.addEventListener("mouseenter", () => { G.mouse.onCanvas = true; });
   // 退出游戏 → 回到首页（标题菜单）。与「主角死亡回菜单」走同一条路，
   // 但额外清理运行时状态，避免存档/地图残留到下一局。
@@ -232,7 +233,8 @@ export function addInput() {
     G.panel = null; G.savePanel = false; G.packOpen = false; G.cursor = null;
     G.dialog = null; G.script = null; G.shop = null;
     G.player = null; G.currentMap = null; G.map = null;
-    G.npcs = []; G.ground = []; G.effects = []; G.projectiles = [];
+    G.npcs = []; G.ground = []; G.effects = []; G.fx = []; G.projectiles = [];
+    G.lockTarget = null; G.uiFx = null; G.moveMarker = null; G.tip = null; G.tipT = 0;
   }
 
   // 打开设置面板（Esc 主入口；会收起其它面板，避免层层叠叠）。

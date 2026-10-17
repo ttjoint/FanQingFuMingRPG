@@ -291,8 +291,9 @@ export function applyDamage(ctx, victim, amount, source) {
     g.stats.hp -= amount;
     if (g.stats.hp <= 0) {
       g.stats.hp = 0; victim.dead = true;
-      if (victim.atkT > 0) victim.pendingDie = true;   // 玩家也在挥砍：先播完这一刀再倒地
-      else { victim.action = "die"; victim.frame = 0; victim.ft = 0; }
+      // 玩家死亡同样立即打断挥砍
+      victim.atkT = 0; victim.swingT = 0; victim.hitPending = false; victim.swingTarget = null; victim.animSpeed = 1;
+      victim.action = "die"; victim.frame = 0; victim.ft = 0;
       return true;
     }
     return false;
@@ -306,8 +307,11 @@ export function applyDamage(ctx, victim, amount, source) {
 export function killNPC(ctx, n) {
   const G = ctx.state, A = ctx.assets;
   n.dead = true; n.dieT = 0; n.path = null; n.target = null;
-  if (n.atkT > 0) { n.pendingDie = true; n.hitPending = false; }   // 正在挥砍：先把这一刀打完再倒地
-  else { n.action = "die"; n.frame = 0; n.ft = 0; n.animSpeed = 1; }
+  // 死亡立即打断一切挥砍/追击状态：未播完的攻击帧、待结算的命中、残影移动都清掉，
+  // 避免“尸体还在挥刀/还能出伤害”或残留 atkT 让单位卡在战斗帧。
+  n.atkT = 0; n.swingT = 0; n.hitPending = false; n.swingTarget = null; n.animSpeed = 1;
+  if (n.ai$) { n.ai$.target = null; if (n.ai$.state) { n.ai$.state.returning = 0; n.ai$.state.aggroT = 0; } }
+  n.action = "die"; n.frame = 0; n.ft = 0;
   addExp(G, n.exp);
   G.stats.honor += 1;
   // 掉落由数据驱动（npcs.json 的 drops 字段）。经掉落表 roll，支持几率/数量区间/词缀。

@@ -42,6 +42,9 @@ export function resetNewGame(ctx) {
   G.equip = { Wu: null, Jia: null, Shi1: null, Shi2: null }; G.cursor = null; G.shop = null;
   G.missions = {}; G.vars = {}; G.notes = []; G.factions = []; G.love = {}; G.vips = {}; G.inventory = {};
   G.ground = []; G.effects = []; G.fx = []; G.uiFx = null; G.moveMarker = null; G.gameOver = false; G.currentMap = null; G.map = null;
+  // 场景级瞬时状态全清：不只在切图时清，重新开局时也必然清一遍。
+  // npcs 置空后由 startScript 的 LoadInitialMap 重新 spawn（归位 + 满血）。
+  G.npcs = []; G.projectiles = []; G.lockTarget = null; G.shop = null; G.savePanel = false;
   G.player = null;   // 丢弃旧主角对象，避免上一次阵亡的 dead/动画状态被带进新游戏
   G.tip = null; G.panel = null; G.dialog = null; G.script = null; G.triggerCD = 0; G.lastCell = null;
   G.deathT = 0;

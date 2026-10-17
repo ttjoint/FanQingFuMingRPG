@@ -11,6 +11,16 @@ import { canAttack, nearestHostile, isHostile } from "../engine/faction.js";
 import { registerAction, ACTIONS } from "../engine/ai.js";
 import { NPC_DEFAULT_SPEED, NPC_DEFAULT_RUN_SPEED } from "../content/npcFields.js";
 
+// “撤回冷却”：放弃目标后，在这段时间内不再索敌，并强制走回出生点。
+// 两个作用：
+//   1) 玩家站在 aggroRange 内时，怪不会“清目标↔重新选中”每帧来回切（原地抽搐）。
+//   2) 保证它真的走回家 —— 以前靠 chase 内部的 returnTo，但撤回时 target 为空、
+//      规则落到 idle/wander，结果原地不动。
+// 实际结束由 return 动作报告 done=true；这个秒数只是超时保险（防卡死）。
+const RETURN_HOLD = 30;
+// 撤回途中被打了，若这一击发生在此秒数内，则取消撤回、回头作战。
+const RETALIATE_WINDOW = 2.5;
+
 // ---- 单位当前使用的技能（数据驱动）----
 // NPC 可用其 skills 列表里的第一项（需满足等级/精力），否则徒手（近战、无威力加成）。
 // 玩家走 combat.js 中的 G.skill；这里只服务 NPC。
@@ -105,6 +115,22 @@ registerAction("wander", (rt, bb, params, dt) => {
   return {};
 });
 
+// 撤回：走回出生点（撤回冷却期间由 stepAi 无条件调用）。
+// 达时返回 { done: true }，让 stepAi 把 returning 清掉。
+registerAction("return", (rt, bb, params, dt) => {
+  const n = bb.self;
+  if (!n || n.dead) return { done: true };
+  const home = homeOf(bb);
+  const d = Math.hypot(n.x - home.x, n.y - home.y);
+  if (d < 24) { n.path = null; setAnim(n, "stand"); return { done: true }; }
+  const walkSpeed = params && params.speed === "walk";
+  const done = goTo(rt.ctx, n, home.x, home.y, walkSpeed ? "walk" : "run", 12, dt);
+  if (done) { setAnim(n, "stand"); return { done: true }; }
+  n.dir = dirFromVec(home.x - n.x, home.y - n.y);
+  setAnim(n, walkSpeed ? "walk" : "walk");
+  return { done: false };
+});
+
 // 追击：走到目标的 stopRange 内；超过 maxTime（默认由 targeting.giveUpT）则放弃。
 registerAction("chase", (rt, bb, params, dt) => {
   const n = bb.self, t = bb.target;
@@ -115,6 +141,7 @@ registerAction("chase", (rt, bb, params, dt) => {
     // 追击超时：放弃目标，仇恨清零，然后**走回出生点**
     // （只清目标不回家会让怪永远停在地图另一头）。
     bb.target = null; bb.state.aggroT = 0;
+    if (!(bb.state.returning > 0)) { bb.state.returning = RETURN_HOLD; bb.state.returnSince = rt.ctx.state.time || 0; }
     if (bb.self) { bb.self.lastAttacker = null; bb.self.aggroAt = null; }
     const home = homeOf(bb);
     return returnTo(rt.ctx, n, home, dt);
@@ -126,6 +153,7 @@ registerAction("chase", (rt, bb, params, dt) => {
     const home = homeOf(bb);
     if (Math.hypot(n.x - home.x, n.y - home.y) > leashFrom) {
       bb.target = null; bb.state.aggroT = 0;
+      if (!(bb.state.returning > 0)) { bb.state.returning = RETURN_HOLD; bb.state.returnSince = rt.ctx.state.time || 0; }
       if (bb.self) { bb.self.lastAttacker = null; bb.self.aggroAt = null; }
       return returnTo(rt.ctx, n, home, dt);
     }
@@ -250,7 +278,6 @@ function returnTo(ctx, n, home, dt) {
   else { n.dir = dirFromVec(home.x - n.x, home.y - n.y); setAnim(n, "walk"); }
   return {};
 }
-
 // ---- AI 运行时适配器 ----
 // 依据 ctx 与黑板，执行动作并处理索敌/丢失。
 // engine/ai.js 需要一个“AI 上下文”：除真实 ctx 的 state/assets/config 外，
@@ -287,6 +314,11 @@ export function createAiRuntime(ctx) {
     // 由 stepAi 每帧调用，避免"打过一次就永远记仇"。
     decayAggro(bb, dt) {
       const n = bb.self;
+      // 撤回冷却递减。何时结束由 return 动作自己报告（走到家门口时 done=true），
+      // 这里只负责计时，避免与主循环抢着改状态。
+      if (bb.state && bb.state.returning > 0) {
+        bb.state.returning = Math.max(0, bb.state.returning - dt);
+      }
       if (!n.lastAttacker) return;
       const tg = (bb.plan && bb.plan.targeting) || {};
       // 仇恨记忆时长：默认取 giveUpT 的 2 倍，至少 6 秒。
@@ -301,6 +333,17 @@ export function createAiRuntime(ctx) {
       const plane = bb.plan ? bb.plan.targeting : null;
       const aggroRange = plane ? plane.aggroRange : 0;
       if (aggroRange <= 0) return null;
+      // **撤回途中不索敌**：否则玩家只要还站在 aggroRange 内，就会
+      // “清目标 → 下一帧又选中 → 又超 leash → 又清目标” 每帧来回切，
+      // 表现为原地抽搐（站立/行走/转身动画逐帧抖）。
+      // 例外：撤回开始之后又被打（aggroAt 更新），说明它追着打——取消撤回。
+      if ((bb.state && bb.state.returning) > 0) {
+        const now = ctx.state.time || 0;
+        const hitAfter = n.aggroAt != null && n.lastAttacker && !n.lastAttacker.dead &&
+          now - n.aggroAt < RETALIATE_WINDOW && (bb.state.returnSince == null || n.aggroAt >= bb.state.returnSince);
+        if (!hitAfter) return null;
+        bb.state.returning = 0;
+      }
       const units = collectUnits(ctx, n);
       // 优先报复攻击者（retaliate）。
       // **必须同样受 aggroRange 约束**：否则玩家打了地图另一头的一只怪，
