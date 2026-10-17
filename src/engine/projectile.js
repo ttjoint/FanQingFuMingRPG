@@ -83,13 +83,20 @@ export function stepProjectile(proj, dt, ctx) {
   const ny = reach ? proj.ty : proj.y + dy / d * step;
   proj.x = nx; proj.y = ny;
 
-  // 命中检测：路径上任意可命中单位进入 radius 即命中
+  // 命中检测：路径上任意可命中单位进入 radius 即命中。
+  //
+  // 注意 **reach 时必须放宽判定**：投射物按 speed*dt 逐帧步进，到达追踪点前
+  // 最后一帧的步长可能整段跨过目标；而目标半径（radius）通常只有 ~20px。
+  // 若仍用严格 radius 判定，投射物会在距目标 24px 处 reach 结束、判定不中——
+  // 表现就是"远程怪一直放技能但永远打不到人"。因此 reach 时把命中容差放宽到
+  // max(radius, step + radius)（即这最后一步扫过的整段半径）。
   const units = ctx.units ? ctx.units() : [];
+  const reachTol = reach ? Math.max(proj.radius, step + proj.radius) : proj.radius;
   for (const u of units) {
     if (proj.hits.indexOf(u) >= 0) continue;
     if (ctx.canHit && !ctx.canHit(proj, u)) continue;
     const dd = ctx.dist ? ctx.dist(proj, u) : Math.hypot(proj.x - u.x, proj.y - u.y);
-    if (dd <= proj.radius) {
+    if (dd <= reachTol) {
       hits.push(u); proj.hits.push(u);
       if (proj.pierce <= 0) { proj.dead = true; return hits; }
       proj.pierce--;

@@ -59,7 +59,8 @@ const ENEMIES = [
 const SKILLS = [
   {
     name: "震地波", desc: "石傀的震荡冲击，向目标投出碎石并造成范围伤害。",
-    type: 1, range: 6, mp: 8, reqLevel: 0, power: 24,
+    // range 单位是**像素**（与 config.combat.meleeMaxRange 同量纲），不是格子数。
+    type: 1, range: 160, mp: 8, reqLevel: 0, power: 24,
     sound: "cq.wav", icon: "震地波.png", frames: [],
     projectile: {
       speed: 260, radius: 22, homing: false, pierce: 0,
@@ -68,7 +69,7 @@ const SKILLS = [
   },
   {
     name: "魂火", desc: "游魂吐出的幽蓝鬼火，追踪目标。",
-    type: 1, range: 8, mp: 12, reqLevel: 0, power: 30,
+    type: 1, range: 240, mp: 12, reqLevel: 0, power: 30,
     sound: "cq.wav", icon: "魂火.png", frames: [],
     projectile: {
       speed: 380, radius: 18, homing: true, pierce: 0,
@@ -91,14 +92,17 @@ const GROUND_ITEMS = ["红宝石", "蓝宝石", "翠玉镯", "乌木剑"];
 // iso 坐标公式与 src/core/layout.js 的 GEO 一致：
 //   dx = originX + (col - row) * halfW
 //   dy = (col + row) * halfH
-// 这里只写 cells 的最小必要字段，flag/trigger/map/layer 取地板值。
+// 这里只写 cells 的最小必要字段。
+// **flag 语义：1 = 可走，0 = 阻挡**（world/map.js 的 flags[i] 用法与
+// mapDoc.js 的 fromLegacyMap 都遵循这个约定）。
+// 早先写成 flag: 0，整张地图 400 格全部不可走，玩家一进场景就不能移动。
 const HALF_W = 32, HALF_H = 16, ORIGIN_X = 1568;
 const iso = (row, col) => ({
   row, col,
   sx: 320, sy: 64,
   dx: ORIGIN_X + (col - row) * HALF_W,
   dy: (col + row) * HALF_H,
-  flag: 0, trigger: 0, map: 0, layer: 2,
+  flag: 1, trigger: 0, map: 0, layer: 2,
 });
 
 function buildMap() {

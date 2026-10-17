@@ -8,7 +8,7 @@ import { dropGround } from "../systems/ground.js";
 import { startScript } from "../script/vm.js";
 import { canAttack } from "../engine/faction.js";
 import { rollDrops } from "../engine/lootTable.js";
-import { isMelee, skillRange as skRange, rollAttackHit, damage as dmgFormula } from "../engine/skill.js";
+import { skillRange as skRange, rollAttackHit, damage as dmgFormula } from "../engine/skill.js";
 import { normalizeTargeting, selectTargets, needsPrimary, isSelfOnly, tickCooldowns, isReady, startCooldown, knockbackTarget } from "../engine/targeting.js";
 import { spawnProjectile } from "./projectiles.js";
 import { spawnFx } from "./effects.js";
@@ -29,14 +29,17 @@ export function skillRange(ctx) {
   return sk ? skRange(sk, ctx.config.combat.rangeMin) : ctx.config.combat.rangeMin;
 }
 
-// 忠实还原 exe：roll = Random(100)（MINSTD 0x429300）；若 role+0x64>0 则 roll=(roll²)%100；
-// 命中条件 roll <= role+0xa8c（命中率，上限 100）。
-export function rollHit(hitRate, square) {
-  let roll = Math.floor(Math.random() * 100);
-  if (square) roll = (roll * roll) % 100;
-  return roll <= Math.max(0, Math.min(100, hitRate));
+export function dealDamage(atk, power, def, variance) {
+  return dmgFormula(atk, power, def, variance);   // variance 省略则退化为固定值
 }
-export function dealDamage(atk, power, def) { return dmgFormula(atk, power, def); }
+
+// 结算瞬间的射程判定（命中与否只看"这一刻目标还在不在范围+缓冲内"）。
+// 近战用 combat.meleeMaxRange，远程用技能射程；两者都加 combat.hitBuffer 缓冲。
+export function attackReach(ctx, sk) {
+  const C = ctx.config.combat || {};
+  const base = sk && sk.range > 0 ? Math.max(C.rangeMin || 0, sk.range) : (C.meleeMaxRange || C.npcMelee || 46);
+  return { range: base, buffer: C.hitBuffer == null ? 40 : C.hitBuffer };
+}
 
 export function spawnEffect(ctx, sk, x, y, anchor, follow) {
   // 新特效系统：技能可用 fx.hit 指定特效定义 id（或 fx 直接为 id）。
@@ -63,7 +66,7 @@ function applyPlayerHit(ctx, p) {
   // AOE / 多目标技能：走统一的目标选择入口（castSkill）。
   const tg = normalizeTargeting(sk.targeting);
   if (tg.aoe || isSelfOnly(tg) || tg.kind === "ally" || tg.kind === "point") {
-    castSkill(ctx, p, t, sk, { atk: G.stats.attack, hitRate: G.stats.hit });
+    castSkill(ctx, p, t, sk, { atk: G.stats.attack });
     return;
   }
   if (sk.type === 0) {
@@ -73,10 +76,10 @@ function applyPlayerHit(ctx, p) {
   }
   // 远程 + 配置了弹道：发射一枚弹道，命中时机延后到飞行抵达时（伤害仍在 resolveHit）。
   if (sk.projectile) {
-    spawnProjectile(ctx, p, t, sk, { params: { atk: G.stats.attack, hitRate: G.stats.hit } });
+    spawnProjectile(ctx, p, t, sk, { params: { atk: G.stats.attack } });
     return;
   }
-  resolveHit(ctx, p, t, sk, { atk: G.stats.attack, hitRate: G.stats.hit });
+  resolveHit(ctx, p, t, sk, { atk: G.stats.attack });
 }
 
 export function playerAttackTarget(ctx, dt) {
@@ -138,7 +141,12 @@ export function playerAttackTarget(ctx, dt) {
   if (sk.mp && G.stats.mp < sk.mp) { p.target = null; G.tip = "精力不足"; G.tipT = 2; return; }
   if (sk.mp) G.stats.mp -= sk.mp;
   const dur = actionDuration(p, "fight", ctx.assets.chars);
-  const interval = Math.max(0.25, CFG.combat.attackCD);   // 攻击间隔（招式节奏）
+  // 攻击间隔 = 基础冷却 × 攻速系数。
+  // attackSpeed 是百分比（100 = 基准）；越高越快，故用 100/(100+as) 收敛，
+  // 保证不会因为堆攻速把间隔压到 0（下限 0.25s）。
+  const as = Math.max(0, G.stats.attackSpeed || 0);
+  const speedMul = 100 / (100 + as);
+  const interval = Math.max(0.25, CFG.combat.attackCD * speedMul);   // 攻击间隔（招式节奏）
   p.atkT = interval;
   p.swingTotal = interval; p.swingT = 0;
   p.action = "fight"; p.frame = 0; p.ft = 0;               // 动画与挥砍计时同步从首帧开始
@@ -165,13 +173,19 @@ export function resolveHit(ctx, attacker, target, sk, opts) {
   spawnEffect(ctx, sk, target.x, target.y);
   // 治疗型技能（type 0）：本阶段仅玩家自疗，NPC 不用。
   if (sk && sk.type === 0) return { hit: true, dmg: 0, heal: true };
-  const hit = o.forceHit ? true : rollHit(o.hitRate == null ? 100 : o.hitRate, !isMelee({ mode }));
+  // 命中判定：看**结算这一刻**目标是否还在「射程 + 缓冲带」内。
+  // 站桩换血必定命中；只有目标在前摇期间被拉开距离才落空（War3 式）。
+  const { range, buffer } = attackReach(ctx, sk);
+  const dist = Math.hypot((target.x || 0) - (attacker.x || 0), (target.y || 0) - (attacker.y || 0));
+  const hit = o.forceHit ? true : rollAttackHit(dist, o.reach == null ? range : o.reach, buffer);
   if (!hit) return { hit: false, dmg: 0 };
   const power = sk ? (sk.power || 0) : 0;
   // Buff 属性加成：攻方 atk +、守方 def +（按层数累加）。
   const am = statMods(attacker), dm = statMods(target);
   const def = (target.defence || target.def || 0) + dm.def;
-  const amount = dealDamage((o.atk || 0) + am.atk, power, def);
+  // 伤害在 [min,max] 内浮动（不再"没打中 0 伤害"）。
+  const variance = ctx.config.combat && ctx.config.combat.damageVariance;
+  const amount = dealDamage((o.atk || 0) + am.atk, power, def, variance);
   const dead = applyDamage(ctx, target, amount, attacker);
   // 命中施加 buff / 治疗 / 击退（阶段 C/D）。
   applyOnHit(ctx, attacker, target, sk);
@@ -242,7 +256,7 @@ export function castSkill(ctx, attacker, target, sk, opts) {
       continue;
     }
     if (o.forceHit || hostile(attacker, t)) {
-      const r = resolveHit(ctx, attacker, t, sk, { atk: o.atk || 0, hitRate: o.hitRate == null ? 100 : o.hitRate });
+      const r = resolveHit(ctx, attacker, t, sk, { atk: o.atk || 0 });
       if (r.hit) hits++;
     }
   }

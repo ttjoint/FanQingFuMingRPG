@@ -40,10 +40,10 @@ globalThis.__GAME__ = {
     const tgt = target || (G.npcs || []).find(n => !n.dead);
     if (!sk || !G.player || !tgt) return null;
     if (sk.projectile) {
-      spawnProjectile(runtime, G.player, tgt, sk, { params: { atk: G.stats.attack, hitRate: 100 } });
+      spawnProjectile(runtime, G.player, tgt, sk, { params: { atk: G.stats.attack } });
       return { skill: sk.name, target: tgt.name, mode: "projectile" };
     }
-    castSkill(runtime, G.player, tgt, sk, { atk: G.stats.attack, hitRate: 100 });
+    castSkill(runtime, G.player, tgt, sk, { atk: G.stats.attack });
     return { skill: sk.name, target: tgt.name, mode: "cast" };
   },
   gotoMap: (name, row, col, dir) => {

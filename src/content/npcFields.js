@@ -28,6 +28,17 @@ export const NPC_FIELDS = {
   attackable: { fromTemplate: d => int(d), default: false },
   aggressive: { fromTemplate: d => !!(d && d.hostile), default: false },
   ai: { fromTemplate: d => (d && (d.ai == null || d.ai === "")) ? "" : (typeof d.ai === "number" ? d.ai : String(d.ai)), default: "" },
+  // 可用技能名列表（AI 施放用）。
+  //   来源优先级：模板 skillList（数组）> 模板 skills 为数组。
+  //   注意：原版模板的 `skills` **是对话占位符字符串**（如 "*/*"），不是技能名，
+  //   不能直接当列表用；那种情况一律视为「无技能」。
+  skills: {
+    fromTemplate: d => {
+      const v = d && d.skillList ? d.skillList : (d && Array.isArray(d.skills) ? d.skills : null);
+      return Array.isArray(v) ? v.map(String).filter(Boolean) : [];
+    },
+    default: [],
+  },
   speed: { fromTemplate: d => orElse(d && d.speed, 45), default: 45 },
   runSpeed: { fromTemplate: d => orElse(d && d.runSpeed, 70), default: 70 },
   drops: { fromTemplate: d => ((d && d.drops) || []).map(x => ({ name: x.name, count: x.count || 1 })), default: [] },

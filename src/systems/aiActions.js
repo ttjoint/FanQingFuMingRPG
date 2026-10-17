@@ -151,18 +151,16 @@ registerAction("attack", (rt, bb, params, dt) => {
     setAnim(n, "fight");
     if (n.hitPending && n.swingT >= (n.swingTotal || 0) * HIT_FRACTION) {
       n.hitPending = false;
-      const CFG = rt.ctx.config.combat;
-      const nhit = CFG.npcHitBase + Math.min(CFG.npcHitPerLevel, n.level || 10);
       const atk = Math.round((n.atk || 0) * (params.rage || 1));
       // 统一命中结算入口（与玩家共用）；NPC 使用技能（如果有），否则徒手。
       const sk = skillFor(rt.ctx, n);
       const tg = sk ? sk.targeting : null;
       if (sk && (sk.projectile || (tg && (tg.aoe || tg.kind === "ally" || tg.kind === "point")))) {
         // 带目标选择 / 弹道的技能：走统一施放入口。
-        if (sk.projectile) spawnProjectile(rt.ctx, n, t, sk, { params: { atk, hitRate: nhit } });
-        else castSkill(rt.ctx, n, t, sk, { atk, hitRate: nhit });
+        if (sk.projectile) spawnProjectile(rt.ctx, n, t, sk, { params: { atk } });
+        else castSkill(rt.ctx, n, t, sk, { atk });
       } else {
-        resolveHit(rt.ctx, n, t, sk, { atk, hitRate: nhit });
+        resolveHit(rt.ctx, n, t, sk, { atk });
       }
     }
     if (n.atkT <= 0) n.swingTarget = null;

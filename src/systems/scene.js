@@ -36,7 +36,7 @@ export function enterMenu(ctx, opts) {
 export function resetNewGame(ctx) {
   const G = ctx.state, p = ctx.config.player;
   G.stats = { hp: p.hpMax, hpMax: p.hpMax, mp: p.mpMax, mpMax: p.mpMax, exp: 0, expNext: p.expNext,
-    level: p.level, money: p.money, moral: p.moral, honor: p.honor, attack: p.attack, defence: p.defence, hit: p.hit };
+    level: p.level, money: p.money, moral: p.moral, honor: p.honor, attack: p.attack, defence: p.defence, attackSpeed: p.attackSpeed };
   G.skills = (p.startSkills || []).slice(); G.skill = p.startSkill || G.skills[0];
   G.hotbar = new Array(9).fill(null); G.pack = []; G.packOpen = false;
   G.equip = { Wu: null, Jia: null, Shi1: null, Shi2: null }; G.cursor = null; G.shop = null;

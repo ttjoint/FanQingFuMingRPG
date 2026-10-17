@@ -407,7 +407,7 @@ const ITEM_SCHEMA = [
   { k: "subtype", label: "子类", type: "number" }, { k: "price", label: "价格", type: "number" },
   { k: "reqLevel", label: "需求等级", type: "number" }, { k: "hp", label: "生命+", type: "number" },
   { k: "mp", label: "精力+", type: "number" }, { k: "attack", label: "攻击+", type: "number" },
-  { k: "defence", label: "防御+", type: "number" }, { k: "attrA", label: "命中+", type: "number" },
+  { k: "defence", label: "防御+", type: "number" }, { k: "attrA", label: "攻速+", type: "number" },
   { k: "attrB", label: "属性B", type: "number" }, { k: "attrC", label: "属性C", type: "number" },
   { k: "icon", label: "图标", type: "text", img: it => it.icon ? assetSrc("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png")) : null }, { k: "desc", label: "说明", type: "textarea", rows: 2 },
   { k: "rarity", label: "稀有度", type: "select", options: [["common", "普通"], ["magic", "精良"], ["rare", "稀有"], ["unique", "传说"], ["quest", "任务"]] },
@@ -418,7 +418,7 @@ const ITEM_SCHEMA = [
   { k: "gem.mods.atk", label: "宝石·攻击+", type: "number" },
   { k: "gem.mods.def", label: "宝石·防御+", type: "number" },
   { k: "gem.mods.hp", label: "宝石·生命+", type: "number" },
-  { k: "gem.mods.hit", label: "宝石·命中+", type: "number" },
+  { k: "gem.mods.hit", label: "宝石·攻速+", type: "number" },
   { k: "fx.aura", label: "特效·装备光环", type: "select" },
   { k: "fx.use", label: "特效·使用时", type: "select" },
 ];
@@ -470,7 +470,7 @@ const BUFF_SCHEMA = [
   { k: "mods.hpMax", label: "每层·生命上限", type: "number", def: 0 },
   { k: "mods.mpMax", label: "每层·精力上限", type: "number", def: 0 },
   { k: "mods.speed", label: "每层·速度", type: "number", def: 0 },
-  { k: "mods.hit", label: "每层·命中", type: "number", def: 0 },
+  { k: "mods.hit", label: "每层·攻速", type: "number", def: 0 },
   { k: "dot.dps", label: "每层·每秒伤害", type: "number", def: 0 },
   { k: "hot.hps", label: "每层·每秒治疗", type: "number", def: 0 },
   { k: "tags", label: "标签(每行一个)", type: "lines", rows: 2 },
@@ -516,7 +516,7 @@ const AFFIX_SCHEMA = [
   { k: "mods.def", label: "防御+", type: "number" },
   { k: "mods.hp", label: "生命+", type: "number" },
   { k: "mods.mp", label: "精力+", type: "number" },
-  { k: "mods.hit", label: "命中+", type: "number" },
+  { k: "mods.hit", label: "攻速+", type: "number" },
   { k: "mods.spd", label: "速度+", type: "number" },
 ];
 function tabAffixes() {
@@ -588,7 +588,7 @@ function tabConfig() {
     { k: "hpMax", label: "最大生命", type: "number" }, { k: "mpMax", label: "最大精力", type: "number" },
     { k: "expNext", label: "升级所需经验", type: "number" }, { k: "level", label: "起始等级", type: "number" },
     { k: "money", label: "起始银两", type: "number" }, { k: "attack", label: "起始攻击", type: "number" },
-    { k: "defence", label: "起始防御", type: "number" }, { k: "hit", label: "起始命中", type: "number" },
+    { k: "defence", label: "起始防御", type: "number" }, { k: "attackSpeed", label: "起始攻速", type: "number" },
     { k: "moral", label: "起始道德", type: "number" }, { k: "honor", label: "起始声望", type: "number" },
     { k: "startSkills", label: "初始技能（逗号分隔）", type: "strlist" },
   ]);
@@ -603,8 +603,8 @@ function tabConfig() {
     { k: "rangeMin", label: "最小攻击距离", type: "number" }, { k: "attackCD", label: "攻击冷却(秒)", type: "number", step: 0.1 },
     { k: "mpDrainRun", label: "奔跑耗精力/秒", type: "number", step: 0.1 }, { k: "npcAggro", label: "敌人视野", type: "number" },
     { k: "npcMelee", label: "敌人近战距离", type: "number" }, { k: "npcAttackCD", label: "敌人攻击冷却", type: "number", step: 0.1 },
-    { k: "npcHitBase", label: "敌人命中基数", type: "number" }, { k: "npcHitPerLevel", label: "敌人命中/级", type: "number" },
-    { k: "meleeMaxRange", label: "近战/远程分界", type: "number" },
+    { k: "meleeMaxRange", label: "近战/远程分界", type: "number", step: 1 },
+    { k: "hitBuffer", label: "命中缓冲(像素)", type: "number", step: 1 }, { k: "damageVariance", label: "伤害浮动(0~1)", type: "number", step: 0.05 },
   ]);
   sec("移动速度", "move", [
     { k: "walkSpeed", label: "走路速度(像素/秒)", type: "number" }, { k: "runSpeed", label: "奔跑速度(像素/秒)", type: "number" },

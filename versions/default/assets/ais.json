@@ -63,6 +63,26 @@
     ]
   },
   {
+    "id": "caster",
+    "name": "远程施法者（保持距离放技能，不贴身）",
+    "idle": { "action": "wander", "radius": 140, "interval": [2, 6], "speed": 45 },
+    "targeting": { "aggroRange": 260, "retaliate": true, "giveUpT": 8, "leash": 320, "leashFrom": 220 },
+    "rules": [
+      {
+        "when": { "targetInRange": 220 },
+        "do": { "action": "attack", "cooldown": 1.2 }
+      },
+      {
+        "when": { "targetDistBelow": 90 },
+        "do": { "action": "flee", "range": 200, "speed": 1.2 }
+      },
+      {
+        "when": { "hasTarget": true },
+        "do": { "action": "chase", "stopRange": 180, "speed": "walk" }
+      }
+    ]
+  },
+  {
     "id": "boss",
     "name": "首领（分阶段：高血普攻 / 中血猛攻 / 低血狂暴）",
     "idle": { "action": "idle" },

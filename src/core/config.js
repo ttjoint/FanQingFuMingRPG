@@ -4,11 +4,13 @@
 export const DEFAULT_CONFIG = {
   player: {
     hpMax: 200, mpMax: 100, expNext: 500, level: 1, money: 500, moral: 0, honor: 0,
-    attack: 20, defence: 5, hit: 30,
+    attack: 20, defence: 5, attackSpeed: 30,
     startSkills: ["长剑"], startSkill: "长剑",
   },
-  levelUp: { expMul: 1.5, expAdd: 200, hpMax: 40, mpMax: 20, attack: 5, defence: 3, hit: 3, maxLevel: 99, healOnLevel: true },
-  combat: { rangeMin: 40, attackCD: 0.9, mpDrainRun: 1.6, npcAttackCD: 1.1, npcAggro: 260, npcMelee: 46, npcHitBase: 20, npcHitPerLevel: 60, meleeMaxRange: 60 },
+  levelUp: { expMul: 1.5, expAdd: 200, hpMax: 40, mpMax: 20, attack: 5, defence: 3, attackSpeed: 3, maxLevel: 99, healOnLevel: true },
+  combat: { rangeMin: 40, attackCD: 0.9, mpDrainRun: 1.6, npcAttackCD: 1.1, npcAggro: 260, npcMelee: 46, meleeMaxRange: 60,
+            // 命中已改为“结算瞬间距离判定”：范围内必中，跑出 range+hitBuffer 才落空。
+            hitBuffer: 40, damageVariance: 0.25 },
   economy: { sellRate: 0.5 },
   inventory: { packItem: "包裹", packSize: 25 },
   // 掉落物：存在时长 / 散布 / 拾取与保护 / 地面堆叠合并半径。

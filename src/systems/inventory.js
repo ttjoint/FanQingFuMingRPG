@@ -131,7 +131,8 @@ export function addExp(g, n) {
     g.stats.expNext = Math.round(g.stats.expNext * L.expMul + L.expAdd);
     g.stats.hpMax += L.hpMax; g.stats.mpMax += L.mpMax;
     if (L.healOnLevel !== false) { g.stats.hp = g.stats.hpMax; g.stats.mp = g.stats.mpMax; }
-    g.stats.attack += L.attack; g.stats.defence += L.defence; g.stats.hit += L.hit;
+    g.stats.attack += L.attack; g.stats.defence += L.defence;
+    g.stats.attackSpeed = (g.stats.attackSpeed || 0) + (L.attackSpeed || 0);
     g.tip = "升级！等级 " + g.stats.level; g.tipT = 4;
   }
 }
@@ -145,7 +146,9 @@ export function applyBonus(g, it, sign, entry) {
   const st = entry ? instanceStats(entry, it, CFG.itemEnhance) : { atk: it.attack || 0, def: it.defence || 0, hit: it.attrA || 0 };
   g.stats.attack += sign * (st.atk || 0);
   g.stats.defence += sign * (st.def || 0);
-  g.stats.hit += sign * (st.hit || 0);
+  // 旧的"命中"属性已废除（命中改为距离判定），装备上的 hit 加成转投攻速，
+  // 避免老物品数据/hit 字段变成"加了但没有任何效果"的废属性。
+  g.stats.attackSpeed = (g.stats.attackSpeed || 0) + sign * (st.hit || 0);
 }
 
 // 装备槽位：模板的 equipSlot 优先（weapon/armor/trinket），映射到装备栏的 Wu/Jia/Shi1/Shi2。
