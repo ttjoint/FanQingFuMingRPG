@@ -139,6 +139,32 @@ table.ed-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .ed-tablescroll{flex:1 1 auto;overflow:auto;min-height:0}
 .ed-tablescroll table.ed-table{border:0;border-radius:0}
 .ed-split-form{flex:1;min-width:0;overflow:auto;padding-right:4px}
+/* 详情面板若是「只放一个整块编辑器」的形态（脚本/AI），让编辑器纵向撑满，
+   而不是浮在顶部留一大片空白。 */
+.ed-split-form.fill{display:flex;flex-direction:column;overflow:hidden;min-height:0}
+/* ================= 行走图（pmg）预览 ================= */
+.ed-pmg{margin:4px 0}
+.ed-pmg-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.ed-pmg-tabs .ed-btn.on{background:#3a2f10;border-color:#f0d060;color:#f0d060}
+.ed-pmg-body{display:flex;flex-direction:column;gap:6px}
+.ed-pmg-dir{display:flex;align-items:flex-start;gap:8px}
+.ed-pmg-dirlab{flex:0 0 42px;color:#7f8792;font-size:11px;padding-top:6px;text-align:right}
+.ed-pmg-strip{display:flex;flex-wrap:wrap;gap:4px;flex:1;min-width:0}
+.ed-pmg-cell{position:relative;width:52px;height:64px;border:1px solid #262b33;border-radius:4px;
+  background:#0a0b0d;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer}
+.ed-pmg-cell:hover{border-color:#4a5260}
+.ed-pmg-cell.on{border-color:#f0d060;box-shadow:0 0 0 1px #f0d060 inset}
+.ed-pmg-cell img{max-width:100%;max-height:100%;image-rendering:pixelated}
+.ed-pmg-idx{position:absolute;right:1px;bottom:0;font-size:9px;color:#5a626d;background:rgba(0,0,0,.6);
+  padding:0 2px;border-radius:2px}
+/* 表格里的分组分隔行（资源/装饰物列表按目录分组） */
+table.ed-table tr.ed-grouprow td{background:#121418;color:#7f8792;font-size:10px;
+  letter-spacing:.06em;padding:4px 8px;cursor:default}
+.ed-split-form.fill>.ed-group{display:flex;flex-direction:column;min-height:0}
+.ed-editorwrap{flex:1 1 auto;min-height:0}
+.ed-editorwrap>textarea{flex:1 1 auto;min-height:0;resize:none}
+/* 普通多行字段：随内容增高，过高时自身滚动，不无限拉长页面 */
+textarea[data-grow]{max-height:420px;overflow:auto}
 
 /* ================= 地图编辑器 ================= */
 .ed-main.mapmode{overflow:hidden;display:flex;flex-direction:column;padding:10px;gap:8px}
@@ -197,7 +223,10 @@ table.ed-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 
 /* ================= 其它 ================= */
 .ed-hint{color:#7f8792;font-size:11px;margin-top:6px;line-height:1.5}
-.ed-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px 16px}
+/* 字段纵向单列排列：早先用 auto-fill 多列网格，宽屏下字段横向散开、
+   阅读顺序跳来跳去。统一改成一行一个字段（label 在左、控件在右），
+   与 NPC/物品/Buff 详情面板完全一致。 */
+.ed-grid{display:grid;grid-template-columns:1fr;gap:6px}
 .ed-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#2b3a52;
   color:#fff;padding:9px 18px;border-radius:5px;border:1px solid #4a5a78;
   opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;z-index:110;

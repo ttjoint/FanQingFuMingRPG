@@ -5,7 +5,20 @@ import { startScript } from "../script/vm.js";
 
 export function titleMusic(ctx) { const A = ctx.assets; return (A.game && A.game.music && A.game.music.start) || ""; }
 export function endMusic(ctx) { const A = ctx.assets; return (A.game && A.game.music && A.game.music.end) || titleMusic(ctx); }
-export function flashPics(ctx) { const A = ctx.assets; return (A.game && A.game.flash && A.game.flash.length) ? A.game.flash : []; }
+// 片头闪屏条目：兼容两种写法 ——
+//   旧："team.bmp"                        （固定 2 秒）
+//   新：{ file: "team.bmp", duration: 3 }  （可单独设时长）
+export function flashItem(x, defDur) {
+  const d = defDur == null ? 2 : defDur;
+  if (x == null) return { file: "", duration: d };
+  if (typeof x === "string") return { file: x, duration: d };
+  return { file: String(x.file || x.name || ""), duration: Number(x.duration) > 0 ? Number(x.duration) : d };
+}
+export function flashPics(ctx) {
+  const A = ctx.assets;
+  const arr = (A.game && A.game.flash && A.game.flash.length) ? A.game.flash : [];
+  return arr.map(x => flashItem(x, 2).file).filter(Boolean);
+}
 export function endPic(ctx) { const A = ctx.assets; return (A.game && A.game.endpic) || ""; }
 
 // 片头闪屏「已看过」标记。切换数据版本会整页 reload，没有这个标记的话

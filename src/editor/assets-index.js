@@ -45,7 +45,8 @@ export function groupOf(path) {
   return "其它";
 }
 
-let INDEX = null;      // Set<string>，已排序
+let INDEX = null;
+let AUDIO = null;
 let MANIFEST_LOADED = false;
 
 function add(set, p) {
@@ -144,9 +145,31 @@ export function buildAssetIndex(opts) {
   // 4) 已内联的覆盖（编辑器里上传过的图，逻辑键即路径）
   for (const p in (o.images || {})) add(set, p);
   INDEX = [...set].sort();
+  // 音频单独一份索引（图片选择器里不该出现 mp3，音乐下拉里也不该出现 png）
+  const aset = new Set();
+  const scanAudio = list => {
+    for (const p of (list || [])) {
+      const q = String(p).replace(/^versions\/[^/]+\//, "");
+      if (/\.(mp3|wav|ogg|m4a)$/i.test(q)) aset.add(q);
+    }
+  };
+  if (def) scanAudio(def.assets);
+  for (const v of vs) if (v.id === curId) scanAudio(v.assets);
+  scanAudio(o.currentAssets);
+  scanAudio(o.defaultAssets);
+  AUDIO = [...aset].sort();
   MANIFEST_LOADED = true;
   return INDEX;
 }
+
+/** 音频资源（音乐/音效）索引：形如 "assets/music/start.mp3"。 */
+export function audioIndex() { return AUDIO || []; }
+
+/** 音乐文件（assets/music/ 下）。 */
+export function musicFiles() { return audioIndex().filter(p => /\/music\//.test(p)); }
+
+/** 音效文件（assets/sound/ 下）。 */
+export function soundFiles() { return audioIndex().filter(p => /\/sound\//.test(p)); }
 
 export function assetIndex() { return INDEX || []; }
 

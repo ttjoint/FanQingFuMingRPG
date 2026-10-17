@@ -254,12 +254,15 @@ export function renderForm(host, schema, obj, onChange) {
       continue;
     }
     if (f.type === "textarea" || f.type === "lines") {
-      ctl = h("textarea", { rows: f.rows || (f.type === "lines" ? 4 : 3) });
+      ctl = h("textarea", { rows: f.rows || (f.type === "lines" ? 6 : 4) });
       ctl.value = v;
       ctl.oninput = () => {
         pathSet(obj, f.k, f.type === "lines" ? ctl.value.split("\n").map(s => s.trimEnd()).filter(s => s.length) : ctl.value);
+        autoGrow(ctl, f.rows || 4);
         flag(f);
       };
+      // 不再只靠 rows 定高：随内容增高（下限由 f.rows 换算），保证多行内容能看全。
+      if (f.grow !== false) queueMicrotask(() => autoGrow(ctl, f.rows || (f.type === "lines" ? 6 : 4)));
     } else if (f.type === "select") {
       ctl = h("select");
       // f.fx：选项来自内容特效表（effects.json）；由调用方通过 f.options 注入，此处只保证首项为空。
@@ -271,6 +274,53 @@ export function renderForm(host, schema, obj, onChange) {
       ctl.value = String(pathGet(obj, f.k));
       ctl.style.flex = "1";
       ctl.onchange = () => { pathSet(obj, f.k, f.numeric ? Number(ctl.value) : ctl.value); flag(f); };
+    } else if (f.type === "audio") {
+      // 音频字段：下拉选择 + 试听按钮（不再手打文件名）。
+      // f.files：候选音频路径数组，如 ["assets/music/start.mp3", ...]
+      // f.useDir：是否把值规范化成"纯文件名"（地图/场景里 music 存的就是文件名）
+      const wrap = h("div", { style: "display:flex;gap:6px;flex:1;min-width:0;align-items:center" });
+      ctl = h("select", { style: "flex:1;min-width:0" });
+      // files 可直接给数组；filesFn 则是惰性取值（索引是异步建立的，模块加载时还没有数据）
+      const files = (f.filesFn ? (f.filesFn() || []) : (f.files || [])).slice();
+      const cur = String(pathGet(obj, f.k) == null ? "" : pathGet(obj, f.k));
+      const base = x => String(x).split("/").pop();
+      ctl.append(h("option", { value: "" }, "（无）"));
+      let hit = false;
+      // 原版数据里存在"引用 .wma、磁盘只有同名 .mp3"这类扩展名对不上的情况
+      // （几处地图音乐就一直是坏的，游戏里静音）。选择器按「同名不同扩展名」匹配，
+      // 这样这类值会正常高亮，并在保存时顺手规范成实际存在的文件名。
+      const stem = x => String(x).replace(/\.[a-z0-9]+$/i, "").toLowerCase();
+      const stemHit = files.find(fp => stem(base(fp)) === stem(cur));
+      for (const fp of files) {
+        const v = f.useDir === false ? fp : base(fp);
+        if (v === cur || (stemHit === fp)) hit = true;
+        ctl.append(h("option", { value: v }, v));
+      }
+      // 当前值不在候选里（手改过/版本缺文件）也保留，避免静默清空
+      if (cur && !hit) ctl.append(h("option", { value: cur }, cur + "（不在列表中）"));
+      // 同名不同扩展名时，直接落到磁盘上真实存在的那个（并回写，修掉指向 .wma 的坏引用）
+      if (cur && stemHit && stem(base(stemHit)) === stem(cur)) {
+        const fixed = f.useDir === false ? stemHit : base(stemHit);
+        pathSet(obj, f.k, fixed); ctl.value = fixed; flag(f);
+      } else {
+        ctl.value = cur;
+      }
+      ctl.onchange = () => { pathSet(obj, f.k, ctl.value); flag(f); playBtn.disabled = !ctl.value; };
+      const playBtn = h("button", { class: "ed-btn ghost", title: "试听" }, "▶");
+      playBtn.disabled = !cur;
+      /** @type {HTMLAudioElement|null} */
+      let au = null;
+      playBtn.onclick = () => {
+        if (au) { au.pause(); au = null; playBtn.textContent = "▶"; return; }
+        const v = ctl.value; if (!v) return;
+        const full = files.find(x => base(x) === v) || v;
+        au = new Audio(String(full).startsWith("assets/") ? full : "assets/music/" + v);
+        au.onended = () => { au = null; playBtn.textContent = "▶"; };
+        au.onerror = () => { au = null; playBtn.textContent = "▶"; };
+        au.play().then(() => { playBtn.textContent = "■"; }).catch(() => { au = null; playBtn.textContent = "▶"; });
+      };
+      wrap.append(ctl, playBtn);
+      ctl = wrap;
     } else if (f.type === "checkbox") {
       ctl = h("input", { type: "checkbox" });
       ctl.checked = !!pathGet(obj, f.k);
@@ -297,7 +347,7 @@ export function renderForm(host, schema, obj, onChange) {
     }
     // 布局：文本域这类"大段内容"独占一整行且加高；其余单行控件与 label 同排。
     // label 右对齐、字号与控件一致（见 style.js 的 .ed-row > label）。
-    const wide = f.type === "textarea" || f.type === "lines" || f.wide === true;
+    const wide = f.type === "textarea" || f.type === "lines" || f.type === "audio" || f.wide === true;
     groupHost.append(h("div", { class: wide ? "ed-row wide" : "ed-row" }, lab, ctl));
     // 图片字段：若有 f.img(obj)，在控件下方显示预览（随输入/选择实时刷新）
     if (typeof f.img === "function") {
@@ -408,19 +458,37 @@ export function renderListEditor(host, opts) {
     left.append(h("div", { class: "ed-tablescroll" }, tbl));
 
     // 行内容填充（首列缩略图 + 各列文本）。每次重绘都以数据为准，避免残留旧 DOM。
+    // 行内容同步。**尽量复用已有 DOM**：只改文本 / 只在缩略图地址变化时换 src，
+    // 否则每次表单输入都会重新创建 <img>，浏览器要重新解码图片，列表一大就卡。
     const fillRow = (tr, it) => {
-      clear(tr);
       if (hasThumb) {
-        const td = h("td", { class: "ed-thumb" });
-        const src = opts.thumb(it);
-        if (src) {
-          const im = h("img", { src, loading: "lazy" });
-          im.onerror = () => { im.style.opacity = "0.12"; };
-          td.append(im);
+        let td = /** @type {HTMLElement|null} */ (tr.firstElementChild);
+        if (!td || !td.classList.contains("ed-thumb")) {
+          td = h("td", { class: "ed-thumb" });
+          tr.insertBefore(td, tr.firstChild);
         }
-        tr.append(td);
+        const src = opts.thumb(it);
+        let im = /** @type {HTMLImageElement|null} */ (td.firstElementChild);
+        if (src) {
+          if (!im || im.tagName !== "IMG") {
+            im = h("img", { loading: "lazy", decoding: "async" });
+            im.onerror = () => { im.style.opacity = "0.12"; };
+            clear(td); td.append(im);
+          }
+          const want = new URL(String(src), location.href).href;
+          if (im.src !== want) im.src = String(src);
+        } else if (im) im.remove();
       }
-      for (const c of columns) tr.append(h("td", null, c.get ? c.get(it) : (it[c.k] == null ? "" : String(it[c.k]))));
+      const off = hasThumb ? 1 : 0;
+      for (let i = 0; i < columns.length; i++) {
+        const c = columns[i];
+        const txt = c.get ? String(c.get(it) ?? "") : (it[c.k] == null ? "" : String(it[c.k]));
+        let td = /** @type {HTMLElement} */ (tr.children[off + i]);
+        if (!td) { td = h("td", null, txt); tr.append(td); }
+        else if (td.textContent !== txt) td.textContent = txt;
+      }
+      // 多余的单元格（列数变少时）删掉
+      while (tr.children.length > off + columns.length) tr.lastElementChild?.remove();
     };
 
     let formHost = null;
@@ -446,15 +514,10 @@ export function renderListEditor(host, opts) {
       right.append(formHost);
       renderForm(formHost, schema, cur, () => {
         opts.onChange && opts.onChange();
-        // 表单里改名/换图要让左侧表格即时反映（只重填该行，不重建 DOM，避免输入框失焦）
-        let row = 0;
-        for (let i = 0; i < list.length; i++) {
-          if (!match(list[i])) continue;
-          const tr = body.children[row++];
-          if (!tr) continue;
-          fillRow(tr, list[i]);
-          tr.className = i === sel ? "on" : "";
-        }
+        // 表单里改名/换图要让左侧表格即时反映：只重填**当前这一行**，
+        // 不碰其它行（列表可能上千条，全量重填会卡且会丢滚动位置）。
+        const tr = body.querySelector("tr.on");
+        if (tr && list[sel]) fillRow(tr, list[sel]);
       });
     };
 
@@ -509,4 +572,23 @@ export function editorShell(ta, opts) {
 
   apply();
   return wrap;
+}
+
+/**
+ * textarea 随内容自动增高。
+ * 之前多行文本框高度只由 `rows` 决定，长文本只能在小框里滚动，看不到全貌。
+ * 这里按 scrollHeight 撑开，下限 minRows 行（避免空值塌成一条线），
+ * 上限由 CSS 的 max-height 控制（用户仍可手动拖动 resize 手柄）。
+ * @param {HTMLTextAreaElement} ta
+ * @param {number} [minRows]
+ */
+export function autoGrow(ta, minRows) {
+  const rows = minRows || 3;
+  ta.style.height = "auto";
+  const cs = getComputedStyle(ta);
+  const line = parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) || 12) * 1.5;
+  const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+  const min = Math.round(line * rows + pad);
+  const need = Math.max(min, ta.scrollHeight + 2);
+  ta.style.height = need + "px";
 }

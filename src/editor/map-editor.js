@@ -16,6 +16,7 @@ import { createSelection } from "./selection.js";
 import { makeLineEditor, modeControl, decorState } from "./decor-line.js";
 import { decorSpriteKey } from "../content/schema.js";
 import { attachLegacyViews } from "../content/mapDoc.js";
+import { musicFiles } from "./assets-index.js";
 
 const LAYERS = [
   ["ground", "地面"],
@@ -132,6 +133,27 @@ export function mountMapEditor(main, side, opts) {
   const field = (label, ctl) => h("div", { class: "ed-field" }, h("label", null, label), ctl);
   const textIn = (val, on) => { const i = h("input", { type: "text", value: val == null ? "" : val }); i.oninput = () => on(i.value); return i; };
   const numIn = (val, on) => { const i = h("input", { type: "number", value: val == null ? 0 : val }); i.oninput = () => on(Number(i.value)); return i; };
+  // 音乐选择：地图里存的是纯文件名（如 "平原.mp3"），候选来自版本里的 assets/music/。
+  // 不再手打文件名——打错一个字符游戏就静音，且无从发现。
+  const musicIn = (val, on) => {
+    const sel = h("select");
+    const base = x => String(x).split("/").pop();
+    const files = musicFiles();
+    sel.append(h("option", { value: "" }, "（无）"));
+    const cur = val == null ? "" : String(val);
+    // 原版数据里有几处引用 .wma、磁盘上只有同名 .mp3（这几张地图一直是静音的）。
+    // 按「同名不同扩展名」匹配，自动落到真实存在的文件并回写。
+    const stem = x => String(x).replace(/\.[a-z0-9]+$/i, "").toLowerCase();
+    const real = files.find(f => stem(base(f)) === stem(cur));
+    let hit = false;
+    for (const f of files) { const v = base(f); if (v === cur || f === real) hit = true; sel.append(h("option", { value: v }, v)); }
+    if (cur && !hit) sel.append(h("option", { value: cur }, cur + "（不在列表）"));
+    const fixed = real ? base(real) : cur;
+    sel.value = fixed;
+    if (fixed !== cur) on(fixed);
+    sel.onchange = () => on(sel.value);
+    return sel;
+  };
   const btn = (label, cls, on) => h("button", { class: "ed-btn" + (cls ? " " + cls : ""), onclick: on }, label);
   const imgSrc = p => images[p] || assetURL(p);
   const npcById = id => npcs.find(n => n.id === id);
@@ -696,7 +718,7 @@ export function mountMapEditor(main, side, opts) {
   function mapProps() {
     side.append(h3("地图属性"));
     side.append(field("显示名", textIn(raw.name || "", v => { raw.name = v; mark(); })));
-    side.append(field("音乐", textIn(raw.music || "", v => { raw.music = v; mark(); })));
+    side.append(field("音乐", musicIn(raw.music || "", v => { raw.music = v; mark(); })));
     side.append(h3("操作"));
     side.append(hint("在画布上按当前层点选部件即可编辑。右键或中键拖动平移，滚轮缩放。"));
   }

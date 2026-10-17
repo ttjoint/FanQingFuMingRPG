@@ -72,7 +72,12 @@ export function openAssetPicker(opts) {
   };
   dlg.append(h("div", { class: "ed-tools" }, h("div", { class: "ed-search" }, searchIn), cnt, pickLocal, fileIn));
 
-  searchIn.oninput = () => { query = searchIn.value; drawList(); };
+  let searchT = 0;
+  searchIn.oninput = () => {
+    query = searchIn.value;
+    clearTimeout(searchT);
+    searchT = setTimeout(drawList, 160);
+  };
 
   // ---- 主体：左缩略图列表 + 右大预览 ----
   const body = h("div", { class: "ed-modal-body" });
@@ -87,21 +92,53 @@ export function openAssetPicker(opts) {
 
   let previewKey = [...sel][0] || null;
 
+  // 性能：点选时**不重建列表**（资源上千条，重建会重新请求/解码所有缩略图，
+  // 点一下卡一下）。只有搜索/上传/多选模式切换才重建 DOM；点选只改 class。
+  const rowByPath = new Map();
+  let io = null;
+  const LIST_MAX = 3000;
+  const ioNow = () => {
+    if (io) return io;
+    io = new IntersectionObserver(entries => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const img = /** @type {HTMLImageElement} */ (e.target);
+        const src = img.dataset.lazy;
+        if (src) { img.src = src; delete img.dataset.lazy; }
+        io.unobserve(img);
+      }
+    }, { root: listEl, rootMargin: "260px" });
+    return io;
+  };
+  const refreshMarks = () => {
+    for (const [p, row] of rowByPath) {
+      row.classList.toggle("on", sel.has(p));
+      row.classList.toggle("cur", p === previewKey);
+    }
+    cnt.textContent = "共 " + rowByPath.size + " 项" + (sel.size ? " / 已选 " + sel.size : "");
+  };
+
   function drawList() {
+    if (io) { io.disconnect(); io = null; }
+    rowByPath.clear();
     clear(listEl);
     const all = searchAssets(query);
     // 只显示与目标目录相关的资源优先；但如果搜索了关键词，就全库搜（跨目录更好找）
     const relevant = query ? all : all.filter(p => !dir || p.includes("/" + dir + "/") || groupOf(p) === groupOf("assets/" + dir));
     const show = relevant.length ? relevant : all;
-    cnt.textContent = "共 " + show.length + " 项" + (sel.size ? " / 已选 " + sel.size : "");
     // 分组显示（已知目录在前，"其它"垫底；组内保持路径顺序）
     const sorted = show.slice().sort((a, b) => groupRank(groupOf(a)) - groupRank(groupOf(b)));
+    const obs = ioNow();
     let lastGroup = null;
+    let shown = 0;
     for (const p of sorted) {
+      if (shown >= LIST_MAX) break;
+      shown++;
       const g = groupOf(p);
       if (g !== lastGroup) { listEl.append(h("div", { class: "ed-modal-group" }, g)); lastGroup = g; }
       const on = sel.has(p);
-      const im = h("img", { src: assetSrc(p), loading: "lazy" });
+      const im = h("img", { loading: "lazy", decoding: "async" });
+      im.dataset.lazy = assetSrc(p);
       im.onerror = () => { im.style.opacity = "0.12"; };
       const row = h("div", { class: "ed-modal-item" + (on ? " on" : "") + (p === previewKey ? " cur" : ""), title: p },
         im, h("span", { class: "ed-modal-name" }, fileName(p)));
@@ -110,11 +147,16 @@ export function openAssetPicker(opts) {
           if (sel.has(p)) sel.delete(p); else sel.add(p);
         } else { sel = new Set([p]); }
         previewKey = p;
-        drawList(); drawPreview();
+        refreshMarks();     // 只改 class，不重建列表
+        drawPreview();
       };
+      rowByPath.set(p, row);
       listEl.append(row);
+      obs.observe(im);
     }
     if (!show.length) listEl.append(h("div", { class: "ed-empty" }, "没有匹配的资源"));
+    else if (sorted.length > shown) listEl.append(h("div", { class: "ed-empty" }, "还有 " + (sorted.length - shown) + " 项未列出，请用搜索缩小范围"));
+    refreshMarks();
     drawPreview();
   }
 
@@ -137,7 +179,7 @@ export function openAssetPicker(opts) {
         const im = h("img", { src: assetSrc(p), title: p });
         im.onerror = () => { im.style.opacity = "0.12"; };
         const cell = h("div", { class: "ed-modal-frame" + (p === k ? " on" : "") }, im, h("span", null, String(i + 1)));
-        cell.onclick = () => { previewKey = p; drawPreview(); drawList(); };
+        cell.onclick = () => { previewKey = p; refreshMarks(); drawPreview(); };
         strip.append(cell);
       });
       prevEl.append(h("div", { class: "ed-hint" }, "已选 " + keys.length + " 帧（按选择顺序）："), strip);
