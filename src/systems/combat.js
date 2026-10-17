@@ -266,7 +266,13 @@ export { tickCooldowns };
 export function applyDamage(ctx, victim, amount, source) {
   const g = ctx.state;
   if (!victim || victim.dead) return false;
-  if (source && source !== victim) victim.lastAttacker = source;   // 用于 AI 报复/协助
+  // 用于 AI 报复/协助。同时记录时间戳，供仇恨衰减使用
+  // （否则 lastAttacker 永久保留 —— 打了地图一头的一只怪，
+  //   全图同阵营单位都会一直把它当目标）。
+  if (source && source !== victim) {
+    victim.lastAttacker = source;
+    victim.aggroAt = (ctx.state && ctx.state.time) || 0;
+  }
   if (victim.isPlayer || victim === g.player) {
     g.stats.hp -= amount;
     if (g.stats.hp <= 0) {

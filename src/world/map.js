@@ -139,6 +139,9 @@ export function loadMap(ctx, name) {
   G.currentMap = name;
   G.map = data;
   playBGM(G, data.music);
+  // 切图：清除目标锁定与仇恨（旧地图的单位引用全部作废）
+  G.lockTarget = null;
+  if (G.player) { G.player.target = null; G.player.lastAttacker = null; }
   G.npcs = [];
   G.ground = [];
   // 出生 NPC（可带实例覆盖）

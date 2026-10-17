@@ -82,7 +82,9 @@ export function actionNames() { return Object.keys(ACTIONS); }
 // profile 结构：
 //   { id, name, idle: { action, ...params }, targeting: { aggroRange, retaliate, giveUpT, leash }, rules: [{ when, do }] }
 // ---------------------------------------------------------------------------
-export const DEFAULT_TARGETING = { aggroRange: 260, retaliate: true, giveUpT: 8, leash: 480 };
+// leashFrom: 允许离开出生/巡逻锚点的最大距离（缺省 = leash）。
+//   超出即放弃追击并返回原地 —— 避免"追着玩家横穿整张地图"。
+export const DEFAULT_TARGETING = { aggroRange: 260, retaliate: true, giveUpT: 8, leash: 480, leashFrom: 0 };
 
 // 字段缺省值可注入：runtime 可传入由游戏配置派生的 targeting 默认，
 // 使“索敌半径/追丢时间/拴绳距离”等平衡数值不再写死在引擎里。
@@ -99,6 +101,7 @@ export function normalizeProfile(p, defaults) {
       retaliate: t.retaliate !== false,
       giveUpT: num(t.giveUpT, def.giveUpT),
       leash: num(t.leash, def.leash),
+      leashFrom: num(t.leashFrom, def.leashFrom != null ? def.leashFrom : num(t.leash, def.leash)),
     },
     rules: Array.isArray(o.rules) ? o.rules.filter(r => r && typeof r === "object")
       .map(r => ({ when: (r.when && typeof r.when === "object") ? r.when : null, do: (r.do && typeof r.do === "object") ? r.do : { action: "idle" } })) : [],
@@ -173,6 +176,9 @@ export function stepAi(plan, bb, rt, dt) {
   } else {
     st.aggroT = (st.aggroT || 0) + dt;
   }
+
+  // 仇恨衰减（若运行时提供）：长时间未被攻击则清除 lastAttacker。
+  if (rt.decayAggro) rt.decayAggro(bb, dt);
 
   const { action, params } = decide(plan, bb, ctx);
   const res = rt.run(bb, action, params, dt);

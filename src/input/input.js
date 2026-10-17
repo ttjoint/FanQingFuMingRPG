@@ -4,7 +4,7 @@ import { VW, cv } from "../core/constants.js";
 import { screenPos, worldToCell, walkable, cellCenter } from "../core/utils.js";
 import { nearestWalkable, nearestWalkablePixel, findPathPoints } from "../world/pathfinding.js";
 import { groundAt, dropGround } from "../systems/ground.js";
-import { setMoveMarker } from "../systems/indicators.js";
+import { setMoveMarker, setLock, clearLock } from "../systems/indicators.js";
 import { canAddItem, useItemSlot, reindex } from "../systems/inventory.js";
 import { skillByName } from "../core/registry.js";
 import { castSelf, playerCanAttack } from "../systems/combat.js";
@@ -73,6 +73,8 @@ export function handleLeft(wx, wy) {
   const n = npcAt(wx, wy);
   if (sk && sk.type === 0 && !n) { castSelf(getRuntime()); return; }
   if (n) {
+    // 左键点中任何单位 = 锁定该目标（敌对红圈 / 友好蓝圈）
+    setLock(G, n);
     if (playerCanAttack(getRuntime(), n)) { if (G.player) { G.player.target = n; setPlayerRun(G, true); G.player.path = null; G.player.atkT = 0; } }
     else { // 友善 NPC：仅走近，不攻击
       const c = worldToCell(n.x, n.y);
@@ -89,8 +91,9 @@ export function handleLeft(wx, wy) {
   if (onCell) { cell = c; exact = { x: wx, y: wy }; }                       // 可走格 → 精确停在点击像素
   else { const n = nearestWalkablePixel(getRuntime(), wx, wy); if (!n) return; cell = { row: n.row, col: n.col }; exact = { x: n.x, y: n.y }; }   // 不可走 → 贴近的最近可走像素
   if (!G.player) return;
-  if (Math.hypot(exact.x - G.player.x, exact.y - G.player.y) < 24) { G.player.path = null; G.player.target = null; return; }   // 已很近→原地不动，防抖动
+  if (Math.hypot(exact.x - G.player.x, exact.y - G.player.y) < 24) { G.player.path = null; G.player.target = null; clearLock(G); return; }   // 已很近→原地不动，防抖动
   G.player.target = null;
+  clearLock(G);   // 点空地 = 取消锁定
   setPlayerRun(G, true);   // 左键=跑（但精力为 0 时自动降为走路）
   setMoveMarker(G, exact.x, exact.y);   // 点击地面：落点光圈动画
   const cc = worldToCell(G.player.x, G.player.y);
@@ -101,6 +104,7 @@ export function handleLeft(wx, wy) {
 export function handleRight(wx, wy) {
   const n = npcAt(wx, wy);
   if (n && !n.dead) {
+    setLock(G, n);   // 右键点中单位同样锁定
     if (playerCanAttack(getRuntime(), n)) {
       const line = n.talks && n.talks.length ? n.talks[Math.floor(Math.random() * n.talks.length)] : "";
       if (line) openSay(getRuntime(), n.name, line.replace(/\\n/g, "\n"), n.portrait);
@@ -116,6 +120,7 @@ export function handleRight(wx, wy) {
     }
     return;
   }
+  clearLock(G);   // 右键空地 = 取消锁定
   const c = worldToCell(wx, wy);
   const onCell = !!(G.map && walkable(c.row, c.col));
   let cell, exact;
@@ -216,6 +221,9 @@ export function addInput() {
     const sp = screenPos(e.clientX, e.clientY);
     G.mouse.sx = sp.x; G.mouse.sy = sp.y; G.mouse.wx = sp.x + G.cam.x; G.mouse.wy = sp.y + G.cam.y;
   });
+  // 鼠标离开画布（出屏幕范围）= 丢失锁定。
+  cv.addEventListener("mouseleave", () => { G.mouse.onCanvas = false; clearLock(G); });
+  cv.addEventListener("mouseenter", () => { G.mouse.onCanvas = true; });
   // 退出游戏 → 回到首页（标题菜单）。与「主角死亡回菜单」走同一条路，
   // 但额外清理运行时状态，避免存档/地图残留到下一局。
   function quitToMenu() {

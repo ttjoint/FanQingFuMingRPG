@@ -41,6 +41,8 @@ export function makeNPC(d, row, col, overrides) {
   attachAll(n, UNIT_COMPONENTS);   // 统一补齐组件默认字段（半径/速度/姿态…）
   preloadChar(n.model);
   placeFree(n);   // 防止出生点与已有单位重叠
+  // 记录"家"（出生/巡逻锚点）：AI 追击超出范围后据此返回，也用于 leashFrom 判定。
+  n.homeX = n.x; n.homeY = n.y;
   return n;
 }
 

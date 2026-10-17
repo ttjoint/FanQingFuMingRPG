@@ -85,7 +85,10 @@ registerAction("wander", (rt, bb, params, dt) => {
   const iv = Array.isArray(params.interval) ? params.interval : [2, 6];
   st.wanderT = iv[0] + Math.random() * Math.max(0, iv[1] - iv[0]);
   const radius = params.radius === undefined ? 160 : params.radius;
-  const home = bb.home || { x: n.x, y: n.y };
+  // 优先用单位自身记录的出生点（n.homeX/homeY，spawnNPC 时写入并经过 placeFree 校正），
+  // 退化时才用黑板的 home（黑板在首次访问时建立，可能早于 placeFree 的位移）。
+  const home = (n.homeX != null && n.homeY != null) ? { x: n.homeX, y: n.homeY }
+                                                     : (bb.home || { x: n.x, y: n.y });
   let dest = null;
   for (let k = 0; k < 6; k++) {
     const ang = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * radius;
@@ -108,7 +111,25 @@ registerAction("chase", (rt, bb, params, dt) => {
   if (!t || t.dead) return {};
   const stop = resolveRange(params.stopRange, bb, rt.ctx);
   const maxTime = params.maxTime === undefined ? (bb.plan ? bb.plan.targeting.giveUpT : 8) : params.maxTime;
-  if (maxTime > 0 && (bb.state.aggroT || 0) > maxTime) { bb.target = null; bb.state.aggroT = 0; return {}; }
+  if (maxTime > 0 && (bb.state.aggroT || 0) > maxTime) {
+    // 追击超时：放弃目标，仇恨清零，然后**走回出生点**
+    // （只清目标不回家会让怪永远停在地图另一头）。
+    bb.target = null; bb.state.aggroT = 0;
+    if (bb.self) { bb.self.lastAttacker = null; bb.self.aggroAt = null; }
+    const home = homeOf(bb);
+    return returnTo(rt.ctx, n, home, dt);
+  }
+  // 追得太远（离开出生点超过 leashFrom）也放弃并返回。
+  const tg = (bb.plan && bb.plan.targeting) || {};
+  const leashFrom = tg.leashFrom != null ? tg.leashFrom : 0;
+  if (leashFrom > 0) {
+    const home = homeOf(bb);
+    if (Math.hypot(n.x - home.x, n.y - home.y) > leashFrom) {
+      bb.target = null; bb.state.aggroT = 0;
+      if (bb.self) { bb.self.lastAttacker = null; bb.self.aggroAt = null; }
+      return returnTo(rt.ctx, n, home, dt);
+    }
+  }
   const d = Math.hypot(t.x - n.x, t.y - n.y);
   if (d <= stop) { n.path = null; n.dir = dirFromVec(t.x - n.x, t.y - n.y); setAnim(n, "stand"); return {}; }
   const speed = params.speed === "walk" ? (n.speed || NPC_DEFAULT_SPEED) : (n.runSpeed || NPC_DEFAULT_RUN_SPEED);
@@ -196,8 +217,13 @@ registerAction("assist", (rt, bb, params, dt) => {
 
 // 守卫：在 home 附近，超出 leash 则回防，否则按攻击/待机。
 registerAction("guard", (rt, bb, params, dt) => {
-  const n = bb.self, t = bb.target, home = bb.home || { x: n.x, y: n.y };
-  const leash = params.leash === undefined ? 260 : params.leash;
+  const n = bb.self, t = bb.target;
+  const home = (n.homeX != null && n.homeY != null) ? { x: n.homeX, y: n.homeY }
+                                                    : (bb.home || { x: n.x, y: n.y });
+  // 守卫的拴绳距离优先取 AI 配置的 leashFrom（表驱动），否则用参数/缺省。
+  const tg = (bb.plan && bb.plan.targeting) || {};
+  const leash = params.leash !== undefined ? params.leash
+               : (tg.leashFrom != null && tg.leashFrom > 0 ? tg.leashFrom : 260);
   if (Math.hypot(n.x - home.x, n.y - home.y) > leash) { bb.target = null; return returnTo(rt.ctx, n, home, dt); }
   if (!t || t.dead) return ACTIONS.idle(rt, bb, params, dt);
   const d = Math.hypot(t.x - n.x, t.y - n.y);
@@ -206,6 +232,13 @@ registerAction("guard", (rt, bb, params, dt) => {
 });
 
 // 回到某点（用于守卫回防）。
+// 取单位的出生/巡逻锚点（spawnNPC 写入并经过 placeFree 校正）。
+function homeOf(bb) {
+  const n = bb.self;
+  if (n && n.homeX != null && n.homeY != null) return { x: n.homeX, y: n.homeY };
+  return bb.home || (n ? { x: n.x, y: n.y } : { x: 0, y: 0 });
+}
+
 function returnTo(ctx, n, home, dt) {
   const done = goTo(ctx, n, home.x, home.y, "walk", 12, dt);
   if (done) setAnim(n, "stand");
@@ -222,16 +255,41 @@ export function createAiRuntime(ctx) {
   const aiCtx = makeAiContext(ctx, table);
   return {
     ctx: aiCtx,
-    // 单位是否应当与目标脱离（超出 leash 或目标已死）
+    // 单位是否应当与目标脱离。
+    //   - 目标死亡 / 丢失
+    //   - 超出 leash（自身与目标的直线距离）
+    //   - 超出 leashFrom（自身离开出生点/巡逻锚点太远，即"追得太远"）
+    //   - 超出 giveUpT（追了太久，仇恨衰减到消失）
     lost(bb, t) {
       const n = bb.self;
       if (!t || t.dead) return true;
-      const leash = bb.plan ? bb.plan.targeting.leash : 480;
+      const tg = (bb.plan && bb.plan.targeting) || {};
+      const leash = tg.leash != null ? tg.leash : 480;
       if (leash > 0 && Math.hypot(n.x - t.x, n.y - t.y) > leash) return true;
+      // 离开锚点（出生/巡逻点）太远 → 放弃追击，返回原地
+      const leashFrom = tg.leashFrom != null ? tg.leashFrom : leash;
+      if (leashFrom > 0 && n.homeX != null && n.homeY != null) {
+        if (Math.hypot(n.x - n.homeX, n.y - n.homeY) > leashFrom) return true;
+      }
+      // 追击超时 → 仇恨消失（giveUpT，单位：秒）
+      const giveUpT = tg.giveUpT != null ? tg.giveUpT : 8;
+      if (giveUpT > 0 && (bb.state.aggroT || 0) > giveUpT) return true;
       return false;
     },
     // 目标是否仍应保留（阵营/敌对关系可能被脚本动态改变）
     canKeep(bb, t) { return canAttack(bb.self, t, table); },
+    // 仇恨衰减：长时间没被攻击，就忘掉 lastAttacker。
+    // 由 stepAi 每帧调用，避免"打过一次就永远记仇"。
+    decayAggro(bb, dt) {
+      const n = bb.self;
+      if (!n.lastAttacker) return;
+      const tg = (bb.plan && bb.plan.targeting) || {};
+      // 仇恨记忆时长：默认取 giveUpT 的 2 倍，至少 6 秒。
+      const memT = Math.max(6, (tg.giveUpT != null ? tg.giveUpT : 8) * 2);
+      const now = ctx.state.time || 0;
+      const since = n.aggroAt != null ? now - n.aggroAt : memT + 1;
+      if (since > memT) { n.lastAttacker = null; n.aggroAt = null; }
+    },
     pickTarget(bb) {
       const n = bb.self;
       // 只有“具备攻击力 + 有索敌半径”的单位才主动索敌
@@ -239,8 +297,13 @@ export function createAiRuntime(ctx) {
       const aggroRange = plane ? plane.aggroRange : 0;
       if (aggroRange <= 0) return null;
       const units = collectUnits(ctx, n);
-      // 优先报复攻击者（retaliate）
-      if (plane.retaliate && n.lastAttacker && !n.lastAttacker.dead && canAttack(n, n.lastAttacker, table)) return n.lastAttacker;
+      // 优先报复攻击者（retaliate）。
+      // **必须同样受 aggroRange 约束**：否则玩家打了地图另一头的一只怪，
+      // 全图所有该阵营单位都会靠 lastAttacker 直奔玩家（"全图怪都来打我"）。
+      if (plane.retaliate && n.lastAttacker && !n.lastAttacker.dead && canAttack(n, n.lastAttacker, table)) {
+        const a = n.lastAttacker;
+        if (Math.hypot(n.x - a.x, n.y - a.y) <= aggroRange) return a;
+      }
       return nearestHostile(n, units, table, aggroRange);
     },
     run(bb, action, params, dt) {

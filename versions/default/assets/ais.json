@@ -21,7 +21,7 @@
     "id": "guard",
     "name": "站桩守卫（原地警戒）",
     "idle": { "action": "idle" },
-    "targeting": { "aggroRange": 260, "retaliate": true },
+    "targeting": { "aggroRange": 180, "retaliate": true, "giveUpT": 6, "leash": 260, "leashFrom": 140 },
     "rules": [
       { "when": { "targetInRange": "melee" }, "do": { "action": "attack" } },
       { "when": { "hasTarget": true }, "do": { "action": "guard", "leash": 260 } }
@@ -31,7 +31,7 @@
     "id": "beast",
     "name": "野兽（游荡+主动扑咬）",
     "idle": { "action": "wander", "radius": 200, "interval": [2, 5], "speed": 45 },
-    "targeting": { "aggroRange": 200, "retaliate": true, "giveUpT": 6, "leash": 420 },
+    "targeting": { "aggroRange": 170, "retaliate": true, "giveUpT": 5, "leash": 240, "leashFrom": 160 },
     "rules": [
       { "when": { "hpBelow": 0.25 }, "do": { "action": "flee", "range": 420, "speed": 1.5 } },
       { "when": { "targetInRange": "melee" }, "do": { "action": "attack", "cooldown": 1.1 } },
@@ -42,7 +42,7 @@
     "id": "bandit",
     "name": "强盗（主动+呼朋引伴+低血逃跑）",
     "idle": { "action": "wander", "radius": 180, "interval": [2, 6], "speed": 45 },
-    "targeting": { "aggroRange": 260, "retaliate": true, "giveUpT": 8, "leash": 520 },
+    "targeting": { "aggroRange": 200, "retaliate": true, "giveUpT": 7, "leash": 300, "leashFrom": 200 },
     "rules": [
       { "when": { "hpBelow": 0.2 }, "do": { "action": "flee", "range": 480, "speed": 1.5 } },
       { "when": { "targetInRange": "melee" }, "do": { "action": "attack", "cooldown": 1.1 } },
@@ -54,7 +54,7 @@
     "id": "soldier",
     "name": "士兵（列阵+协助同阵营）",
     "idle": { "action": "wander", "radius": 120, "interval": [3, 7], "speed": 45 },
-    "targeting": { "aggroRange": 280, "retaliate": true, "giveUpT": 10, "leash": 600 },
+    "targeting": { "aggroRange": 210, "retaliate": true, "giveUpT": 8, "leash": 320, "leashFrom": 220 },
     "rules": [
       { "when": { "hpBelow": 0.15 }, "do": { "action": "flee", "range": 500, "speed": 1.4 } },
       { "when": { "allyBeingAttacked": true }, "do": { "action": "assist", "radius": 340 } },
@@ -66,7 +66,7 @@
     "id": "boss",
     "name": "首领（分阶段：高血普攻 / 中血猛攻 / 低血狂暴）",
     "idle": { "action": "idle" },
-    "targeting": { "aggroRange": 320, "retaliate": true, "giveUpT": 12, "leash": 640 },
+    "targeting": { "aggroRange": 260, "retaliate": true, "giveUpT": 10, "leash": 400, "leashFrom": 300 },
     "rules": [
       { "when": { "hpBelow": 0.3 }, "do": { "action": "attack", "cooldown": 0.7, "skill": "", "rage": 1.5 } },
       { "when": { "hpBelow": 0.6 }, "do": { "action": "attack", "cooldown": 1.0 } },
