@@ -199,15 +199,145 @@ export function fitCentered(img, size, bg) {
 }
 
 /**
- * 一步处理成游戏图标：
- *   裁中心方 → 去背景 → 紧致裁剪 → 等比放进 size×size（居中）
- * @param {{img:any, size:number, key?:number[]|null, tol?:number, ratio?:number, padding?:number, keepBg?:boolean}} o
+ * 边缘洪水填充式抠底（解决白发/白袍/灰发被误删）。
+ * 只从画布四边向内扩散「与背景色接近」的像素，内部不连通的近色区域（如白发、白袍、
+ * 玉质高光）**保留**。色键直接删所有近色像素会把它们一起抠掉，这是此前的真实 bug。
+ * @param {any} img
+ * @param {number[]} [key] 背景色，缺省自动取四角众数
+ * @param {number} [tol] 颜色距离容差
+ * @param {boolean} [soft] 边缘半透明柔化
+ * @returns {{width:number,height:number,data:Buffer,removed:number,keptInnerNear:number}}
+ */
+export function floodKey(img, key, tol, soft) {
+  const k = key || detectBackground(img);
+  const t = tol == null ? 34 : tol;
+  const w = img.width, h = img.height;
+  const out = Buffer.from(img.data);
+  const near = (x, y) => {
+    const i = (y * w + x) * 4;
+    if (out[i + 3] < 8) return true;   // 已透明视为背景
+    const dr = out[i] - k[0], dg = out[i + 1] - k[1], db = out[i + 2] - k[2];
+    return Math.sqrt(dr * dr + dg * dg + db * db) <= t;
+  };
+  const seen = new Uint8Array(w * h);
+  const stack = [];
+  for (let x = 0; x < w; x++) { stack.push([x, 0], [x, h - 1]); }
+  for (let y = 0; y < h; y++) { stack.push([0, y], [w - 1, y]); }
+  let removed = 0;
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    if (x < 0 || y < 0 || x >= w || y >= h) continue;
+    const p = y * w + x;
+    if (seen[p]) continue;
+    seen[p] = 1;
+    if (!near(x, y)) continue;
+    out[p * 4 + 3] = 0;
+    removed++;
+    stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+  }
+  // 统计：仍保留的、颜色接近背景的像素（这些就是被正确保住的「白发」类区域）
+  let keptInnerNear = 0;
+  for (let p = 0; p < w * h; p++) {
+    if (out[p * 4 + 3] < 8) continue;
+    const dr = out[p * 4] - k[0], dg = out[p * 4 + 1] - k[1], db = out[p * 4 + 2] - k[2];
+    if (Math.sqrt(dr * dr + dg * dg + db * db) <= t) keptInnerNear++;
+  }
+  const res = { width: w, height: h, data: out, removed, keptInnerNear };
+  if (soft !== false) {
+    const f = featherEdge(res, k, t);
+    return { width: f.width, height: f.height, data: f.data, removed, keptInnerNear };
+  }
+  return res;
+}
+
+/** 对抠图后的边缘做一圈柔化（避免硬锯齿）。 */
+function featherEdge(img, k, t) {
+  const w = img.width, h = img.height;
+  const out = Buffer.from(img.data);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      if (out[i + 3] < 8) continue;
+      let bgNeighbor = false;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        if (out[(ny * w + nx) * 4 + 3] < 8) { bgNeighbor = true; break; }
+      }
+      if (!bgNeighbor) continue;
+      const d = Math.sqrt((out[i] - k[0]) ** 2 + (out[i + 1] - k[1]) ** 2 + (out[i + 2] - k[2]) ** 2);
+      if (d <= t + 20) out[i + 3] = Math.round(out[i + 3] * Math.min(1, d / (t + 20)));
+    }
+  }
+  return { width: w, height: h, data: out };
+}
+
+/**
+ * 块平均下采样（面积平均）。比最近邻更适合「大图缩成小图标」：
+ * 最近邻会随机抽点导致细节丢失、出现孤立噪点；块平均保留整体明度结构。
+ */
+export function areaDown(img, w, h) {
+  const bx = img.width / w, by = img.height / h;
+  const out = Buffer.alloc(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.floor(y * by), y1 = Math.max(y0 + 1, Math.floor((y + 1) * by));
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.floor(x * bx), x1 = Math.max(x0 + 1, Math.floor((x + 1) * bx));
+      let r = 0, g = 0, b = 0, a = 0, n = 0;
+      for (let sy = y0; sy < y1 && sy < img.height; sy++) {
+        for (let sx = x0; sx < x1 && sx < img.width; sx++) {
+          const i = (sy * img.width + sx) * 4;
+          const al = img.data[i + 3] / 255;
+          r += img.data[i] * al; g += img.data[i + 1] * al; b += img.data[i + 2] * al; a += al; n++;
+        }
+      }
+      const di = (y * w + x) * 4;
+      if (a > 0.001) { out[di] = Math.round(r / a); out[di + 1] = Math.round(g / a); out[di + 2] = Math.round(b / a); }
+      out[di + 3] = n ? Math.round((a / n) * 255) : 0;
+    }
+  }
+  return { width: w, height: h, data: out };
+}
+
+/** 颜色量化（把 4 万色压到几十色，接近手绘像素画的调色板规模）。 */
+export function quantize(img, levels) {
+  const n = levels || 8;
+  const step = 256 / n;
+  const out = Buffer.from(img.data);
+  for (let i = 0; i < out.length; i += 4) {
+    if (out[i + 3] < 8) continue;
+    for (let k = 0; k < 3; k++) out[i + k] = Math.max(0, Math.min(255, Math.round(out[i + k] / step) * step));
+  }
+  return { width: img.width, height: img.height, data: out };
+}
+
+/**
+ * 一步处理成游戏图标（推荐入口）：
+ *   裁中心方 → 洪水抠底（保白发）→ 紧致裁剪 → 块平均降到目标尺寸 → 量化
  */
 export function toIcon(o) {
   let img = centerSquare(o.img, o.ratio);
-  let bg = o.key || detectBackground(img);
-  if (!o.keepBg) img = chromaKey(img, bg, o.tol);
-  const box = trimBox(img, o.keepBg ? null : bg, o.tol, o.padding == null ? 1 : o.padding);
-  const cut = crop(img, box.x, box.y, box.w, box.h);
-  return fitCentered(cut, o.size, o.keepBg ? bg : null);
+  const bg = o.key || detectBackground(img);
+  let keyed = img;
+  let info = null;
+  if (!o.keepBg) {
+    const r = floodKey(img, bg, o.tol);
+    keyed = r;
+    info = { removed: r.removed, keptInnerNear: r.keptInnerNear };
+  }
+  const box = trimBox(keyed, o.keepBg ? null : bg, o.tol, o.padding == null ? 2 : o.padding);
+  const cut = crop(keyed, box.x, box.y, box.w, box.h);
+  const [W, H] = Array.isArray(o.size) ? o.size : [o.size, o.size];
+  // 等比装进目标画布
+  const s = Math.min(W / cut.width, H / cut.height);
+  const dw = Math.max(1, Math.round(cut.width * s)), dh = Math.max(1, Math.round(cut.height * s));
+  let small = areaDown(cut, dw, dh);
+  if (o.quantize !== false) small = quantize(small, o.levels || 8);
+  const out = Buffer.alloc(W * H * 4);
+  const ox = Math.floor((W - dw) / 2), oy = Math.floor((H - dh) / 2);
+  for (let y = 0; y < dh; y++) {
+    const dy = oy + y; if (dy < 0 || dy >= H) continue;
+    small.data.copy(out, (dy * W + ox) * 4, y * dw * 4, (y + 1) * dw * 4);
+  }
+  return { width: W, height: H, data: out, keyInfo: info };
 }

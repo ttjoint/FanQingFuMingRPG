@@ -14,6 +14,7 @@ import { spawn } from "node:child_process";
 import { ComfyClient, txt2imgWorkflow } from "./comfy.mjs";
 import { decodePNG, encodePNG, toIcon, resize, fitCentered } from "./png.mjs";
 import { buildPrompt, KINDS, sizeOf } from "./prompts.mjs";
+import { analyze } from "./analyze.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BASE = process.env.COMFY_URL || "http://127.0.0.1:8199";
@@ -76,36 +77,62 @@ export async function generateOne(kind, subject, opts) {
     ckpt: o.ckpt || CKPT,
     positive: p.positive, negative: p.negative,
     width: gen, height: gen, seed: o.seed,
-    steps: o.steps || 28, cfg: o.cfg || 6, prefix: o.prefix || "aigen",
+    steps: o.steps || p.steps || 26, cfg: o.cfg || p.cfg || 7, prefix: o.prefix || "aigen",
   });
   const r = await client.runTxt2Img(wf);
   const raw = r.buffer;
   const img = decodePNG(raw);
   const [W, H] = sizeOf(p.size);
-  let done;
+  let done, keyInfo = null;
   if (o.raw) done = img;
   else {
-    // 非方形目标（如头像 63x80）：先按最大边裁中心方，再交给 toIcon，最后拉伸到目标尺寸
-    const sq = toIcon({ img, size: Math.max(W, H), key: o.key, tol: o.tol, ratio: p.ratio, padding: o.padding, keepBg: o.keepBg });
-    done = (W === H) ? sq : resize(sq, W, H);
+    const icon = toIcon({ img, size: [W, H], key: o.key, tol: o.tol, ratio: p.ratio, padding: o.padding, keepBg: o.keepBg, quantize: o.quantize !== false, levels: o.levels || p.levels || 8 });
+    done = icon; keyInfo = icon.keyInfo;
   }
-  return { png: encodePNG(done), raw, meta: { kind, subject, prompt: p.positive, negative: p.negative, seed: wf[5].inputs.seed, size: [W, H], promptId: r.promptId } };
+  return { png: encodePNG(done), raw, meta: { kind, subject, prompt: p.positive, negative: p.negative, seed: wf[5].inputs.seed, size: [W, H], gen, steps: wf[5].inputs.steps, cfg: wf[5].inputs.cfg, promptId: r.promptId, keyInfo } };
 }
 
 async function cmdGen() {
   const kind = process.argv[3];
   const subject = process.argv[4];
-  if (!kind || !subject) { console.error("用法：cli.mjs gen <kind> \"<subject>\" [--out 文件] [--seed N] [--raw]"); process.exitCode = 1; return; }
+  if (!kind || !subject) { console.error("用法：cli.mjs gen <kind> \"<subject>\" [--out 文件] [--seed N] [--raw] [--retry N]"); process.exitCode = 1; return; }
   const out = arg("out");
   const seed = arg("seed");
+  const retry = Number(arg("retry", 0)) || 0;
+  const baseSeed = seed == null ? Math.floor(Math.random() * 1e9) : Number(seed);
   const t0 = Date.now();
-  const { png, raw, meta } = await generateOne(kind, subject, {
-    seed: seed == null ? undefined : Number(seed),
-    raw: has("raw"), extra: arg("extra"), negative: arg("negative"),
-    steps: arg("steps") && Number(arg("steps")), ckpt: arg("ckpt"),
-  });
-  console.log("生成完成 " + ((Date.now() - t0) / 1000).toFixed(1) + "s  seed=" + meta.seed + "  尺寸=" + meta.size.join("x"));
+  let last = null, lastQa = null, usedSeed = baseSeed;
+  for (let attempt = 0; attempt <= retry; attempt++) {
+    usedSeed = baseSeed + attempt;
+    const r = await generateOne(kind, subject, {
+      seed: usedSeed,
+      raw: has("raw"), extra: arg("extra"), negative: arg("negative"),
+      steps: arg("steps") && Number(arg("steps")), ckpt: arg("ckpt"),
+    });
+    last = r;
+    let qa = null;
+    try { qa = analyze(decodePNG(r.raw)); } catch { qa = null; }
+    lastQa = qa;
+    const bad = qa && (
+      qa.palette.at32 > 300 || qa.blobs > 2 || qa.largestRatio < 0.08 ||
+      // 稀疏碎点：bbox 内填充率过低，缩小后就是一堆散点（铁剑类典型失败）
+      qa.bboxFill < 0.45
+    );
+    if (!bad || attempt === retry) break;
+    console.log("seed " + usedSeed + " 质检不合格（@32=" + qa.palette.at32 + "，blobs=" + qa.blobs + "，主体=" + (qa.largestRatio * 100).toFixed(0) + "%，bbox填充=" + (qa.bboxFill * 100).toFixed(0) + "%）→ 重试");
+  }
+  const { png, raw, meta } = last;
+  console.log("生成完成 " + ((Date.now() - t0) / 1000).toFixed(1) + "s  seed=" + meta.seed + "  尺寸=" + meta.size.join("x") + "  出图=" + meta.gen + " steps=" + meta.steps + " cfg=" + meta.cfg);
   console.log("prompt: " + meta.prompt);
+  if (meta.keyInfo) console.log("抠底：移除背景像素 " + meta.keyInfo.removed + "，保留内部近背景色像素 " + meta.keyInfo.keptInnerNear + "（后者是被保护住的白发/白衣类区域）");
+  if (lastQa) {
+    const qa = lastQa;
+    console.log("质检：原图@32色数=" + qa.palette.at32 + "，连通域=" + qa.blobs + "，主体占画面=" + (qa.largestRatio * 100).toFixed(0) + "%，bbox填充=" + (qa.bboxFill * 100).toFixed(0) + "%");
+    if (qa.palette.at32 > 300) console.log("⚠ 细节过多（@32 色数 > 300），缩小后可能糊成一团；建议换 seed 或简化 subject");
+    if (qa.blobs > 2) console.log("⚠ 主体不唯一（连通域 " + qa.blobs + "），负向词可能未生效");
+    if (qa.largestRatio < 0.08) console.log("⚠ 主体过小（占画面 " + (qa.largestRatio * 100).toFixed(0) + "%），建议重新生成（或加 --retry 3 自动重试）");
+    if (qa.bboxFill < 0.45) console.log("⚠ 主体稀疏（bbox 内填充率仅 " + (qa.bboxFill * 100).toFixed(0) + "%），缩到目标尺寸会散成碎点；建议换 seed");
+  }
   const dir = join(ROOT, "_aigen", "out");
   mkdirSync(dir, { recursive: true });
   const base = out ? resolve(ROOT, String(out)) : join(dir, kind + "_" + meta.seed + ".png");
