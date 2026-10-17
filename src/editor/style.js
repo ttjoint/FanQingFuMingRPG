@@ -294,9 +294,16 @@ table.ed-table tbody tr.on td.ed-thumb img{border-color:#f0d060}
 
 /* ================= 图片字段（预览 + 更换按钮） ================= */
 .ed-imgfield{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0}
-.ed-imgthumbs{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:34px}
-.ed-imgthumbs img{width:32px;height:32px;object-fit:contain;background:#0a0b0d;
-  border:1px solid #2c3038;border-radius:3px;image-rendering:pixelated}
+/* 右侧详情里的预览图：这里是「看清这张图长什么样」的地方，
+   要和左侧列表的 32px 小缩略图区分开，所以默认给到 96px
+   （素材原始尺寸：物品/技能图标 32px、头像 63x80、UI 图最大 640x480）。
+   图标类放大 3 倍仍然锐利（pixelated 不模糊），头像/立绘接近原大。
+   帧动画序列张数多，用 72px 免得把表单撑太长。 */
+.ed-imgthumbs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:40px}
+.ed-imgthumbs img{width:96px;height:96px;object-fit:contain;background:#0a0b0d;
+  border:1px solid #2c3038;border-radius:4px;image-rendering:pixelated}
+/* 帧序列：格子略小、一行放得下多张 */
+.ed-imgthumbs.frames img{width:72px;height:72px}
 .ed-imgthumbs .ed-imghint{color:#6b737e;font-size:11px}
 
 /* ================= 资源选择弹窗 ================= */

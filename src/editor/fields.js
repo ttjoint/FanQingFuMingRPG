@@ -221,7 +221,8 @@ export function renderForm(host, schema, obj, onChange) {
       // f.type === "frames" 时值为字符串数组（帧动画），点选可多选。
       const isFrames = f.type === "frames";
       const box = h("div", { class: "ed-imgfield" });
-      const thumbs = h("div", { class: "ed-imgthumbs" });
+      // frames 加类名 → CSS 用略小的格子（帧数多，避免把表单撑得太长）
+      const thumbs = h("div", { class: isFrames ? "ed-imgthumbs frames" : "ed-imgthumbs" });
       const drawThumbs = () => {
         clear(thumbs);
         const raw = isFrames ? (Array.isArray(pathGet(obj, f.k)) ? pathGet(obj, f.k) : []) : [pathGet(obj, f.k)];
