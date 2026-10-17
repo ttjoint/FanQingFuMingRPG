@@ -5,7 +5,7 @@ import { G, A } from "../core/state.js";
 import { setAssetOverrides, assetURL } from "../core/assets.js";
 import { h, clear, deep } from "./dom.js";
 import { injectStyle } from "./style.js";
-import { renderForm, renderListEditor } from "./fields.js";
+import { renderForm, renderListEditor, mkSplitResizer } from "./fields.js";
 import { mountMapEditor } from "./map-editor.js";
 import { modeControl, makeLineEditor, decorState } from "./decor-line.js";
 import { applyPatch, diffContent } from "../content/contentdb.js";
@@ -20,11 +20,22 @@ import {
 } from "../content/store.js";
 import { PACK_FORMAT, PACK_VERSION } from "../content/schema.js";
 import { newNpcTemplate } from "../content/npcFields.js";
+import { buildAssetIndexAsync, searchAssets, groupOf, fileName, assetIndex } from "./assets-index.js";
+import { setImagesWriter } from "./asset-picker.js";
 
 let root = null, ED = null, dirty = false, curTab = "maps";
 let mainEl, sideEl, statusEl, mapEditor = null;
 
 const mark = () => { dirty = true; };
+
+// 资源选择弹窗里"上传本地图"时，把图写进当前的 images 覆盖表。
+// （用注入而非直接 import ED，避免弹窗模块反向依赖编辑器状态）
+setImagesWriter((key, dataUrl) => {
+  if (!ED) return;
+  ED.images[key] = dataUrl;
+  setAssetOverrides(ED.images);
+  mark();
+});
 
 // 资源覆盆（上传替换）解析：assets 路径 → dataURL（若有覆盆），否则原路径。供表单图片预览用。
 const assetSrc = p => (ED && ED.images && ED.images[p]) || assetURL(p);
@@ -355,39 +366,93 @@ function tabDecor() {
   const all = collectTemplates();
   mainEl.append(h("h3", null, "装饰物模板（共 " + all.length + "，跨地图同一贴图共用）"));
   mainEl.append(rhint("同一张贴图在不同地图里是同一个模板：地基线 / 深度模式只编辑一次，所有实例共享。手画：拖黄线控制点、空白处单击加点、右键删点；黄线可越出贴图（拖到下方即让青线覆盖整幅 → 完全遮蔽）。"));
-  const tbl = h("table", { class: "ed-table" });
-  const head = h("tr"); for (const l of ["贴图", "出现", "地图", "模式"]) head.append(h("th", null, l));
-  tbl.append(h("thead", null, head));
-  const body = h("tbody"); tbl.append(body); mainEl.append(tbl);
-  if (!all.length) mainEl.append(rhint("（未找到装饰物：请确认地图数据已加载）"));
+  if (!all.length) { mainEl.append(rhint("（未找到装饰物：请确认地图数据已加载）")); return; }
 
+  if (!decorSelKey || !all.some(x => x.key === decorSelKey)) decorSelKey = all[0].key;
   const modeLabel = t => { const st = decorState(t); return st === "single" ? "单一" : (st === "line" ? "手画" : "自动"); };
-  const renderRows = () => {
-    for (const x of all) {
-      const tr = [...body.children].find(t => t.dataset.k === x.key);
-      if (tr) tr.children[3].textContent = modeLabel(tplOf(x.key, false));
-    }
+
+  // 与其它分页一致：左列表（可搜索/可拖宽/行首缩略图）+ 右详情。
+  const split = h("div", { class: "ed-split" });
+  const left = h("div", { class: "ed-split-list" });
+  const right = h("div", { class: "ed-split-form" });
+  split.append(left, mkSplitResizer("decor", left), right);
+  mainEl.append(split);
+
+  const searchIn = h("input", { type: "text", placeholder: "搜索贴图 / 地图…", style: "min-width:160px" });
+  const cntEl = h("span", { class: "ed-count" });
+  left.append(h("div", { class: "ed-tools", style: "padding:6px" }, h("div", { class: "ed-search" }, searchIn), cntEl));
+
+  const tbl = h("table", { class: "ed-table" });
+  const head = h("tr");
+  head.append(h("th", { class: "ed-thumb" }));
+  for (const l of ["出现", "地图", "模式"]) head.append(h("th", null, l));
+  tbl.append(h("thead", null, head));
+  const body = h("tbody");
+  tbl.append(body);
+  left.append(h("div", { class: "ed-tablescroll" }, tbl));
+
+  let query = "";
+  const match = x => {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    return x.key.toLowerCase().includes(q) || [...x.maps].join(" ").toLowerCase().includes(q);
   };
-  const renderSide = () => {
-    clear(sideEl);
-    const cur = all.find(x => x.key === decorSelKey);
-    if (!cur) { sideEl.append(rhint("选择左侧一个模板")); return; }
-    const s = cur.sprite, tiles = cur.tiles, tpl = tplOf(cur.key, true);
-    sideEl.append(h("h3", null, "模板 " + s[2] + "×" + s[3]));
-    sideEl.append(rhint("出现 " + cur.count + " 处：" + [...cur.maps].join("、")));
-    sideEl.append(rfield("深度模式", modeControl(s, tiles, tpl, 64, () => { mark(); renderSide(); renderRows(); })));
-    if (decorState(tpl) === "line") sideEl.append(h("div", { class: "ed-row" }, h("button", { class: "ed-btn", onclick: () => { delete tpl.line; mark(); renderSide(); renderRows(); } }, "恢复自动地基线")));
-    sideEl.append(h("h3", null, "地基线 / 头顶线"));
-    sideEl.append(makeLineEditor(s, tiles, tpl, 64, sideEl.clientWidth - 30, () => { mark(); renderRows(); }));
-    sideEl.append(rhint("黄=地基线（可越出贴图）；青=头顶最高线（其上→覆盖层，永远遮挡玩家）"));
-  };
-  for (const x of all) {
-    const tr = h("tr", { class: decorSelKey === x.key ? "on" : "", onclick: () => { decorSelKey = x.key; for (const t of body.children) t.classList.toggle("on", t.dataset.k === x.key); renderSide(); } });
+  searchIn.oninput = () => { query = searchIn.value; drawTable(); };
+
+  const fillRow = (tr, x) => {
+    clear(tr);
     tr.dataset.k = x.key;
-    tr.append(h("td", null, x.sprite[2] + "×" + x.sprite[3]), h("td", null, String(x.count)), h("td", null, [...x.maps].join("、")), h("td", null, modeLabel(tplOf(x.key, false))));
-    body.append(tr);
-  }
-  if (!decorSelKey || !all.some(x => x.key === decorSelKey)) decorSelKey = all.length ? all[0].key : null;
+    const td = h("td", { class: "ed-thumb" });
+    const im = h("img", { src: assetSrc(x.sprite[0]), loading: "lazy" });
+    im.onerror = () => { im.style.opacity = "0.12"; };
+    td.append(im);
+    tr.append(td,
+      h("td", null, String(x.count)),
+      h("td", null, [...x.maps].join("、")),
+      h("td", null, modeLabel(tplOf(x.key, false))));
+  };
+
+  const drawTable = () => {
+    clear(body);
+    let n = 0;
+    for (const x of all) {
+      if (!match(x)) continue;
+      n++;
+      const tr = h("tr", { class: decorSelKey === x.key ? "on" : "", onclick: () => { decorSelKey = x.key; select(); } });
+      fillRow(tr, x);
+      body.append(tr);
+    }
+    if (!n) body.append(h("tr", null, h("td", { colspan: 4 }, h("div", { class: "ed-empty" }, "没有匹配的项"))));
+    cntEl.textContent = "共 " + all.length + (query ? " / 显示 " + n : "") + " 项";
+  };
+
+  const renderSide = () => {
+    clear(right);
+    const cur = all.find(x => x.key === decorSelKey);
+    if (!cur) { right.append(h("div", { class: "ed-empty" }, "左侧选择一个模板")); return; }
+    const s = cur.sprite, tiles = cur.tiles, tpl = tplOf(cur.key, true);
+    // 贴图大图预览
+    const big = h("img", { class: "ed-decor-big", src: assetSrc(s[0]), title: cur.key });
+    big.onerror = () => { big.style.opacity = "0.12"; };
+    right.append(h("div", { class: "ed-row", style: "align-items:flex-start;gap:12px" },
+      big,
+      h("div", null,
+        h("h3", { style: "margin:0 0 4px" }, "模板 " + s[2] + "×" + s[3]),
+        rhint("出现 " + cur.count + " 处：" + [...cur.maps].join("、")),
+        rhint(cur.key))));
+    right.append(rfield("深度模式", modeControl(s, tiles, tpl, 64, () => { mark(); renderSide(); drawTable(); })));
+    if (decorState(tpl) === "line") right.append(h("div", { class: "ed-row" }, h("button", { class: "ed-btn", onclick: () => { delete tpl.line; mark(); renderSide(); drawTable(); } }, "恢复自动地基线")));
+    right.append(h("h3", null, "地基线 / 头顶线"));
+    right.append(makeLineEditor(s, tiles, tpl, 64, Math.max(240, right.clientWidth - 40), () => { mark(); drawTable(); }));
+    right.append(rhint("黄=地基线（可越出贴图）；青=头顶最高线（其上→覆盖层，永远遮挡玩家）"));
+  };
+
+  const select = () => {
+    for (const tr of body.children) tr.classList.toggle("on", tr.dataset.k === decorSelKey);
+    renderSide();
+  };
+
+  drawTable();
   renderSide();
 }
 
@@ -395,14 +460,64 @@ function tabDecor() {
 function tabScripts() {
   const scripts = ED.content.scripts;
   const names = Object.keys(scripts);
-  let cur = names[0];
-  const sel = h("select", { onchange: () => { cur = sel.value; ta.value = scripts[cur] || ""; } });
-  for (const n of names) sel.append(h("option", { value: n }, n));
-  const ta = h("textarea", { style: "width:100%;height:calc(100% - 70px);min-height:360px;white-space:pre;font-family:Consolas,monospace" });
-  ta.value = scripts[cur] || "";
-  ta.oninput = () => { scripts[cur] = ta.value; mark(); };
-  mainEl.append(h("h3", null, "剧情 / 交互脚本（GSP）"), h("div", { class: "ed-row" }, h("label", null, "脚本文件"), sel), ta,
-    h("div", { class: "ed-hint" }, "语法与原版一致：Say / Ask / if / else / endif / ChangeMap / AddNPC …"));
+  mainEl.append(h("h3", null, "剧情 / 交互脚本（GSP）"));
+  mainEl.append(rhint("语法与原版一致：Say / Ask / if / else / endif / ChangeMap / AddNPC …"));
+
+  const split = h("div", { class: "ed-split" });
+  const left = h("div", { class: "ed-split-list" });
+  const right = h("div", { class: "ed-split-form" });
+  split.append(left, mkSplitResizer("scripts", left), right);
+  mainEl.append(split);
+
+  const searchIn = h("input", { type: "text", placeholder: "搜索脚本名…" });
+  const cntEl = h("span", { class: "ed-count" });
+  left.append(h("div", { class: "ed-tools", style: "padding:6px" }, h("div", { class: "ed-search" }, searchIn), cntEl));
+
+  const tbl = h("table", { class: "ed-table" });
+  tbl.append(h("thead", null, h("tr", null, h("th", null, "脚本"), h("th", null, "行数"))));
+  const body = h("tbody");
+  tbl.append(body);
+  left.append(h("div", { class: "ed-tablescroll" }, tbl));
+
+  // 右侧：整块文本编辑器（文本类内容不需要表单）
+  const ta = h("textarea", { style: "width:100%;height:calc(100% - 34px);min-height:300px;white-space:pre;font-family:Consolas,monospace;font-size:12px" });
+  const info = h("div", { class: "ed-hint", style: "margin:4px 0 0" });
+
+  let cur = names[0] || null;
+  let query = "";
+
+  const lineCount = txt => String(txt || "").split("\n").length;
+
+  const drawTable = () => {
+    clear(body);
+    const q = query.toLowerCase();
+    let n = 0;
+    for (const nm of names) {
+      if (q && !nm.toLowerCase().includes(q)) continue;
+      n++;
+      const tr = h("tr", { class: nm === cur ? "on" : "", onclick: () => { cur = nm; drawTable(); drawEditor(); } });
+      tr.append(h("td", null, nm), h("td", { style: "color:#7f8792" }, String(lineCount(scripts[nm]))));
+      body.append(tr);
+    }
+    if (!n) body.append(h("tr", null, h("td", { colspan: 2 }, h("div", { class: "ed-empty" }, "没有匹配的脚本"))));
+    cntEl.textContent = "共 " + names.length + (query ? " / 显示 " + n : "") + " 个";
+  };
+  searchIn.oninput = () => { query = searchIn.value; drawTable(); };
+
+  const drawEditor = () => {
+    clear(right);
+    if (!cur) { right.append(h("div", { class: "ed-empty" }, "左侧选择一个脚本")); return; }
+    right.append(h("div", { class: "ed-row", style: "margin:0 0 6px" }, h("strong", null, cur),
+      h("span", { class: "ed-count" }, String(lineCount(scripts[cur])) + " 行")));
+    ta.value = scripts[cur] || "";
+    right.append(ta);
+    right.append(info);
+  };
+  ta.oninput = () => { if (!cur) return; scripts[cur] = ta.value; mark(); drawTable(); };
+  info.textContent = "编辑后左侧行数即时更新；Ctrl+S 保存整个版本。";
+
+  drawTable();
+  drawEditor();
 }
 
 // AI 配置：一条配置 = 一个行为档案（idle + targeting + 顺序匹配的 rules）。
@@ -438,52 +553,85 @@ const AI_TEMPLATES = {
 function tabAis() {
   const list = ED.content.ais || (ED.content.ais = []);
   mainEl.append(h("h3", null, "AI 配置（共 " + list.length + "）"));
-  mainEl.append(h("div", { class: "ed-hint" }, "单位通过 NPC 的「AI 配置」字段按 id 引用；这里定义可复用的行为档案。"));
-  mainEl.append(h("div", { class: "ed-hint" }, AI_COND_HINT));
-  mainEl.append(h("div", { class: "ed-hint" }, AI_ACT_HINT));
+  mainEl.append(rhint("单位通过 NPC 的「AI 配置」字段按 id 引用；这里定义可复用的行为档案。"));
+  mainEl.append(rhint(AI_COND_HINT));
+  mainEl.append(rhint(AI_ACT_HINT));
 
-  const host = h("div");
-  mainEl.append(host);
+  const split = h("div", { class: "ed-split" });
+  const left = h("div", { class: "ed-split-list" });
+  const right = h("div", { class: "ed-split-form" });
+  split.append(left, mkSplitResizer("ais", left), right);
+  mainEl.append(split);
+
   let sel = 0;
-  const redraw = () => {
-    clear(host);
-    const tools = h("div", { class: "ed-tools" },
-      h("button", { class: "ed-btn", onclick: () => { const id = prompt("AI 配置 id", "ai_" + (list.length + 1)); if (!id) return; list.push({ id, name: id, idle: { action: "idle" }, rules: [] }); sel = list.length - 1; mark(); redraw(); } }, "＋ 新建"),
-      h("button", { class: "ed-btn", onclick: () => { if (!list[sel]) return; list.splice(sel + 1, 0, deep(list[sel])); sel = sel + 1; mark(); redraw(); } }, "复制"),
-      h("button", { class: "ed-btn danger", onclick: () => { if (!list[sel]) return; list.splice(sel, 1); sel = Math.max(0, sel - 1); mark(); redraw(); } }, "删除"),
-      h("button", { class: "ed-btn", onclick: () => { if (!list[sel]) return; const t = prompt("模板：" + Object.keys(AI_TEMPLATES).join(" / ")); if (!t || !AI_TEMPLATES[t]) return; Object.assign(list[sel], deep(AI_TEMPLATES[t])); mark(); redraw(); } }, "套用模板"),
-    );
-    host.append(tools);
-    const tbl = h("table", { class: "ed-table" });
-    tbl.append(h("thead", null, h("tr", null, h("th", null, "id"), h("th", null, "名称"), h("th", null, "规则数"))));
-    const body = h("tbody");
-    list.forEach((a, i) => body.append(h("tr", { class: i === sel ? "on" : "", onclick: () => { sel = i; redraw(); } },
-      h("td", null, a.id || ""), h("td", null, a.name || ""), h("td", null, String((a.rules || []).length)))));
-    tbl.append(body);
-    host.append(tbl);
+  let query = "";
 
-    const a = list[sel];
-    if (!a) return;
-    const idIn = h("input", { type: "text", value: a.id || "" });
-    idIn.oninput = () => { a.id = idIn.value; mark(); };
-    const nameIn = h("input", { type: "text", value: a.name || "" });
-    nameIn.oninput = () => { a.name = nameIn.value; mark(); };
-    host.append(h("div", { class: "ed-row" }, h("label", null, "id"), idIn, h("label", null, "名称"), nameIn));
-    const ta = h("textarea", { style: "width:100%;height:360px;white-space:pre;font-family:Consolas,monospace" });
-    const body2 = /** @type {any} */ ({ ...a }); delete body2.id; delete body2.name;
-    ta.value = JSON.stringify(body2, null, 2);
+  const searchIn = h("input", { type: "text", placeholder: "搜索 id / 名称…" });
+  const cntEl = h("span", { class: "ed-count" });
+  left.append(h("div", { class: "ed-tools", style: "padding:6px" },
+    h("button", { class: "ed-btn", onclick: () => { const id = prompt("AI 配置 id", "ai_" + (list.length + 1)); if (!id) return; list.push({ id, name: id, idle: { action: "idle" }, rules: [] }); sel = list.length - 1; mark(); redraw(); } }, "+ 新建"),
+    h("div", { class: "ed-search" }, searchIn), cntEl));
+
+  const tbl = h("table", { class: "ed-table" });
+  tbl.append(h("thead", null, h("tr", null, h("th", null, "id"), h("th", null, "名称"), h("th", null, "规则"))));
+  const bodyEl = h("tbody");
+  tbl.append(bodyEl);
+  left.append(h("div", { class: "ed-tablescroll" }, tbl));
+
+  const match = x => {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    return String(x.id || "").toLowerCase().includes(q) || String(x.name || "").toLowerCase().includes(q);
+  };
+
+  const drawTable = () => {
+    clear(bodyEl);
+    let n = 0;
+    list.forEach((x, i) => {
+      if (!match(x)) return;
+      n++;
+      const tr = h("tr", { class: i === sel ? "on" : "", onclick: () => { sel = i; drawTable(); drawDetail(); } });
+      tr.append(h("td", null, String(x.id || "")), h("td", null, String(x.name || "")), h("td", { style: "color:#7f8792" }, String((x.rules || []).length)));
+      bodyEl.append(tr);
+    });
+    if (!n) bodyEl.append(h("tr", null, h("td", { colspan: 3 }, h("div", { class: "ed-empty" }, "没有匹配的项"))));
+    cntEl.textContent = "共 " + list.length + (query ? " / 显示 " + n : "") + " 项";
+  };
+  searchIn.oninput = () => { query = searchIn.value; drawTable(); };
+
+  const drawDetail = () => {
+    clear(right);
+    const a0 = list[sel];
+    if (!a0) { right.append(h("div", { class: "ed-empty" }, "左侧选择一个 AI 配置")); return; }
+    right.append(h("div", { class: "ed-tools" },
+      h("button", { class: "ed-btn", onclick: () => { list.splice(sel + 1, 0, deep(a0)); sel++; mark(); drawTable(); drawDetail(); } }, "复制"),
+      h("button", { class: "ed-btn danger", onclick: () => { list.splice(sel, 1); sel = Math.max(0, sel - 1); mark(); drawTable(); drawDetail(); } }, "删除"),
+      h("button", { class: "ed-btn", onclick: () => { const t = prompt("模板：" + Object.keys(AI_TEMPLATES).join(" / ")); if (!t || !AI_TEMPLATES[t]) return; Object.assign(a0, deep(AI_TEMPLATES[t])); mark(); drawTable(); drawDetail(); } }, "套用模板")));
+
+    const idIn = h("input", { type: "text", value: a0.id || "" });
+    idIn.oninput = () => { a0.id = idIn.value; mark(); drawTable(); };
+    const nameIn = h("input", { type: "text", value: a0.name || "" });
+    nameIn.oninput = () => { a0.name = nameIn.value; mark(); drawTable(); };
+    right.append(h("div", { class: "ed-row" }, h("label", null, "id"), idIn, h("label", null, "名称"), nameIn));
+
+    right.append(h("h3", null, "行为档案（idle / targeting / rules）"));
+    const ta = h("textarea", { style: "width:100%;height:calc(100% - 190px);min-height:260px;white-space:pre;font-family:Consolas,monospace;font-size:12px" });
+    const clone = /** @type {any} */ ({ ...a0 }); delete clone.id; delete clone.name;
+    ta.value = JSON.stringify(clone, null, 2);
     const err = h("div", { class: "ed-hint" });
     ta.oninput = () => {
       try {
         const o = JSON.parse(ta.value);
         err.textContent = "";
-        delete a.idle; delete a.targeting; delete a.rules;
-        Object.assign(a, o);
-        mark();
+        delete a0.idle; delete a0.targeting; delete a0.rules;
+        Object.assign(a0, o);
+        mark(); drawTable();
       } catch (e) { err.textContent = "JSON 语法错误：" + e.message; err.style.color = "#e66"; }
     };
-    host.append(h("h3", null, "行为档案（idle / targeting / rules）"), ta, err);
+    right.append(ta, err);
   };
+
+  const redraw = () => { drawTable(); drawDetail(); };
   redraw();
 }
 
@@ -498,14 +646,31 @@ function withFx(schema) {
   return schema.map(f => (f.k && f.k.indexOf("fx.") === 0 ? { ...f, options: fxOptions() } : f));
 }
 
-function listTab(title, arr, schema, columns, makeNew) {
+// 列表页统一入口：左侧列表（可搜索、每行可带缩略图、可拖拽改宽）+ 右侧详情。
+// opts: { key 宽度记忆用的键名, thumb(it)=>url 行首缩略图, icon 从 it.icon 自动推缩略图的目录 }
+function listTab(title, arr, schema, columns, makeNew, opts) {
+  const o = opts || {};
   mainEl.append(h("h3", null, title));
   const host = h("div");
   mainEl.append(host);
+  // 缩略图：优先用调用方给的 thumb()；否则若指定了 icon 目录，就按 it.icon 推导。
+  const thumb = o.thumb || (o.icon
+    ? (it => (it && it.icon ? assetSrc2(it.icon, o.icon) : null))
+    : null);
   renderListEditor(host, {
     list: arr, schema, columns, makeNew, onChange: () => mark(),
     onStructural: () => mark(), sel: 0,
+    thumb, splitKey: o.key || "list",
   });
+}
+
+// 缩略图 URL：值可能是纯文件名（老数据）也可能是完整 assets/ 路径。
+function assetSrc2(ref, dir) {
+  if (!ref) return null;
+  const s = String(ref);
+  if (/^(data:|blob:|https?:)/i.test(s)) return s;
+  if (s.startsWith("assets/")) return assetSrc(s);
+  return assetSrc("assets/" + String(dir).replace(/\/$/, "") + "/" + s.replace(/\.bmp$/i, ".png"));
 }
 
 const NPC_SCHEMA_FIELDS = [
@@ -526,7 +691,7 @@ function npcSchema() {
   return NPC_SCHEMA_FIELDS.map(f => {
     const o = /** @type {any} */ ({ ...f });
     if (f.k === "model") { o.list = Object.keys(A.chars || {}); o.img = n => roleSrc(n.model); }
-    if (f.k === "portrait") o.img = n => n.portrait ? assetSrc("assets/face/" + n.portrait.replace(/\.bmp$/, ".png")) : null;
+    if (f.k === "portrait") { o.type = "image"; o.dir = "face"; }
     if (f.k === "script") o.list = Object.keys(ED.content.scripts || {});
     if (f.k === "ai") o.options = [["", "（默认）"]].concat((ED.content.ais || []).map(a => [a.id, a.id + (a.name && a.name !== a.id ? " " + a.name : "")]));
     if (f.k === "drops") o.items = ED.items.map(x => x.name);
@@ -543,7 +708,7 @@ const ITEM_SCHEMA = [
   { k: "mp", label: "精力+", type: "number" }, { k: "attack", label: "攻击+", type: "number" },
   { k: "defence", label: "防御+", type: "number" }, { k: "attrA", label: "攻速+", type: "number" },
   { k: "attrB", label: "属性B", type: "number" }, { k: "attrC", label: "属性C", type: "number" },
-  { k: "icon", label: "图标", type: "text", img: it => it.icon ? assetSrc("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png")) : null }, { k: "desc", label: "说明", type: "textarea", rows: 2 },
+  { k: "icon", label: "图标", type: "image", dir: "items_icons" }, { k: "desc", label: "说明", type: "textarea", rows: 2 },
   { k: "rarity", label: "稀有度", type: "select", options: [["common", "普通"], ["magic", "精良"], ["rare", "稀有"], ["unique", "传说"], ["quest", "任务"]] },
   { k: "stackable", label: "可堆叠", type: "checkbox" },
   { k: "maxStack", label: "最大堆叠", type: "number", def: 0 },
@@ -562,13 +727,13 @@ const SKILL_SCHEMA = [
   { k: "mode", label: "攻击方式", type: "select", options: [["melee", "近战（瞬间命中）"], ["ranged", "远程（预留弹道）"]] },
   { k: "range", label: "射程", type: "number" }, { k: "mp", label: "耗精力", type: "number" },
   { k: "power", label: "威力", type: "number" }, { k: "reqLevel", label: "需求等级", type: "number" },
-  { k: "sound", label: "音效", type: "text" }, { k: "icon", label: "图标", type: "text", img: sk => sk.icon ? assetSrc("assets/skill_icons/" + sk.icon.replace(/\.bmp$/, ".png")) : null },
-  { k: "frames", label: "特效帧(每行一个)", type: "lines", rows: 5, img: sk => (sk.frames && sk.frames[0]) ? assetSrc("assets/skill/" + sk.frames[0].replace(/\.bmp$/, ".png")) : null },
+  { k: "sound", label: "音效", type: "text" }, { k: "icon", label: "图标", type: "image", dir: "skill_icons" },
+  { k: "frames", label: "特效帧", type: "frames", dir: "skill" },
   { k: "projectile.homing", label: "弹道·追踪目标", type: "checkbox" },
   { k: "projectile.speed", label: "弹道·速度(像素/秒)", type: "number", def: 320 },
   { k: "projectile.radius", label: "弹道·命中半径", type: "number", def: 18 },
   { k: "projectile.pierce", label: "弹道·穿透次数", type: "number", def: 0 },
-  { k: "projectile.frames", label: "弹道·飞行帧(每行一个)", type: "lines", rows: 3, img: sk => (sk.projectile && sk.projectile.frames && sk.projectile.frames[0]) ? assetSrc("assets/projectile/" + sk.projectile.frames[0].replace(/\.bmp$/, ".png")) : null },
+  { k: "projectile.frames", label: "弹道·飞行帧", type: "frames", dir: "projectile" },
   { k: "desc", label: "说明", type: "textarea", rows: 2 },
 ];
 
@@ -595,7 +760,7 @@ function skillSchema() {
 const BUFF_SCHEMA = [
   { k: "id", label: "id", type: "text" },
   { k: "name", label: "名称", type: "text" },
-  { k: "icon", label: "图标", type: "text", img: b => b.icon ? assetSrc("assets/buff_icons/" + String(b.icon).replace(/\.bmp$/, ".png")) : null },
+  { k: "icon", label: "图标", type: "image", dir: "buff_icons" },
   { k: "duration", label: "持续(秒)", type: "number", def: 10 },
   { k: "maxStacks", label: "最大层数", type: "number", min: 1, def: 1 },
   { k: "stackMode", label: "叠层方式", type: "select", options: [["refresh", "刷新时长"], ["stack", "叠加层数"]] },
@@ -619,7 +784,7 @@ const EFFECT_SCHEMA = [
   { k: "name", label: "名称", type: "text" },
   { k: "layer", label: "层级(叠放次序)", type: "select", options: [["under", "地面（恒低于单位）"], ["over", "角色层（按 y 排序）"], ["top", "顶层（头顶，恒在上）"]] },
   { k: "anchor", label: "锚点", type: "select", options: [["world", "世界坐标"], ["unit", "单位"], ["item", "物品"]] },
-  { k: "frames", label: "帧图(每行一个)", type: "lines", rows: 4, img: e => (e.frames && e.frames[0]) ? assetSrc("assets/fx/" + e.frames[0].replace(/\.bmp$/, ".png")) : null },
+  { k: "frames", label: "帧图", type: "frames", dir: "fx" },
   { k: "fps", label: "帧率(帧/秒)", type: "number", def: 12 },
   { k: "loop", label: "循环播放", type: "checkbox" },
   { k: "holdFirst", label: "首帧停留(秒)", type: "number", def: 0 },
@@ -636,7 +801,8 @@ function tabEffects() {
   const list = ED.content.effects || (ED.content.effects = []);
   listTab("特效（" + list.length + "）", list, EFFECT_SCHEMA,
     [{ k: "id", label: "id" }, { k: "layer", label: "层级" }, { k: "anchor", label: "锚点" }, { k: "loop", label: "循环" }],
-    () => ({ id: "fx_" + (list.length + 1), name: "新特效", layer: "over", anchor: "world", frames: [], fps: 12, loop: false, holdFirst: 0, holdLast: 0, life: 0, ox: 0, oy: 0, scale: 1, color: "", radius: 18 }));
+    () => ({ id: "fx_" + (list.length + 1), name: "新特效", layer: "over", anchor: "world", frames: [], fps: 12, loop: false, holdFirst: 0, holdLast: 0, life: 0, ox: 0, oy: 0, scale: 1, color: "", radius: 18 }),
+    { key: "effects", thumb: e => (e.frames && e.frames[0]) ? assetSrc2(e.frames[0], "fx") : null });
 }
 
 const AFFIX_SCHEMA = [
@@ -662,51 +828,30 @@ function tabAffixes() {
 
 function tabBuffs() {
   const list = ED.buffs || (ED.buffs = ED.content.buffs || (ED.content.buffs = []));
-  mainEl.append(h("h3", null, "Buff / Debuff 配置（共 " + list.length + "）"));
   mainEl.append(h("div", { class: "ed-hint" }, "技能通过「命中效果」按 id 引用；叠层/刷新/持续/DOT/HOT 均在引擎 engine/buff.js 中处理。"));
-  const host = h("div");
-  mainEl.append(host);
-  let sel = 0;
-  const redraw = () => {
-    clear(host);
-    host.append(h("div", { class: "ed-tools" },
-      h("button", { class: "ed-btn", onclick: () => { const id = prompt("Buff id", "buff_" + (list.length + 1)); if (!id) return; list.push({ id, name: id, duration: 10, maxStacks: 1, stackMode: "refresh", mods: {}, tags: [] }); sel = list.length - 1; mark(); redraw(); } }, "＋ 新建"),
-      h("button", { class: "ed-btn", onclick: () => { if (!list[sel]) return; list.splice(sel + 1, 0, deep(list[sel])); sel++; mark(); redraw(); } }, "复制"),
-      h("button", { class: "ed-btn danger", onclick: () => { if (!list[sel]) return; list.splice(sel, 1); sel = Math.max(0, sel - 1); mark(); redraw(); } }, "删除"),
-    ));
-    const tbl = h("table", { class: "ed-table" });
-    tbl.append(h("thead", null, h("tr", null, h("th", null, "id"), h("th", null, "名称"), h("th", null, "持续"), h("th", null, "层数"))));
-    const body = h("tbody");
-    list.forEach((b, i) => {
-      const tr = h("tr", { class: i === sel ? "on" : "", onclick: () => { sel = i; redraw(); } });
-      tr.append(h("td", null, String(b.id || "")), h("td", null, String(b.name || "")), h("td", null, String(b.duration == null ? "" : b.duration)), h("td", null, String(b.maxStacks == null ? "" : b.maxStacks)));
-      body.append(tr);
-    });
-    tbl.append(body); host.append(tbl);
-    if (list[sel]) {
-      host.append(h("h3", null, "编辑：" + (list[sel].name || list[sel].id || ("#" + sel))));
-      const form = h("div", { class: "ed-grid" });
-      host.append(form);
-      renderForm(form, withFx(BUFF_SCHEMA), list[sel], () => mark());
-    }
-  };
-  redraw();
+  listTab("Buff / Debuff（" + list.length + "）", list, withFx(BUFF_SCHEMA),
+    [{ k: "id", label: "id" }, { k: "name", label: "名称" }, { k: "duration", label: "持续" }, { k: "maxStacks", label: "层数" }],
+    () => ({ id: "buff_" + (list.length + 1), name: "新 Buff", duration: 10, maxStacks: 1, stackMode: "refresh", mods: {}, tags: [] }),
+    { key: "buffs", icon: "buff_icons" });
 }
 
 function tabNpcs() {
   listTab("NPC / 怪物（" + ED.npcs.length + "）", ED.npcs, npcSchema(),
     [{ k: "id", label: "编号" }, { k: "name", label: "名称" }, { k: "model", label: "行走图" }, { k: "level", label: "等级" }, { k: "hp", label: "生命" }],
-    () => newNpcTemplate());
+    () => newNpcTemplate(),
+    { key: "npcs", thumb: n => roleSrc(n.model) || (n.portrait ? assetSrc2(n.portrait, "face") : null) });
 }
 function tabItems() {
   listTab("物品（" + ED.items.length + "）", ED.items, withFx(ITEM_SCHEMA),
     [{ k: "name", label: "名称" }, { k: "type", label: "类型" }, { k: "price", label: "价格" }, { k: "attack", label: "攻击" }, { k: "defence", label: "防御" }],
-    () => ({ name: "新物品", type: 0, subtype: 0, price: 0, reqLevel: 0, hp: 0, mp: 0, attack: 0, defence: 0, attrA: 0, attrB: 0, attrC: 0, icon: "", desc: "" }));
+    () => ({ name: "新物品", type: 0, subtype: 0, price: 0, reqLevel: 0, hp: 0, mp: 0, attack: 0, defence: 0, attrA: 0, attrB: 0, attrC: 0, icon: "", desc: "" }),
+    { key: "items", icon: "items_icons" });
 }
 function tabSkills() {
   listTab("技能（" + ED.skills.length + "）", ED.skills, withFx(skillSchema()),
     [{ k: "name", label: "名称" }, { k: "type", label: "类型" }, { k: "power", label: "威力" }, { k: "mp", label: "耗精力" }, { k: "range", label: "射程" }],
-    () => ({ name: "新技能", desc: "", type: 1, range: 40, mp: 0, reqLevel: 1, power: 10, sound: "", icon: "", frames: [] }));
+    () => ({ name: "新技能", desc: "", type: 1, range: 40, mp: 0, reqLevel: 1, power: 10, sound: "", icon: "", frames: [] }),
+    { key: "skills", icon: "skill_icons" });
 }
 
 // ---------- 数值 ----------
@@ -756,60 +901,141 @@ function tabGame() {
   const g = ED.content.game;
   if (!g.music) g.music = {};
   if (!g.result) g.result = [];
-  if (!g.flash) g.flash = [];
+  if (!Array.isArray(g.flash)) g.flash = [];
   mainEl.append(h("h3", null, "标题 / 结局配置"));
+
+  // 音乐候选：版本里有登记过的音频文件；没有就退化成可输入的文本框。
+  const audioFiles = (A.assetsAudio || []).slice();
+  const musicField = k => (audioFiles.length
+    ? { k, label: k === "start" ? "标题音乐" : "结局音乐", type: "select",
+        options: [["", "（无）"]].concat(audioFiles.map(x => [x, x])) }
+    : { k, label: k === "start" ? "标题音乐" : "结局音乐", type: "text" });
+
+  mainEl.append(h("h3", null, "音乐与背景"));
   const f = h("div", { class: "ed-grid" }); mainEl.append(f);
-  renderForm(f, [{ k: "start", label: "标题音乐", type: "text" }, { k: "end", label: "结局音乐", type: "text" }], g.music, mark);
+  renderForm(f, [musicField("start"), musicField("end")], g.music, mark);
   const f2 = h("div", { class: "ed-grid" }); mainEl.append(f2);
-  renderForm(f2, [{ k: "endpic", label: "结局背景图", type: "text" }], g, mark);
+  renderForm(f2, [{ k: "endpic", label: "结局背景图", type: "image", dir: "ui" }], g, mark);
+
+  mainEl.append(h("h3", null, "片头闪屏"));
+  mainEl.append(rhint("按顺序播放的闪图，可为每张设时长。"));
   const f3 = h("div", { class: "ed-grid" }); mainEl.append(f3);
-  renderForm(f3, [{ k: "flash", label: "片头闪屏(每行一张)", type: "lines", rows: 3 }], g, mark);
+  renderForm(f3, [{ k: "flash", label: "闪屏图（可多选成序列）", type: "frames", dir: "ui" }], g, mark);
+
   listTab("结局评价称号（按声望区间）", g.result, [
     { k: "lower", label: "声望下限", type: "number" }, { k: "upper", label: "声望上限", type: "number" }, { k: "name", label: "称号", type: "text" },
   ], [{ k: "lower", label: "下限" }, { k: "upper", label: "上限" }, { k: "name", label: "称号" }],
-    () => ({ lower: 0, upper: 1000, name: "新称号" }));
+    () => ({ lower: 0, upper: 1000, name: "新称号" }), { key: "gameresult" });
 }
 
 // ---------- 图片素材 ----------
-function assetPaths() {
-  const set = new Set();
-  for (const it of ED.items) if (it.icon) set.add("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png"));
-  for (const sk of ED.skills) {
-    if (sk.icon) set.add("assets/skill_icons/" + sk.icon.replace(/\.bmp$/, ".png"));
-    for (const f of (sk.frames || [])) set.add("assets/skill/" + String(f).replace(/\.bmp$/, ".png"));
-    for (const f of ((sk.projectile && sk.projectile.frames) || [])) set.add("assets/projectile/" + String(f).replace(/\.bmp$/, ".png"));
-  }
-  for (const b of (ED.buffs || [])) if (b.icon) set.add("assets/buff_icons/" + String(b.icon).replace(/\.bmp$/, ".png"));
-  for (const n of ED.npcs) if (n.portrait) set.add("assets/face/" + n.portrait.replace(/\.bmp$/, ".png"));
-  for (const u of ["mainmenu", "content", "end", "start", "load", "about", "exit", "team", "kouhao", "userpanel", "dlgpanel", "packpanel"])
-    set.add("assets/ui/" + u + ".png");
-  for (const p in ED.images) set.add(p);
-  return [...set].sort();
-}
 
 function tabAssets() {
-  mainEl.append(h("h3", null, "图片素材替换"));
-  mainEl.append(h("div", { class: "ed-hint" }, "上传的图片会保存进当前版本（data URL），游戏中自动生效。尺寸建议与原图一致。"));
-  const pathIn = h("input", { type: "text", placeholder: "assets/items_icons/金创药.png", style: "width:280px" });
-  const fileIn = h("input", { type: "file", accept: "image/*" });
-  fileIn.onchange = async () => {
-    const f = fileIn.files[0]; if (!f) return;
-    const p = pathIn.value.trim(); if (!p) { alert("请填写目标资源路径"); return; }
-    ED.images[p] = await readImageFile(f); setAssetOverrides(ED.images); mark(); selectTab("assets");
-  };
-  mainEl.append(h("div", { class: "ed-tools" }, h("span", null, "新路径："), pathIn, h("span", null, "选择图片："), fileIn));
+  mainEl.append(h("h3", null, "图片素材"));
+  mainEl.append(h("div", { class: "ed-hint" },
+    "左侧列出「默认版本 + 当前版本」的全部图片资源（版本 assets/ 是覆盖式的，所以默认版本的图也会出现在这里）。"
+    + "上传的图片以 data URL 存进当前版本，游戏中自动生效；尺寸建议与原图一致。「还原」会删掉本版本的覆盖，回落到原版图。"));
 
-  const grid = h("div", { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px" });
-  for (const p of assetPaths()) {
-    const previewSrc = ED.images[p] || p;
-    const img = h("img", { src: previewSrc, style: "width:40px;height:40px;object-fit:contain;background:#0a0b0d;border:1px solid #2c3038;image-rendering:pixelated" });
+  // 重建索引（每次进入本页都刷新，保证刚上传的图能立刻搜到）
+  const idx0 = buildAssetIndexAsync({
+    versions: null,
+    currentId: ED.id,
+    images: ED.images,
+    items: ED.items, skills: ED.skills, npcs: ED.npcs, buffs: ED.buffs || [],
+    charsMap: A.chars || {},
+    maps: Object.values(ED.maps || {}),
+  });
+  // 索引构建是异步的（要拉 versions/index.json）；先画骨架，回来后再铺列表。
+  let idx = [];
+
+  const split = h("div", { class: "ed-split" });
+  const left = h("div", { class: "ed-split-list" });
+  const right = h("div", { class: "ed-split-form" });
+  split.append(left, mkSplitResizer("assets", left), right);
+  mainEl.append(split);
+
+  // ---- 左：搜索 + 列表 ----
+  const searchIn = h("input", { type: "text", placeholder: "搜索资源路径…" });
+  const cntEl = h("span", { class: "ed-count" });
+  left.append(h("div", { class: "ed-tools", style: "padding:6px" }, h("div", { class: "ed-search" }, searchIn), cntEl));
+  const listWrap = h("div", { class: "ed-tablescroll" });
+  left.append(listWrap);
+
+  let selPath = null;
+  let query = "";
+
+  const drawList = () => {
+    clear(listWrap);
+    const all = searchAssets(query);
+    cntEl.textContent = "共 " + idx.length + (query ? " / 显示 " + all.length : "") + " 项";
+    const tbl = h("table", { class: "ed-table" });
+    tbl.append(h("thead", null, h("tr", null, h("th", { class: "ed-thumb" }), h("th", null, "资源"), h("th", null, "状态"))));
+    const tb = h("tbody");
+    let lastGroup = null;
+    for (const p of all) {
+      const g = groupOf(p);
+      if (g !== lastGroup) {
+        tb.append(h("tr", null, h("td", { colspan: 3, style: "background:#121418;color:#7f8792;font-size:10px;letter-spacing:.06em;padding:4px 8px" }, g)));
+        lastGroup = g;
+      }
+      const tr = h("tr", { class: p === selPath ? "on" : "", onclick: () => { selPath = p; drawList(); drawDetail(); } });
+      const im = h("img", { src: ED.images[p] || assetSrc(p), loading: "lazy" });
+      im.onerror = () => { im.style.opacity = "0.12"; };
+      tr.append(h("td", { class: "ed-thumb" }, im),
+        h("td", { style: "font-size:11px;word-break:break-all" }, fileName(p)),
+        h("td", { style: "font-size:10px;color:" + (ED.images[p] ? "#f0d060" : "#6b737e") }, ED.images[p] ? "本版覆盖" : "原版"));
+      tb.append(tr);
+    }
+    if (!all.length) tb.append(h("tr", null, h("td", { colspan: 3 }, h("div", { class: "ed-empty" }, "没有匹配的资源"))));
+    tbl.append(tb);
+    listWrap.append(tbl);
+  };
+  searchIn.oninput = () => { query = searchIn.value; drawList(); };
+
+  // ---- 右：大图预览 + 上传/还原 ----
+  const drawDetail = () => {
+    clear(right);
+    if (!selPath) { right.append(h("div", { class: "ed-empty" }, "左侧选择一个资源")); return; }
+    const overridden = !!ED.images[selPath];
+    right.append(h("h3", { style: "margin-top:0" }, fileName(selPath)));
+    right.append(rhint(selPath));
+    const big = h("img", { class: "ed-decor-big", src: ED.images[selPath] || assetSrc(selPath), style: "max-width:100%;max-height:320px" });
+    big.onerror = () => { big.style.opacity = "0.12"; };
+    right.append(h("div", { style: "display:flex;justify-content:center;background:#0a0b0d;border:1px solid #22262d;border-radius:4px;padding:12px;margin:8px 0" }, big));
+    right.append(h("div", { class: "ed-row" }, h("span", null, "来源：" + (overridden ? "本版本上传的覆盖图" : "默认版本原图"))));
+
     const file = h("input", { type: "file", accept: "image/*", style: "display:none" });
-    file.onchange = async () => { const f = file.files[0]; if (!f) return; ED.images[p] = await readImageFile(f); setAssetOverrides(ED.images); mark(); selectTab("assets"); };
-    grid.append(h("div", { class: "ed-row", style: "margin:0" }, img,
-      h("span", { style: "flex:1;font-size:11px;word-break:break-all" }, p),
-      h("button", { class: "ed-btn", onclick: () => file.click() }, "上传"),
-      ED.images[p] ? h("button", { class: "ed-btn danger", onclick: () => { delete ED.images[p]; setAssetOverrides(ED.images); mark(); selectTab("assets"); } }, "还原") : null));
-    grid.append(file);
-  }
-  mainEl.append(grid);
+    file.onchange = async () => {
+      const f = file.files[0]; if (!f) return;
+      ED.images[selPath] = await readImageFile(f);
+      setAssetOverrides(ED.images); mark(); drawList(); drawDetail();
+    };
+    right.append(h("div", { class: "ed-row" },
+      h("button", { class: "ed-btn", onclick: () => file.click() }, "上传替换…"), file,
+      overridden ? h("button", { class: "ed-btn danger", onclick: () => { delete ED.images[selPath]; setAssetOverrides(ED.images); mark(); drawList(); drawDetail(); } }, "还原为原版") : null));
+
+    // 新路径上传（用于给还没有图的数据加素材）
+    const pathIn = h("input", { type: "text", placeholder: "assets/items_icons/新图.png", style: "flex:1" });
+    const file2 = h("input", { type: "file", accept: "image/*", style: "display:none" });
+    file2.onchange = async () => {
+      const f = file2.files[0]; if (!f) return;
+      const np = pathIn.value.trim(); if (!np) { alert("请填写目标资源路径"); return; }
+      ED.images[np] = await readImageFile(f); setAssetOverrides(ED.images); mark();
+      if (!idx.includes(np)) idx.push(np), idx.sort();
+      selPath = np; drawList(); drawDetail();
+    };
+    right.append(h("h3", null, "新增资源"));
+    right.append(rhint("给还没有图片的数据补一张（路径需与数据里引用的名字一致）。"));
+    right.append(h("div", { class: "ed-row" }, pathIn, h("button", { class: "ed-btn", onclick: () => file2.click() }, "选择图片…"), file2));
+  };
+
+  // 先显示"加载中"，索引到位后填充。
+  clear(listWrap);
+  listWrap.append(h("div", { class: "ed-empty" }, "正在建立资源索引…"));
+  idx0.then(list => {
+    idx = list;
+    if (!selPath || !idx.includes(selPath)) selPath = idx[0] || null;
+    drawList();
+    drawDetail();
+  });
 }

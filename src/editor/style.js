@@ -230,6 +230,69 @@ table.ed-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 /* 窄屏抽屉遮罩 */
 .ed-scrim{position:absolute;inset:0;background:rgba(0,0,0,.45);z-index:15;display:none}
 .ed-scrim.on{display:block}
+
+
+/* ================= 列表行首缩略图 ================= */
+table.ed-table th.ed-thumb,table.ed-table td.ed-thumb{
+  width:38px;padding:2px 4px 2px 6px;text-align:center;vertical-align:middle}
+table.ed-table td.ed-thumb img{width:30px;height:30px;object-fit:contain;
+  background:#0a0b0d;border:1px solid #22262d;border-radius:3px;image-rendering:pixelated;display:block}
+table.ed-table tbody tr.on td.ed-thumb img{border-color:#f0d060}
+
+/* ================= 图片字段（预览 + 更换按钮） ================= */
+.ed-imgfield{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0}
+.ed-imgthumbs{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:34px}
+.ed-imgthumbs img{width:32px;height:32px;object-fit:contain;background:#0a0b0d;
+  border:1px solid #2c3038;border-radius:3px;image-rendering:pixelated}
+.ed-imgthumbs .ed-imghint{color:#6b737e;font-size:11px}
+
+/* ================= 资源选择弹窗 ================= */
+.ed-modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.66);z-index:10000;
+  display:flex;align-items:center;justify-content:center;padding:18px}
+.ed-modal{display:flex;flex-direction:column;width:min(980px,96vw);height:min(720px,92vh);
+  background:#171a1f;border:1px solid #3a414c;border-radius:6px;overflow:hidden;
+  box-shadow:0 18px 54px rgba(0,0,0,.65)}
+.ed-modal-head{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:9px 12px;
+  border-bottom:1px solid #2c3038;background:#1c2026}
+.ed-modal-title{font-size:13px;font-weight:600;color:#f0d060;flex:1}
+.ed-btnicon{width:26px;height:26px;padding:0;line-height:1;display:flex;align-items:center;justify-content:center}
+.ed-chk{display:flex;align-items:center;gap:5px;font-size:11px;color:#9aa2ad;cursor:pointer;user-select:none}
+.ed-modal-body{flex:1 1 auto;min-height:0;display:flex;gap:0}
+.ed-modal-list{flex:0 0 46%;min-width:0;overflow:auto;border-right:1px solid #2c3038;
+  padding:4px;display:flex;flex-direction:column;gap:1px}
+.ed-modal-group{position:sticky;top:0;z-index:1;background:#121418;color:#7f8792;
+  font-size:10px;letter-spacing:.06em;padding:5px 8px;border-bottom:1px solid #232830}
+.ed-modal-item{display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:3px;
+  cursor:pointer;transition:background .08s}
+.ed-modal-item:hover{background:#20262e}
+.ed-modal-item.on{background:#2b3a52}
+.ed-modal-item.cur{box-shadow:inset 0 0 0 1px #f0d060}
+.ed-modal-item img{width:32px;height:32px;object-fit:contain;flex:0 0 auto;
+  background:#0a0b0d;border:1px solid #22262d;border-radius:3px;image-rendering:pixelated}
+.ed-modal-name{font-size:11px;color:#c3cad3;word-break:break-all;line-height:1.25}
+.ed-modal-item.on .ed-modal-name{color:#fff}
+.ed-modal-prev{flex:1;min-width:0;overflow:auto;padding:12px;display:flex;
+  flex-direction:column;gap:8px;align-items:center}
+.ed-modal-big{flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  width:100%;min-height:180px;background:#0a0b0d;border:1px solid #22262d;border-radius:4px;padding:10px}
+.ed-modal-big img{max-width:100%;max-height:300px;object-fit:contain;image-rendering:pixelated}
+.ed-modal-path{font-size:11px;color:#7f8792;word-break:break-all;text-align:center}
+.ed-modal-strip{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;width:100%}
+.ed-modal-frame{position:relative;cursor:pointer;border:1px solid #2c3038;border-radius:3px;overflow:hidden}
+.ed-modal-frame img{width:40px;height:40px;object-fit:contain;background:#0a0b0d;image-rendering:pixelated;display:block}
+.ed-modal-frame span{position:absolute;right:1px;bottom:0;font-size:9px;color:#aeb6c0;
+  background:rgba(0,0,0,.6);padding:0 2px}
+.ed-modal-frame.on{border-color:#f0d060}
+.ed-modal-foot{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:9px 12px;
+  border-top:1px solid #2c3038;background:#1c2026}
+.ed-modal-foot .ed-btn:last-child{margin-left:auto}
+@media (max-width:900px){
+  .ed-modal-body{flex-direction:column}
+  .ed-modal-list{flex:0 0 42%;border-right:0;border-bottom:1px solid #2c3038}
+  .ed-modal-big{min-height:120px}
+}
+.ed-decor-big{max-width:180px;max-height:180px;object-fit:contain;background:#0a0b0d;
+  border:1px solid #2c3038;border-radius:4px;image-rendering:pixelated}
 `;
 
 export function injectStyle() {

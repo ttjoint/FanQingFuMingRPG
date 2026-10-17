@@ -1,5 +1,7 @@
 // 表单向导：由 schema 生成可编辑控件，供 NPC / 物品 / 技能 / 数值 / 结局等复用。
 import { h, clear } from "./dom.js";
+import { openAssetPicker } from "./asset-picker.js";
+import { assetSrc } from "./assets-index.js";
 
 let dlSeq = 0;
 
@@ -168,6 +170,44 @@ export function renderForm(host, schema, obj, onChange) {
       host.append(box);
       continue;
     }
+    if (f.type === "image" || f.type === "frames") {
+      // 图片类字段：显示缩略图 + 「更换…」按钮，不让人手打资源路径。
+      // f.dir 指定目录（如 "items_icons"），把值（可能只是纯文件名）解析成可显示 URL。
+      // f.type === "frames" 时值为字符串数组（帧动画），点选可多选。
+      const isFrames = f.type === "frames";
+      const box = h("div", { class: "ed-imgfield" });
+      const thumbs = h("div", { class: "ed-imgthumbs" });
+      const drawThumbs = () => {
+        clear(thumbs);
+        const raw = isFrames ? (Array.isArray(pathGet(obj, f.k)) ? pathGet(obj, f.k) : []) : [pathGet(obj, f.k)];
+        const list = raw.filter(x => x != null && x !== "");
+        if (!list.length) {
+          thumbs.append(h("div", { class: "ed-imghint" }, "（未设置）"));
+          return;
+        }
+        for (const v of list) {
+          const im = h("img", { src: assetSrc(v, f.dir), title: String(v) });
+          im.onerror = () => { im.style.opacity = "0.12"; };
+          thumbs.append(im);
+        }
+      };
+      const btn = h("button", { class: "ed-btn" }, isFrames ? "选择帧…" : "更换…");
+      btn.onclick = () => openAssetPicker({
+        title: (f.label || f.k) + (isFrames ? "（选帧动画）" : ""),
+        dir: f.dir, multi: isFrames,
+        value: pathGet(obj, f.k),
+        onPick: val => {
+          const picked = isFrames ? (Array.isArray(val) ? val : [val]) : (Array.isArray(val) ? val[0] : val);
+          pathSet(obj, f.k, picked);
+          drawThumbs(); flag(f);
+        },
+      });
+      const reset = h("button", { class: "ed-btn ghost", onclick: () => { pathSet(obj, f.k, isFrames ? [] : ""); drawThumbs(); flag(f); } }, "清除");
+      box.append(thumbs, h("div", { class: "ed-row" }, btn, reset));
+      host.append(h("div", { class: "ed-field" }, lab, box));
+      drawThumbs();
+      continue;
+    }
     if (f.type === "textarea" || f.type === "lines") {
       ctl = h("textarea", { rows: f.rows || (f.type === "lines" ? 4 : 3) });
       ctl.value = v;
@@ -229,6 +269,39 @@ export function renderForm(host, schema, obj, onChange) {
   }
 }
 
+// 双栏拖拽手柄：左栏宽度存在 localStorage，双击恢复默认。
+// 各列表页共用同一套行为，保证“每个分页都能左右拖收放”。
+export function mkSplitResizer(key, leftEl) {
+  const storeKey = "ed.width." + key;
+  const el = h("div", { class: "ed-resizer", title: "拖动调整列表宽度 / 双击恢复默认" });
+  const apply = w => { leftEl.style.flex = "0 0 " + w + "px"; leftEl.style.width = w + "px"; };
+  const saved = parseInt(localStorage.getItem(storeKey) || "", 10);
+  if (saved > 0) apply(saved);
+  let startX = 0, startW = 0;
+  const onMove = e => apply(Math.max(200, Math.min(900, startW + (e.clientX - startX))));
+  const onUp = () => {
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+    el.classList.remove("dragging");
+    document.body.classList.remove("ed-resizing");
+    localStorage.setItem(storeKey, String(Math.round(leftEl.getBoundingClientRect().width)));
+  };
+  el.addEventListener("mousedown", e => {
+    if (window.matchMedia("(max-width: 900px)").matches) return;   // 窄屏上下堆叠，不拖
+    e.preventDefault();
+    startX = e.clientX; startW = leftEl.getBoundingClientRect().width;
+    el.classList.add("dragging");
+    document.body.classList.add("ed-resizing");
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+  el.addEventListener("dblclick", () => {
+    leftEl.style.flex = ""; leftEl.style.width = "";
+    localStorage.removeItem(storeKey);
+  });
+  return el;
+}
+
 // 列表 + 选中项表单 + 增删。list 为数组（会被就地修改）。
 export function renderListEditor(host, opts) {
   const { list, schema, columns, makeNew } = opts;
@@ -238,6 +311,7 @@ export function renderListEditor(host, opts) {
   const match = it => {
     if (!query) return true;
     const q = query.toLowerCase();
+    // 只要任一列命中即显示（含 id / 名称等主键列）。
     for (const c of columns) {
       const v = c.get ? c.get(it) : it[c.k];
       if (v != null && String(v).toLowerCase().includes(q)) return true;
@@ -268,11 +342,14 @@ export function renderListEditor(host, opts) {
     const split = h("div", { class: "ed-split" });
     const left = h("div", { class: "ed-split-list" });
     const right = h("div", { class: "ed-split-form" });
-    split.append(left, right);
+    split.append(left, mkSplitResizer(opts.splitKey || ("list." + (opts.key || "default")), left), right);
     host.append(split);
 
     const tbl = h("table", { class: "ed-table" });
     const head = h("tr");
+    // 有缩略图时首列是图列（无表头文字，窄列）
+    const hasThumb = !!opts.thumb;
+    if (hasThumb) head.append(h("th", { class: "ed-thumb" }));
     for (const c of columns) head.append(h("th", null, c.label));
     tbl.append(h("thead", null, head));
     const body = h("tbody");
@@ -280,16 +357,32 @@ export function renderListEditor(host, opts) {
     // 表格放进专用滚动容器，sticky 表头才能生效；左栏高度不随行数撑高。
     left.append(h("div", { class: "ed-tablescroll" }, tbl));
 
+    // 行内容填充（首列缩略图 + 各列文本）。每次重绘都以数据为准，避免残留旧 DOM。
+    const fillRow = (tr, it) => {
+      clear(tr);
+      if (hasThumb) {
+        const td = h("td", { class: "ed-thumb" });
+        const src = opts.thumb(it);
+        if (src) {
+          const im = h("img", { src, loading: "lazy" });
+          im.onerror = () => { im.style.opacity = "0.12"; };
+          td.append(im);
+        }
+        tr.append(td);
+      }
+      for (const c of columns) tr.append(h("td", null, c.get ? c.get(it) : (it[c.k] == null ? "" : String(it[c.k]))));
+    };
+
     let formHost = null;
     const drawTable = () => {
       clear(body);
       list.forEach((it, i) => {
         if (!match(it)) return;
         const tr = h("tr", { class: i === sel ? "on" : "", onclick: () => { opts.sel = i; drawSelection(); fadeAll(); tr.className = "on"; } });
-        for (const c of columns) tr.append(h("td", null, c.get ? c.get(it) : (it[c.k] == null ? "" : String(it[c.k]))));
+        fillRow(tr, it);
         body.append(tr);
       });
-      if (!body.children.length) body.append(h("tr", null, h("td", { colspan: columns.length }, h("div", { class: "ed-empty" }, "没有匹配的项"))));
+      if (!body.children.length) body.append(h("tr", null, h("td", { colspan: columns.length + (hasThumb ? 1 : 0) }, h("div", { class: "ed-empty" }, "没有匹配的项"))));
     };
     const fadeAll = () => { for (const tr of body.children) tr.className = ""; };
 
@@ -303,18 +396,14 @@ export function renderListEditor(host, opts) {
       right.append(formHost);
       renderForm(formHost, schema, cur, () => {
         opts.onChange && opts.onChange();
-        // 表单里改名要让左侧表格即时反映（只更新文本，不重建 DOM，避免输入框失焦）
+        // 表单里改名/换图要让左侧表格即时反映（只重填该行，不重建 DOM，避免输入框失焦）
         let row = 0;
         for (let i = 0; i < list.length; i++) {
           if (!match(list[i])) continue;
           const tr = body.children[row++];
           if (!tr) continue;
-          for (let j = 0; j < columns.length; j++) {
-            const c = columns[j];
-            const td = tr.children[j];
-            if (!td) continue;
-            td.textContent = c.get ? c.get(list[i]) : (list[i][c.k] == null ? "" : String(list[i][c.k]));
-          }
+          fillRow(tr, list[i]);
+          tr.className = i === sel ? "on" : "";
         }
       });
     };
