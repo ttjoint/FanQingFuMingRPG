@@ -21,6 +21,7 @@ import { decodePNG, encodePNG } from "./png.mjs";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const CAND = path.join(ROOT, "_aigen/exp/cand");
 const VER = path.join(ROOT, "versions/aitest");
+const DEF = path.join(ROOT, "versions/default/assets");   // 原版资源（合并基底）
 const ASSETS = path.join(VER, "assets");
 
 const readJSON = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
@@ -79,7 +80,12 @@ for (const p of PROPS) {
 
 // ---------------------------------------------------------------- chars.json
 // 单帧 stand × 8 方向。dir 索引 0..7，帧名带 _d<N> 后缀便于排查。
-const chars = {};
+//
+// **必须基于原版 chars.json 合并**，不能只写新增单位：
+// 版本 assets/ 是「覆盖」而非「追加」，只写 2 个新模型会把原版 30 个
+// 全部冲掉 —— 结果是玩家(role)、所有原版 NPC 都找不到贴图，
+// 任何地图上一个人都看不见（真实踩过的坑）。
+const chars = readJSON(path.join(DEF, "chars.json"));
 for (const u of UNITS) {
   const frame = u.png.replace(/\.png$/, ".png");   // 渲染器会自动 .bmp→.png
   chars[u.model] = {
