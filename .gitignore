@@ -25,6 +25,7 @@ versions/*/
 _*.mjs
 _*.png
 _*.log
+_*.spec.js
 *.log
 test/
 

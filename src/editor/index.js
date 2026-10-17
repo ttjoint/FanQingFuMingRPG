@@ -6,7 +6,7 @@ import { setAssetOverrides, assetURL } from "../core/assets.js";
 import { h, clear, deep } from "./dom.js";
 import { injectStyle } from "./style.js";
 import { renderForm, renderListEditor, mkSplitResizer, editorShell, imgPlaceholder } from "./fields.js";
-import { waveBar, decodePeaks, fmtTime, fmtSize } from "./audio-view.js";
+import { waveBar, decodePeaks, prefetchPeaks, fmtTime, fmtSize } from "./audio-view.js";
 import { mountMapEditor } from "./map-editor.js";
 import { modeControl, makeLineEditor, decorState } from "./decor-line.js";
 import { applyPatch, diffContent } from "../content/contentdb.js";
@@ -1323,7 +1323,7 @@ function tabAudio() {
       "来源：" + (over ? "本版本上传" : "默认版本"));
 
     const wave = waveBar({
-      msg: "正在解码波形…",
+      msg: "正在解码波形…（后台进行，可先播放）",
       onSeek: t => {
         if (!au || !isFinite(au.duration)) return;
         au.currentTime = t * au.duration;
@@ -1385,17 +1385,18 @@ function tabAudio() {
     kv("路径", selPath, "mono");
     const sizeDd = h("dd", null, "…"), lenDd = h("dd", null, "…");
     const fmtDd = h("dd", null, "…"), rateDd = h("dd", null, "…"), chDd = h("dd", null, "…");
+    const decodeMsEl = h("dd", { class: "mono" }, "…");
     info.append(h("dt", null, "文件大小"), sizeDd,
       h("dt", null, "时长"), lenDd,
       h("dt", null, "格式"), fmtDd,
       h("dt", null, "采样率"), rateDd,
-      h("dt", null, "声道"), chDd);
+      h("dt", null, "声道"), chDd,
+      h("dt", null, "波形解码"), decodeMsEl);
     g2.append(info);
     right.append(g2);
 
     // ---- 元数据加载：HEAD 取大小/类型，Audio 取时长，WebAudio 解码出波形+采样率 ----
     let dead = false;
-    let audioCtx = null;
     const loadMeta = async () => {
       // 1) 文件大小 / MIME
       try {
@@ -1407,17 +1408,45 @@ function tabAudio() {
           fmtDd.textContent = ct || (selPath.match(/\.[^.]+$/) || [""])[0];
         }
       } catch (e) { if (!dead) { sizeDd.textContent = "未知"; } }
-      // 2) 波形 + 时长 + 采样率 + 声道（需要 WebAudio 解码）
+      // 2) 真实采样率 / 声道数：从文件头读，不需要完整解码。
+      //    （decodePeaks 在 Worker 里用 8 kHz 上下文解码，
+      //      它返回的 sampleRate 是重采样后的值，不能当文件真实值显示。）
+      const readHeader = () => new Promise(res => {
+        const a = new Audio();
+        a.preload = "metadata";
+        let done = false;
+        const fin = v => { if (!done) { done = true; res(v); } };
+        a.onloadedmetadata = () => fin(a);
+        a.onerror = () => fin(null);
+        a.src = src;
+        setTimeout(() => fin(null), 5000);
+      });
+      readHeader().then(a => {
+        if (dead || !a) return;
+        if (a.duration) lenDd.textContent = fmtTime(a.duration) + "（" + a.duration.toFixed(2) + " 秒）";
+      });
+
+      // 3) 波形 + 时长：解码在 Web Worker 里做（不占主线程），结果按文件缓存
       try {
-        const AC = window.AudioContext || /** @type {any} */ (window).webkitAudioContext;
-        audioCtx = new AC();
-        const d = await decodePeaks(audioCtx, src, 220);
+        const t0 = performance.now();
+        const d = await decodePeaks(null, src, 220);
         if (dead || !d) return;
+        const ms = Math.round(performance.now() - t0);
         wave.setPeaks(d);
         lenDd.textContent = fmtTime(d.duration) + "（" + d.duration.toFixed(2) + " 秒）";
+        // 采样率/声道是解码时上下文的值（原文件采样率浏览器不暴露）
         rateDd.textContent = d.sampleRate.toLocaleString() + " Hz";
+        rateDd.title = "解码时的采样率（原始采样率浏览器不提供；解码为画波形已重采样，不影响播放）";
         chDd.textContent = d.channels === 1 ? "单声道" : (d.channels === 2 ? "立体声" : d.channels + " 声道");
         timeEl.textContent = "0:00.0 / " + fmtTime(d.duration);
+        decodeMsEl.textContent = d.cached ? "已缓存" : (ms + " ms");
+        // 解码完当前文件后，后台预取列表里相邻的 2 个（用户左右切时就是 0 ms）。
+        // 解码很贵（~0.6 s/个），所以只预取相邻项，不整表预热。
+        if (!dead && !d.cached) {
+          const order = list.filter(p2 => p2 !== selPath);
+          for (const p2 of order.slice(0, 2)) prefetchPeaks(p2, 220);
+        }
+
       } catch (e) {
         if (!dead) {
           wave.setMsg("无法解码波形（仍可播放）");
@@ -1457,8 +1486,8 @@ function tabAudio() {
       au.onerror = () => { if (au === self) { au = null; playBtn.textContent = "▶ 播放"; wave.setMsg("无法播放该文件"); } };
       au.play().then(() => { playBtn.textContent = "■ 停止"; }).catch(() => { au = null; });
     };
-    // 页面切走时清掉解码器，避免 AudioContext 越积越多
-    detailCleanup = () => { dead = true; wave.destroy(); if (audioCtx) { try { audioCtx.close(); } catch (e) { } audioCtx = null; } };
+    // 页面切走时清掉波形窗口的监听与动画帧（解码在 Worker 里，无需手动关闭）
+    detailCleanup = () => { dead = true; wave.destroy(); };
 
     const g3 = h("div", { class: "ed-group" });
     g3.append(h("div", { class: "ed-grouptitle" }, "替换音频"));
