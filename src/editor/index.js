@@ -970,7 +970,125 @@ function tabConfig() {
   sec("背包", "inventory", [
     { k: "packItem", label: "背包道具名", type: "text" }, { k: "packSize", label: "背包格数", type: "number" },
   ]);
+
+  // ---- 音频：默认音量（玩家在游戏内设置面板改的值会覆盖这里）----
+  sec("音频默认音量", "audio", [
+    { k: "bgm", label: "背景音乐", type: "number", step: 0.05, min: 0, max: 1, def: 0.6 },
+    { k: "sfx", label: "音效", type: "number", step: 0.05, min: 0, max: 1, def: 0.8 },
+  ], "0~1。玩家在游戏内「设置」里调过音量后，以玩家自己存的值为准（存在浏览器本地）。"
+    + "这里只决定「第一次进游戏」时的默认音量。");
+
+  // ---- 掉落 / 拾取 / 强化 ----
+  sec("掉落与拾取", "items", [
+    { k: "dropTtl", label: "掉落存在时长(秒,0=永久)", type: "number", def: 0 },
+    { k: "dropScatter", label: "掉落散布半径", type: "number", def: 22 },
+    { k: "pickupRadius", label: "自动拾取半径", type: "number", def: 20 },
+    { k: "pickupDelay", label: "拾取保护(秒)", type: "number", step: 0.1, def: 0 },
+    { k: "stackRadius", label: "地面堆叠半径", type: "number", def: 18 },
+  ]);
+
+  sec("强化与耐久", "items", [
+    { k: "maxEnhance", label: "强化上限", type: "number", def: 10 },
+    { k: "enhancePriceBase", label: "强化基础价", type: "number", def: 50 },
+    { k: "enhancePriceMul", label: "强化价格倍率", type: "number", step: 0.1, def: 1.6 },
+    { k: "socketFailChance", label: "镶嵌失败率(0~1)", type: "number", step: 0.05, def: 0 },
+    { k: "durabilityLossOnHit", label: "受击耐久损耗", type: "number", step: 0.1, def: 0.5 },
+  ]);
+
+  sec("强化加成", "itemEnhance", [
+    { k: "enhancePerLevel", label: "每级攻击/防御加成", type: "number", def: 2 },
+  ]);
+
+  // ---- 指示器开关与颜色 ----
+  sec("界面指示器", "fx", [
+    { k: "uiRings", label: "显示锁定/选圈", type: "checkbox" },
+    { k: "moveMarker", label: "显示移动标记", type: "checkbox" },
+    { k: "itemHighlight", label: "高亮地上的物品", type: "checkbox" },
+    { k: "ring.target", label: "目标圈颜色", type: "text" },
+    { k: "ring.interact", label: "交互圈颜色", type: "text" },
+    { k: "ring.move", label: "移动圈颜色", type: "text" },
+  ], "颜色写 #rrggbb。");
+
+  // ---- 等距几何（改之前务必确认与地图/素材匹配）----
+  sec("等距坐标", "iso", [
+    { k: "originX", label: "原点 X", type: "number" },
+    { k: "halfW", label: "菱形半宽", type: "number" },
+    { k: "halfH", label: "菱形半高", type: "number" },
+  ], "菱形格子的投影参数。改动会影响所有地图的坐标换算，一般不用动。");
+
   mainEl.append(wrap);
+
+  // ================= 数据集默认参数（版本级的「全局设置」）=================
+  mainEl.append(h("h3", null, "数据集信息"));
+  mainEl.append(rhint("这些是当前版本数据集的全局参数，不随单个 NPC/物品变化。"));
+  const metaWrap = h("div", { class: "ed-grid" });
+  mainEl.append(metaWrap);
+
+  const metaSec = (title, hint) => {
+    const g = h("div", { class: "ed-group" });
+    g.append(h("div", { class: "ed-grouptitle" }, title));
+    if (hint) g.append(h("div", { class: "ed-ghint" }, hint));
+    metaWrap.append(g);
+    return g;
+  };
+
+  // ---- 版本信息（只读展示 + 可改的名称）----
+  const gv = metaSec("版本");
+  const vInfo = h("dl", { class: "ed-kv" });
+  const maps = Object.keys(ED.maps || {});
+  const mapCount = maps.length;
+  // 地图里的 NPC 存在 spawns（不是 npcs）；数量为 0 时视为空地图
+  const spawnCount = m => (m && ((m.spawns && m.spawns.length) || (m.npcs && m.npcs.length) || 0)) || 0;
+  const withEnemies = Object.values(ED.maps || {}).filter(m => spawnCount(m) > 0).length;
+  const totalSpawns = Object.values(ED.maps || {}).reduce((a, m) => a + spawnCount(m), 0);
+  const kvi = (k, v, cls) => vInfo.append(h("dt", null, k), h("dd", { class: cls || "" }, String(v)));
+  kvi("版本 id", ED.id || "(未保存)");
+  kvi("显示名称", ED.name || "(未命名)");
+  kvi("基准版本", ED.base ? (ED.base.name || ED.base.id || "默认") : "—");
+  kvi("地图数", mapCount + "（" + withEnemies + " 张有 NPC，合计 " + totalSpawns + " 个）");
+  kvi("NPC 数", (ED.npcs || []).length);
+  kvi("物品数", (ED.items || []).length);
+  kvi("技能数", (ED.skills || []).length);
+  kvi("行走图模型", Object.keys(A.chars || {}).length);
+  gv.append(vInfo);
+
+  // ---- 新开局的初始地图 ----
+  const gm = ED.content.game || (ED.content.game = {});
+  const gs = metaSec("新开局", "决定玩家开新档时从哪张地图、以什么状态开始。");
+  const startMap = h("select", { style: "flex:1;min-width:0" });
+  const idx = (ED.content.mapsIndex) || {};
+  startMap.append(h("option", { value: "" }, "（用脚本流程，不强制指定）"));
+  for (const [id, name] of Object.entries(idx)) startMap.append(h("option", { value: String(id) }, String(id) + " · " + name));
+  startMap.value = gm.startMap == null ? "" : String(gm.startMap);
+  startMap.onchange = () => {
+    if (startMap.value === "") delete gm.startMap;
+    else gm.startMap = Number(startMap.value);
+    mark();
+  };
+  gs.append(h("div", { class: "ed-row" }, h("label", null, "初始地图"), startMap));
+  const startCell = h("input", { type: "text", placeholder: "行,列（留空=按地图 entry）", style: "flex:1;min-width:0" });
+  startCell.value = Array.isArray(gm.startCell) ? gm.startCell.join(",") : "";
+  startCell.oninput = () => {
+    const t = startCell.value.trim();
+    if (!t) { delete gm.startCell; mark(); return; }
+    const parts = t.split(/[,，\s]+/).map(Number).filter(n => isFinite(n));
+    if (parts.length === 2) { gm.startCell = parts; mark(); }
+  };
+  gs.append(h("div", { class: "ed-row" }, h("label", null, "起始格"), startCell));
+  gs.append(h("div", { class: "ed-ghint" }, "格式「行,列」，例如 3,3。留空则用地图自身配置的入场点。"));
+
+  // ---- 字体 / 界面缩放（数据集级）----
+  const gu = metaSec("界面", "影响游戏内 UI 的默认表现（不是编辑器自己的字号）。");
+  const uiCfg = (ED.content.ui = ED.content.ui || {});
+  const scaleIn = h("input", { type: "number", step: 0.05, min: 0.5, max: 3, style: "flex:1;min-width:0" });
+  scaleIn.value = uiCfg.scale == null ? 1 : uiCfg.scale;
+  scaleIn.oninput = () => { const v = parseFloat(scaleIn.value); if (isFinite(v) && v > 0) { uiCfg.scale = v; mark(); } };
+  gu.append(h("div", { class: "ed-row" }, h("label", null, "界面缩放"), scaleIn));
+  const fontIn = h("input", { type: "text", placeholder: "例：'Microsoft YaHei', sans-serif", style: "flex:1;min-width:0" });
+  fontIn.value = uiCfg.font || "";
+  fontIn.oninput = () => { uiCfg.font = fontIn.value.trim(); mark(); };
+  gu.append(h("div", { class: "ed-row" }, h("label", null, "界面字体"), fontIn));
+  gu.append(h("div", { class: "ed-ghint" }, "留空用游戏内置默认字体。这些字段写进版本内容，随版本保存。"));
 }
 
 // ---------- 标题 / 结局 ----------
@@ -1238,7 +1356,22 @@ function tabAudio() {
     pitch.oninput = applyPitch;
     pitchReset.onclick = () => { pitch.value = "0"; applyPitch(); };
     g1.append(pitchRow);
-    g1.append(h("div", { class: "ed-ghint" }, "音高只作用于编辑器里的试听，不会写进数据、也不影响游戏内播放。"));
+
+    // 音量：同样只影响编辑器试听（游戏内音量由玩家设置 / 配置页的「音频默认音量」决定）
+    const vol = h("input", { type: "range", min: "0", max: "100", step: "1", value: "80" });
+    vol.style.flex = "1";
+    const volVal = h("span", { class: "ed-wave-time", style: "min-width:150px" }, "80%");
+    const applyVol = () => {
+      const v = (parseFloat(vol.value) || 0) / 100;
+      volVal.textContent = Math.round(v * 100) + "%";
+      if (au) au.volume = v;
+    };
+    vol.oninput = applyVol;
+    g1.append(h("div", { class: "ed-row wide" }, h("label", null, "音量"),
+      h("div", { class: "ed-pitch" }, vol, volVal)));
+    g1.append(h("div", { class: "ed-ghint" },
+      "音高 / 音量只作用于编辑器里的试听，不写进数据、也不影响游戏内播放。"
+      + "游戏默认音量在「升级数值」页的「音频默认音量」里配。"));
     right.append(g1);
 
     // ---------- 元数据 ----------
@@ -1306,6 +1439,7 @@ function tabAudio() {
       if (au) { stop(); playBtn.textContent = "▶ 播放"; wave.setProgress(0); return; }
       au = new Audio(src);
       applyPitch();   // 新建的 Audio 要重新套用当前音高
+      applyVol();     // 以及当前音量
       // 注意：这些回调里不能直接用外层 au —— stop() 会把它置 null，
       // 但已排队的事件仍可能触发（切文件/重复点时），必须先判空。
       const self = au;

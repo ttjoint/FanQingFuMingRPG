@@ -22,7 +22,10 @@ function createGameState() {
     player: null, npcs: [], vars: {}, inventory: {}, skills: (CFG.player.startSkills || []).slice(), skill: CFG.player.startSkill || (CFG.player.startSkills || [])[0],
     hotbar: new Array(9).fill(null), pack: [], packOpen: false,
     equip: { Wu: null, Jia: null, Shi1: null, Shi2: null }, cursor: null, shop: null, savePanel: false,
-    settings: { bgm: 0.6, sfx: 0.8 }, settingsPanel: false, bgm: null, bgmSrc: null,
+    // 默认音量来自配置（config.audio），玩家在设置面板改的值由 loadSettings 覆盖
+    settings: { bgm: (CFG.audio && CFG.audio.bgm != null) ? CFG.audio.bgm : 0.6,
+                sfx: (CFG.audio && CFG.audio.sfx != null) ? CFG.audio.sfx : 0.8 },
+    settingsPanel: false, bgm: null, bgmSrc: null,
     factions: [], missions: {}, notes: [], vips: {}, love: {},
     dialog: null, tip: null, tipT: 0, script: null, gameOver: false, deathT: 0,
     currentMap: null, map: null, cam: { x: 0, y: 0 }, time: 0,

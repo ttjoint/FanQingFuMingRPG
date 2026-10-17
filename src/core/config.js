@@ -22,6 +22,9 @@ export const DEFAULT_CONFIG = {
         ring: { target: "#e04040", interact: "#4080ff", move: "#ffe08a" } },
   move: { walkSpeed: 90, runSpeed: 150 },
   iso: { originX: 1568, halfW: 32, halfH: 16 },
+  // 音频默认音量（0~1）。玩家在游戏设置面板里改的值存 localStorage，会覆盖这里的默认。
+  // 之前这两个值是硬编码在 runtime/context.js 的 createGameState() 里，没法配。
+  audio: { bgm: 0.6, sfx: 0.8 },
 };
 
 const deep = o => JSON.parse(JSON.stringify(o));
