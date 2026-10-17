@@ -20,7 +20,7 @@ import {
 } from "../content/store.js";
 import { PACK_FORMAT, PACK_VERSION } from "../content/schema.js";
 import { newNpcTemplate } from "../content/npcFields.js";
-import { buildAssetIndexAsync, searchAssets, groupOf, fileName, assetIndex, audioIndex, musicFiles, soundFiles } from "./assets-index.js";
+import { buildAssetIndexAsync, searchAssets, groupOf, fileName, assetIndex, audioIndex, musicFiles, soundFiles, audioSrc } from "./assets-index.js";
 import { decorThumb, decorPreview } from "./atlas-preview.js";
 import { setImagesWriter } from "./asset-picker.js";
 import { pmgGrid } from "./pmg-view.js";
@@ -913,13 +913,16 @@ function tabConfig() {
   const c = ED.content.config;
   // 与其它分页统一：每个语义段是一个 ed-group（金色小标题 + 细边框），
   // 不再用大段 <h3> 平铺，视觉上与 NPC / 物品 / Buff 详情面板一致。
+  // 分组卡片放进一个外层网格容器：卡片横向并排（宽了自动换行、窄屏单列），
+  // 卡片内部字段纵向排 —— 与 NPC/物品/Buff 列表页同一套布局。
+  const wrap = h("div", { class: "ed-grid" });
   const sec = (title, key, fields, hint) => {
     const g = h("div", { class: "ed-group" });
     g.append(h("div", { class: "ed-grouptitle" }, title));
     if (hint) g.append(h("div", { class: "ed-ghint" }, hint));
-    const f = h("div", { class: "ed-grid" });
+    const f = h("div");
     g.append(f);
-    mainEl.append(g);
+    wrap.append(g);
     if (!c[key]) c[key] = {};
     renderForm(f, fields, c[key], mark);
   };
@@ -966,6 +969,7 @@ function tabConfig() {
   sec("背包", "inventory", [
     { k: "packItem", label: "背包道具名", type: "text" }, { k: "packSize", label: "背包格数", type: "number" },
   ]);
+  mainEl.append(wrap);
 }
 
 // ---------- 标题 / 结局 ----------
@@ -989,18 +993,22 @@ function tabGame() {
     type: "audio", filesFn: musicFiles,
   });
 
+  // 外层网格：卡片横向并排，卡片内字段纵向（与升级数值/列表页一致）。
+  const gwrap = h("div", { class: "ed-grid" });
+  mainEl.append(gwrap);
+
   const g1 = h("div", { class: "ed-group" });
   g1.append(h("div", { class: "ed-grouptitle" }, "音乐"));
-  const f1 = h("div", { class: "ed-grid" });
+  const f1 = h("div");
   g1.append(f1);
-  mainEl.append(g1);
+  gwrap.append(g1);
   renderForm(f1, [musicField("start"), musicField("end")], g.music, mark);
 
   const g2 = h("div", { class: "ed-group" });
   g2.append(h("div", { class: "ed-grouptitle" }, "结局画面"));
-  const f2 = h("div", { class: "ed-grid" });
+  const f2 = h("div");
   g2.append(f2);
-  mainEl.append(g2);
+  gwrap.append(g2);
   renderForm(f2, [{ k: "endpic", label: "结局背景图", type: "image", dir: "ui" }], g, mark);
 
   // 片头闪屏：左列表（缩略图 + 序号 + 时长）+ 右详情，与其它分页一致。
@@ -1183,7 +1191,8 @@ function tabAudio() {
     const g1 = h("div", { class: "ed-group" });
     g1.append(h("div", { class: "ed-grouptitle" }, "试听"));
     const playBtn = h("button", { class: "ed-btn" }, "▶ 播放");
-    const src = ED.sounds[selPath] || selPath;
+    // 资源根是 versions/<id>/，裸写 assets/... 会 404 → 统一走 audioSrc 解析
+    const src = ED.sounds[selPath] || audioSrc(selPath, selPath.includes("/sound/") ? "sound" : "music");
     playBtn.onclick = () => {
       if (au) { stop(); playBtn.textContent = "▶ 播放"; return; }
       au = new Audio(src);

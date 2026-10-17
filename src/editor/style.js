@@ -79,7 +79,8 @@ body.ed-resizing *{cursor:col-resize!important}
 .ed-row.wide>textarea{width:100%;box-sizing:border-box;min-height:76px}
 .ed-row.wide>input,.ed-row.wide>select{width:100%;box-sizing:border-box}
 /* 字段分组：一个语义段一个小标题 */
-.ed-group{margin:0 0 14px;padding:8px 10px 4px;border:1px solid #232830;border-radius:5px;background:#14171c}
+.ed-group{margin:0 0 14px;padding:8px 10px 4px;border:1px solid #232830;border-radius:5px;background:#14171c;
+  display:flex;flex-direction:column;min-width:0}
 .ed-grouptitle{color:#f0d060;font-size:12px;font-weight:600;letter-spacing:.4px;
   margin:0 0 6px;padding-bottom:4px;border-bottom:1px solid #232830;opacity:.92}
 .ed-ghint{color:#7f8792;font-size:11px;margin:-2px 0 6px}
@@ -223,10 +224,14 @@ textarea[data-grow]{max-height:420px;overflow:auto}
 
 /* ================= 其它 ================= */
 .ed-hint{color:#7f8792;font-size:11px;margin-top:6px;line-height:1.5}
-/* 字段纵向单列排列：早先用 auto-fill 多列网格，宽屏下字段横向散开、
-   阅读顺序跳来跳去。统一改成一行一个字段（label 在左、控件在右），
-   与 NPC/物品/Buff 详情面板完全一致。 */
-.ed-grid{display:grid;grid-template-columns:1fr;gap:6px}
+/* 布局分两层，与 NPC/物品/Buff 列表页保持一致：
+   ① .ed-grid 是**分组卡片**的容器 → 卡片本身横向排布（宽了就自动换行）；
+   ② .ed-group 卡片内部 → 字段纵向单行排列（label 在左、控件在右）。
+   这样「几个语义分组并排成几列、每列里字段竖着排」，不会横向散乱。 */
+.ed-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
+  gap:8px 14px;align-items:start}
+/* 卡片内部的字段容器也必须单列（本规则要放在 .ed-grid 之后，否则被覆盖） */
+.ed-group>.ed-grid{grid-template-columns:1fr;gap:6px}
 .ed-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#2b3a52;
   color:#fff;padding:9px 18px;border-radius:5px;border:1px solid #4a5a78;
   opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;z-index:110;

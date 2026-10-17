@@ -205,6 +205,22 @@ export function assetSrc(ref, dir) {
   return assetURL(s);
 }
 
+/**
+ * 音频引用 → 可播放的 URL。
+ * 资源根是 `versions/<id>/`，所以裸写 "assets/music/x.mp3" 会 404（必须带版本根）。
+ * 这里统一走 assetURL（它会把 "assets/..." 拼上当前 ASSET_ROOT）。
+ * @param {string} ref  "assets/music/x.mp3" 或纯文件名 "x.mp3"
+ * @param {string} [dir] 纯文件名时的目录，如 "music" / "sound"
+ */
+export function audioSrc(ref, dir) {
+  if (!ref) return "";
+  const s = String(ref);
+  if (/^(data:|blob:|https?:)/i.test(s)) return s;
+  if (s.startsWith("assets/")) return assetURL(s);
+  const d = dir || "music";
+  return assetURL("assets/" + d.replace(/\/$/, "") + "/" + s);
+}
+
 // 该资源是否存在于当前版本（"覆盖"里有）；用于在列表里标记"本版新增"。
 // 取路径末段文件名（列表与详情标题都要用）。
 export function fileName(p) {

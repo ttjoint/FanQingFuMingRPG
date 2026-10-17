@@ -16,7 +16,7 @@ import { createSelection } from "./selection.js";
 import { makeLineEditor, modeControl, decorState } from "./decor-line.js";
 import { decorSpriteKey } from "../content/schema.js";
 import { attachLegacyViews } from "../content/mapDoc.js";
-import { musicFiles } from "./assets-index.js";
+import { musicFiles, audioSrc } from "./assets-index.js";
 
 const LAYERS = [
   ["ground", "地面"],
@@ -152,7 +152,20 @@ export function mountMapEditor(main, side, opts) {
     sel.value = fixed;
     if (fixed !== cur) on(fixed);
     sel.onchange = () => on(sel.value);
-    return sel;
+    // 试听：与其它分页一致（地图音乐之前只能选、不能听）
+    const playBtn = h("button", { class: "ed-btn ghost", title: "试听" }, "▶");
+    let au = null;
+    playBtn.onclick = () => {
+      if (au) { au.pause(); au = null; playBtn.textContent = "▶"; return; }
+      const v = sel.value; if (!v) return;
+      const full = files.find(f => base(f) === v) || "";
+      au = new Audio(audioSrc(full || v, "music"));
+      au.volume = 0.6;
+      au.onended = () => { au = null; playBtn.textContent = "▶"; };
+      au.onerror = () => { au = null; playBtn.textContent = "▶"; };
+      au.play().then(() => { playBtn.textContent = "■"; }).catch(() => { au = null; });
+    };
+    return h("div", { style: "display:flex;gap:6px;flex:1;min-width:0;align-items:center" }, sel, playBtn);
   };
   const btn = (label, cls, on) => h("button", { class: "ed-btn" + (cls ? " " + cls : ""), onclick: on }, label);
   const imgSrc = p => images[p] || assetURL(p);

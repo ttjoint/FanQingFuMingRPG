@@ -1,7 +1,7 @@
 // 表单向导：由 schema 生成可编辑控件，供 NPC / 物品 / 技能 / 数值 / 结局等复用。
 import { h, clear } from "./dom.js";
 import { openAssetPicker, openModelPicker } from "./asset-picker.js";
-import { assetSrc } from "./assets-index.js";
+import { assetSrc, audioSrc } from "./assets-index.js";
 
 let dlSeq = 0;
 
@@ -313,8 +313,12 @@ export function renderForm(host, schema, obj, onChange) {
       playBtn.onclick = () => {
         if (au) { au.pause(); au = null; playBtn.textContent = "▶"; return; }
         const v = ctl.value; if (!v) return;
-        const full = files.find(x => base(x) === v) || v;
-        au = new Audio(String(full).startsWith("assets/") ? full : "assets/music/" + v);
+        // 必须走 audioSrc：资源根是 versions/<id>/，裸写 assets/... 会 404。
+        // 目录由候选里的完整路径决定（技能音效在 assets/sound/，音乐在 assets/music/），
+        // 找不到候选时按扩展名猜：wav 多为音效。
+        const full = files.find(x => base(x) === v) || "";
+        const dir = full.includes("/sound/") ? "sound" : (full.includes("/music/") ? "music" : (/\.wav$/i.test(v) ? "sound" : "music"));
+        au = new Audio(audioSrc(full || v, dir));
         au.onended = () => { au = null; playBtn.textContent = "▶"; };
         au.onerror = () => { au = null; playBtn.textContent = "▶"; };
         au.play().then(() => { playBtn.textContent = "■"; }).catch(() => { au = null; playBtn.textContent = "▶"; });
