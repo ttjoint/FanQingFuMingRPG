@@ -183,6 +183,39 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     return d1 > d0 + 20;   // 被拉开距离
   })).toBe(true);
 
+  // AI 回归：玩家一直贴着追时，低血怪不能“无限逃跑”。
+  // 旧实现只看 d >= range 就停，而玩家贴身时 d 永远很小，于是 hpBelow 规则
+  // 让它一辈子逃跑（表现为怪永不停下 + 方向每帧随机导致动画抽抽）。
+  expect(await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const u = await import("/src/core/utils.js");
+    const { makeNPC, npcAI } = await import("/src/world/npc.js");
+    const G = window.__GAME__.G, A = window.__GAME__.A, rt = getRuntime();
+    const tmpl = A.npcsData.find(n => n.attack > 0);
+    G.npcs = [];
+    const c = u.cellCenter(11, 11);
+    G.player.x = c.x; G.player.y = c.y; G.player.path = null; G.player.target = null;
+    const foe = makeNPC(tmpl, 11, 12);
+    foe.faction = "bandit"; foe.ai = "bandit"; foe.hpMax = 100; foe.hp = 10;
+    foe.x = G.player.x + 40; foe.y = G.player.y; foe.path = null;
+    G.npcs.push(foe);
+    const t0 = G.time || 0;
+    let freedFrames = 0;   // 统计“没有目标”的帧数（= 脱离了战斗）
+    for (let i = 0; i < 1200; i++) {
+      G.time = t0 + i / 60;               // 世界时间必须推进（fleeTimeout 依赖它）
+      const dd = Math.hypot(foe.x - G.player.x, foe.y - G.player.y);
+      // 玩家贴身追（保持约 28px，不会重叠进怪物身体）
+      if (dd > 28) {
+        const ang = Math.atan2(foe.y - G.player.y, foe.x - G.player.x);
+        const step = Math.min(2.2, dd - 28);
+        G.player.x += Math.cos(ang) * step; G.player.y += Math.sin(ang) * step;
+      }
+      npcAI(rt, foe, 1 / 60);
+      if (!foe.ai$.target) freedFrames++;
+    }
+    return freedFrames > 60;   // 玩家一直追，怪也必须最终放弃逃跑
+  })).toBe(true);
+
   // AI 新能力 2：游荡限定在出生点半径内（不再全图乱跑）。
   expect(await page.evaluate(async () => {
     const { getRuntime } = await import("/src/runtime/context.js");

@@ -89,8 +89,12 @@ export function updateMove(e, dt) {
     }
     else {
       e.dir = dirFromVec(wp.x - e.x, wp.y - e.y);
-      const moved = moveEntity(e, wp.x, wp.y, e.speed || 90, true);
-      if (moved) { setAnim(e, (e.speed || 90) > 100 ? "run" : "walk"); e.stuckT = 0; }
+      // moveSpeed：本次移动的临时步速（由 goTo 按动作传入，如 chase=基础、flee=runSpeed）。
+      // 它同时决定位移与 run/walk 动画，两者不一致时会出现“人在跑却放走路动画”，
+      // 或 run/walk 逐帧互切，看上去就是动画一抽一抽。
+      const sp = e.moveSpeed || e.speed || 90;
+      const moved = moveEntity(e, wp.x, wp.y, sp, true);
+      if (moved) { setAnim(e, sp > 100 ? "run" : "walk"); e.stuckT = 0; }
       else {
         e.stuckT = (e.stuckT || 0) + dt;
         if (e.stuckT > 0.12) setAnim(e, "stand");   // 顶住时不再原地播放跑动动画

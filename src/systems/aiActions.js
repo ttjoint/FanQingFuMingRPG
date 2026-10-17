@@ -59,8 +59,14 @@ function goTo(ctx, n, tx, ty, speed, stopRange, dt) {
     n.chaseCell = tgt;
   }
   const d = Math.hypot(n.x - tx, n.y - ty);
-  if (d <= (stopRange || 0)) { n.path = null; return true; }
+  if (d <= (stopRange || 0)) { n.path = null; n.moveSpeed = 0; return true; }
   const sp = speed === "run" ? (n.runSpeed || NPC_DEFAULT_RUN_SPEED) : (n.speed || NPC_DEFAULT_SPEED);
+  // updateMove 用 e.moveSpeed（回退 e.speed）算位移与 run/walk 动画。
+  // 不同动作的步速不同（chase 用 base、flee 用 runSpeed），而 e.speed 是单位的
+  // **固有属性**，不能拿来当本次步速改 —— 否则跑一次就永久变快。
+  // 所以用一次性字段 moveSpeed 传下去，让“实际步速”与“动画选择”一致：
+  // 不然会出现人在跑却放走路动画、或 run/walk 逐帧互切（看上去一抽一抽）。
+  n.moveSpeed = sp;
   if (n.path && n.path.length) { n.repathT = 0.35; updateMove(n, dt); }
   else moveEntity(n, tx, ty, sp, true);
   return false;
@@ -216,26 +222,82 @@ registerAction("attack", (rt, bb, params, dt) => {
   return {};
 });
 
-// 逃跑：远离目标方向移动；到达 range 之外则停止（交由规则重新决策）。
+// 逃跑：远离目标方向移动；逃到 range 之外并拉开距离后，放弃目标结束战斗。
+//
+// 旧实现有三个问题（表现为“怪物一直逃下去 + 移动动画抽插”）：
+//   1) 每帧用 Math.random() 重选逃跑方向（±0.4 弧度）→ dir 在八个方向间来回跳，
+//      看上去就是鬼抽。这里改成：一旦选定逃跑目的地就坚持跑完（state.fleeDest），
+//      只有到达 / 被阻断才重选。
+//   2) 没有“逃够就脱离战斗”的概念：只要玩家追着跑，d 永远 < range，
+//      配合 hpBelow 规则它就会无限跑下去。这里改用“逃跑锚点”度量：离
+//      开始逃跑时的位置超过 fleeGiveUp（默认 2×range）就清目标 + 回家。
+//   3) 直接 moveEntity 逐帧直线突进，没有绕障碍（会在墙角原地徘徊）。
+//      这里改用 goTo 走寻路（与 chase 一致）。
 registerAction("flee", (rt, bb, params, dt) => {
   const n = bb.self, t = bb.target;
   const range = params.range === undefined ? 400 : params.range;
-  const d = t ? Math.hypot(t.x - n.x, t.y - n.y) : Infinity;
-  const speed = params.speed === undefined ? (n.runSpeed || NPC_DEFAULT_RUN_SPEED) : ((n.runSpeed || NPC_DEFAULT_RUN_SPEED) * params.speed);
-  if (!t || d >= range) { n.path = null; setAnim(n, "stand"); return {}; }
-  // 朝“目标的反方向”找一个可走点
-  const ang = Math.atan2(n.y - t.y, n.x - t.x);
-  let dest = null;
-  for (let k = 0; k < 6; k++) {
-    const a = ang + (Math.random() - 0.5) * 0.8;
-    const px = n.x + Math.cos(a) * 80, py = n.y + Math.sin(a) * 80;
-    const c = worldToCell(px, py);
-    if (walkable(c.row, c.col) && !overlapsUnit(n, px, py)) { dest = { x: px, y: py }; break; }
+  const speedMul = params.speed === undefined ? 1 : params.speed;
+  const st = bb.state || (bb.state = {});
+
+  // 没有目标：结束逃跑，清掉残留状态。
+  if (!t) { st.fleeDest = null; st.fleeFrom = null; n.path = null; setAnim(n, "stand"); return {}; }
+
+  const d = Math.hypot(t.x - n.x, t.y - n.y);
+  // 开始逃跑：记下起点与时间，用于“跑够了就脱离”判定。
+  if (!st.fleeFrom) {
+    st.fleeFrom = { x: n.x, y: n.y };
+    st.fleeT0 = rt.ctx.state.time || 0;
   }
-  n.dir = dirFromVec(n.x - t.x, n.y - t.y);
-  if (dest) moveEntity(n, dest.x, dest.y, speed, true);
-  else moveEntity(n, n.x + Math.cos(ang) * 40, n.y + Math.sin(ang) * 40, speed, true);
-  setAnim(n, "run");
+
+  // 脱离战斗：逃够远 / 逃够久 / 已无路可逃 → 放弃目标回家。
+  //
+  // **不能把“目标在 range 之外”当前提**：玩家一直贴着追时 d 会很小（甚至叠在一起），
+  // 那个条件永远不成立，hpBelow 规则就会让它无限逃下去（这就是“怪一直逃跑”的根因）。
+  // 所以这里只按“逃跑本身的累计效果”判定。
+  const giveUp = params.fleeGiveUp != null ? params.fleeGiveUp : range * 2;
+  const timeout = params.fleeTimeout != null ? params.fleeTimeout : 8;
+  const fromHome = Math.hypot(n.x - st.fleeFrom.x, n.y - st.fleeFrom.y);
+  const ranFor = (rt.ctx.state.time || 0) - (st.fleeT0 || 0);
+  const escaped = fromHome > giveUp || ranFor > timeout;
+  if (escaped) {
+    bb.target = null;
+    st.fleeFrom = null; st.fleeDest = null; st.fleeT0 = 0; st.aggroT = 0;
+    n.path = null;
+    if (!(st.returning > 0)) { st.returning = RETURN_HOLD; st.returnSince = rt.ctx.state.time || 0; }
+    n.lastAttacker = null; n.aggroAt = null;
+    // 血量太低的怪回家后应该回血（否则永远带着 10% 血量反复触发逃跑）。
+    // 这里只恢复到“不再触发 hpBelow”的程度，不白送满血。
+    const hpRule = (bb.plan && bb.plan.rules || []).find(r => r.when === "hpBelow");
+    if (hpRule && n.hpMax) {
+      const floor = Math.ceil(n.hpMax * (hpRule.value || hpRule.hpBelow || 0.2)) + 1;
+      if (n.hp < floor) n.hp = floor;
+    }
+    return returnTo(rt.ctx, n, homeOf(bb), dt);
+  }
+
+  // 已在 range 外且没有在跑：站住观察（但保留目标，防止"停一下就被追上来"）。
+  if (d >= range && !st.fleeDest) { setAnim(n, "stand"); return {}; }
+
+  // 逃跑目的地：保持到跑到 / 被阻挡为止。
+  let dest = st.fleeDest;
+  if (!dest) {
+    const ang = Math.atan2(n.y - t.y, n.x - t.x);
+    for (let k = 0; k < 10; k++) {
+      // 偏移量随尝试次数收敛：先试正后方，实在没路才逐渐偏。
+      const a = ang + (k === 0 ? 0 : (k % 2 ? 1 : -1) * (Math.PI / 8) * Math.ceil(k / 2));
+      const dist = 120;
+      const px = n.x + Math.cos(a) * dist, py = n.y + Math.sin(a) * dist;
+      const c = worldToCell(px, py);
+      if (walkable(c.row, c.col) && !overlapsUnit(n, px, py)) { dest = { x: px, y: py }; break; }
+    }
+    if (!dest) { setAnim(n, "stand"); return {}; }   // 四周无路：原地站着（比随机抽更好）
+    st.fleeDest = dest;
+  }
+
+  // 用寻路走到逃跑点（绕墙），到时清掉定时重选。
+  const arrive = goTo(rt.ctx, n, dest.x, dest.y, "run", 10 / (speedMul || 1), dt);
+  if (arrive) { st.fleeDest = null; setAnim(n, "stand"); return {}; }
+  if (!n.path || !n.path.length) st.fleeDest = null;   // 寻路失败：下帧重新选点
   return {};
 });
 
