@@ -206,6 +206,6 @@ export function makeBlackboard(unit) {
     target: null,
     home: { x: unit.x, y: unit.y },
     hp: 0, hpMax: 1, mp: 0, mpMax: 1,
-    state: { aggroT: 0, lostT: 0, cd: {}, wanderT: 0, wanderDest: null, returning: 0, returnSince: null },   // 可序列化的 AI 状态
+    state: { aggroT: 0, lostT: 0, cd: {}, wanderT: 0, wanderDest: null, returning: 0, returnSince: null, assistLeash: 0 },   // 可序列化的 AI 状态
   };
 }

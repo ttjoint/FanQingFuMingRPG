@@ -140,19 +140,22 @@ registerAction("chase", (rt, bb, params, dt) => {
   if (maxTime > 0 && (bb.state.aggroT || 0) > maxTime) {
     // 追击超时：放弃目标，仇恨清零，然后**走回出生点**
     // （只清目标不回家会让怪永远停在地图另一头）。
-    bb.target = null; bb.state.aggroT = 0;
+    bb.target = null; bb.state.aggroT = 0; bb.state.assistLeash = 0;
     if (!(bb.state.returning > 0)) { bb.state.returning = RETURN_HOLD; bb.state.returnSince = rt.ctx.state.time || 0; }
     if (bb.self) { bb.self.lastAttacker = null; bb.self.aggroAt = null; }
     const home = homeOf(bb);
     return returnTo(rt.ctx, n, home, dt);
   }
   // 追得太远（离开出生点超过 leashFrom）也放弃并返回。
+  // 协防期间放宽：盟友可能倒在离自己很远的地方，且助攻半径本身就 >= leashFrom，
+  // 否则“assist 选中 -> 下帧就走回家”会来回抽插。
   const tg = (bb.plan && bb.plan.targeting) || {};
-  const leashFrom = tg.leashFrom != null ? tg.leashFrom : 0;
+  let leashFrom = tg.leashFrom != null ? tg.leashFrom : 0;
+  if (bb.state && bb.state.assistLeash > leashFrom) leashFrom = bb.state.assistLeash;
   if (leashFrom > 0) {
     const home = homeOf(bb);
     if (Math.hypot(n.x - home.x, n.y - home.y) > leashFrom) {
-      bb.target = null; bb.state.aggroT = 0;
+      bb.target = null; bb.state.aggroT = 0; bb.state.assistLeash = 0;
       if (!(bb.state.returning > 0)) { bb.state.returning = RETURN_HOLD; bb.state.returnSince = rt.ctx.state.time || 0; }
       if (bb.self) { bb.self.lastAttacker = null; bb.self.aggroAt = null; }
       return returnTo(rt.ctx, n, home, dt);
@@ -237,11 +240,22 @@ registerAction("flee", (rt, bb, params, dt) => {
 });
 
 // 协助：附近同阵营单位正在被打 -> 把目标切到攻击者并追击。
+//
+// 注意 leash 放宽：协防半径（默认 300）通常 >= targeting.leash（默认 300），
+// 而盟友可能倒在离自己很远的地方。若沿用原 leash，会出现：
+//   本帧 assist 选中凶手 -> 下一帧 lost() 发现“超 leash” -> 目标丢失 -> 永远无法协防。
+// 所以协防时把 leash 放宽到至少 2×半径（也不小于原来的 leash）。
 registerAction("assist", (rt, bb, params, dt) => {
   const n = bb.self;
   const radius = params.radius === undefined ? 300 : params.radius;
   const a = findAllyInCombat(rt, bb, radius);
-  if (a && a.attacker) { bb.target = a.attacker; bb.state.aggroT = 0; }
+  if (a && a.attacker) {
+    bb.target = a.attacker;
+    bb.state.aggroT = 0;
+    // 临时放宽 leash：直到本次协防结束（目标被丢弃时由 lost() 自行清理）。
+    const reach = Math.hypot(n.x - a.attacker.x, n.y - a.attacker.y);
+    bb.state.assistLeash = Math.max(radius * 2, reach + 120);
+  }
   // 立即按追击/攻击处理本帧
   const t = bb.target;
   if (!t) { setAnim(n, "stand"); return {}; }
@@ -296,7 +310,9 @@ export function createAiRuntime(ctx) {
       const n = bb.self;
       if (!t || t.dead) return true;
       const tg = (bb.plan && bb.plan.targeting) || {};
-      const leash = tg.leash != null ? tg.leash : 480;
+      let leash = tg.leash != null ? tg.leash : 480;
+      // 协防放宽的 leash（由 assist 写入，见该动作的注释）
+      if (bb.state && bb.state.assistLeash > leash) leash = bb.state.assistLeash;
       if (leash > 0 && Math.hypot(n.x - t.x, n.y - t.y) > leash) return true;
       // 离开锚点（出生/巡逻点）太远 → 放弃追击，返回原地
       const leashFrom = tg.leashFrom != null ? tg.leashFrom : leash;
@@ -324,8 +340,14 @@ export function createAiRuntime(ctx) {
       // 仇恨记忆时长：默认取 giveUpT 的 2 倍，至少 6 秒。
       const memT = Math.max(6, (tg.giveUpT != null ? tg.giveUpT : 8) * 2);
       const now = ctx.state.time || 0;
-      const since = n.aggroAt != null ? now - n.aggroAt : memT + 1;
-      if (since > memT) { n.lastAttacker = null; n.aggroAt = null; }
+      // 没有 aggroAt 时**不能当作已过期**：lastAttacker 可能来自非 applyDamage 的途径
+      // （脚本直接赋值、存档还原、测试构造），这类单位应当继续记仇（协防/报复都要用它）。
+      // 旧写法 `since = memT + 1` 会把它当场清掉，导致：
+      //   - 协防（allyBeingAttacked）永远不触发；
+      //   - retaliate 分支永远拿不到 lastAttacker。
+      // 正确做法：把"首次观察到它"当成仇恨起点补上时间戳，之后正常衰减。
+      if (n.aggroAt == null) { n.aggroAt = now; return; }
+      if (now - n.aggroAt > memT) { n.lastAttacker = null; n.aggroAt = null; }
     },
     pickTarget(bb) {
       const n = bb.self;
@@ -367,8 +389,7 @@ function makeAiContext(ctx, table) {
     state: ctx.state, assets: ctx.assets, config: ctx.config, map: ctx.map,
     dist: (a, b) => Math.hypot(a.x - b.x, a.y - b.y),
     resolveRange: (v, bb) => resolveRange(v, bb, { cfg: ctx.config.combat || {} }),
-    allyBeingAttacked: (bb, radius) => !!findAllyInCombat({ ctx, _table: table }, bb, radius),
-    nearbyCount: (bb, side, radius) => countNearby(ctx, table, bb.self, side, radius),
+    allyBeingAttacked: (bb, radius) => !!findAllyInCombat({ ctx, _table: table }, bb, radius),    nearbyCount: (bb, side, radius) => countNearby(ctx, table, bb.self, side, radius),
   };
 }
 
@@ -393,9 +414,16 @@ function collectUnits(ctx, exclude) {
 }
 
 // 找一个“附近正在被攻击的同阵营单位”，返回 { ally, attacker }。
-// 接受 { ctx } 形式的适配器对象（与 rt 兼容）。
+// 调用方式有两种：
+//   - createAiRuntime 内部：findAllyInCombat(rt, ...)，rt.ctx 是真实 ctx；
+//   - makeAiContext 的条件原语：{ ctx } 适配器。
+// 之前只看 rt.ctx，而条件原语传的是 { ctx, _table }（没有嵌套的 ctx 字段），
+// 于是 rt.ctx 为 undefined → ctx.assets 抛错 → 协防永远不触发。
 export function findAllyInCombat(rt, bb, radius) {
-  const ctx = rt.ctx, n = bb.self, table = (ctx.assets && ctx.assets.factionTable) || null;
+  const ctx = (rt && rt.ctx) || rt;                      // 兼容适配器
+  if (!ctx || !ctx.state) return null;
+  const n = bb.self;
+  const table = (rt && rt._table) || (ctx.assets && ctx.assets.factionTable) || null;
   if (!n) return null;
   const units = collectUnits(ctx, n);
   for (const u of units) {

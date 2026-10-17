@@ -98,13 +98,19 @@ export function mountMapEditor(main, side, opts) {
     selection.setMany(list); syncSel();
   };
   let histTimer = 0, lastSnap = null, pendingLabel = null;
+  // 基线快照：载入地图时就把“本次编辑前的状态”记下来。
+  // 旧实现只在首次 scheduleHistory 时才取值，导致**第一次编辑永远入不了栈**
+  // （lastSnap 为 null → 直接跳过），于是“刷一下地面”后按撤销毫无反应。
+  function resetHistoryBaseline() { lastSnap = snapshot(); pendingLabel = null; clearTimeout(histTimer); }
   const snapshot = () => (raw ? JSON.parse(JSON.stringify(raw)) : null);
   function scheduleHistory() {
     if (!raw) return;
     clearTimeout(histTimer);
     histTimer = setTimeout(() => {
       const after = snapshot();
-      if (lastSnap && JSON.stringify(after) !== JSON.stringify(lastSnap)) {
+      if (!after) return;
+      if (lastSnap == null) { lastSnap = after; return; }   // 实在没有基线：用当前状态当基线
+      if (JSON.stringify(after) !== JSON.stringify(lastSnap)) {
         history.push({ map: cur, before: lastSnap, after, label: pendingLabel || "编辑" });
         pendingLabel = null;
         lastSnap = after;
@@ -112,8 +118,24 @@ export function mountMapEditor(main, side, opts) {
       }
     }, 350);
   }
-  function undo() { clearTimeout(histTimer); const e = history.undo(); if (!e) return; maps[e.map] = attachLegacyViews(e.before); loadMap(e.map, true); }
-  function redo() { clearTimeout(histTimer); const e = history.redo(); if (!e) return; maps[e.map] = attachLegacyViews(e.after); loadMap(e.map, true); }
+  function undo() {
+    clearTimeout(histTimer);
+    const e = history.undo(); if (!e) return;
+    maps[e.map] = attachLegacyViews(e.before);
+    loadMap(e.map, true);
+    lastSnap = snapshot();
+    pendingLabel = null;
+    buildToolbar();          // 同步撤销/重做按钮的可用状态（旧实现遗漏）
+  }
+  function redo() {
+    clearTimeout(histTimer);
+    const e = history.redo(); if (!e) return;
+    maps[e.map] = attachLegacyViews(e.after);
+    loadMap(e.map, true);
+    lastSnap = snapshot();
+    pendingLabel = null;
+    buildToolbar();
+  }
 
   // ---------- 布局 ----------
   main.classList.add("mapmode");

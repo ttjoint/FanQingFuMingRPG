@@ -429,13 +429,19 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     }
     const gaps = hits.slice(1).map((h, i) => h - hits[i]);
     const dur = motion.actionDuration(G.player, "fight", chars);
-    return { gaps, anim, expectAnim: dur / rt.config.combat.attackCD, interval: rt.config.combat.attackCD };
+    // 真实攻击间隔 = 基础 attackCD × 攻速系数（attackSpeed 是百分比，越高越快）。
+    // 测试里必须同样扣掉 player.attackSpeed，否则会与实现差一个 100/(100+as) 的系数。
+    const as = Math.max(0, G.stats.attackSpeed || 0);
+    const interval = Math.max(0.25, rt.config.combat.attackCD * (100 / (100 + as)));
+    return { gaps, anim, expectAnim: dur / interval, interval };
   });
   expect(Math.max(...atk.gaps) - Math.min(...atk.gaps)).toBeLessThanOrEqual(1);      // 间隔稳定
   expect(Math.abs(atk.gaps[0] - Math.round(atk.interval * 60))).toBeLessThanOrEqual(3);
   expect(Math.abs(atk.anim - atk.expectAnim)).toBeLessThan(0.01);                     // 动画按间隔加减速
 
-  // 阵亡时先把当前挥砍打完再倒地
+  // 阵亡时立即打断挥砍（不播“尸体还在挥刀”）。
+  // 历史上有过“先把当前挥砍打完再倒地”的设计（pendingDie），但已改为
+  // 死亡立即清理攻击状态（见 killNPC），否则会出现尸体出伤害 / 卡在战斗帧。
   const die = await page.evaluate(async () => {
     const G = window.__GAME__.G, A = window.__GAME__.A;
     const { getRuntime } = await import("/src/runtime/context.js");
@@ -448,12 +454,12 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     G.npcs.push(n);
     n.atkT = 0.5; n.swingTotal = 1.0; n.swingT = 0.2; n.hitPending = true; n.action = "fight"; n.frame = 3;
     c.killNPC(rt, n);
-    const afterKill = { action: n.action, pending: !!n.pendingDie, hitPending: n.hitPending };
+    const afterKill = { action: n.action, pending: !!n.pendingDie, hitPending: n.hitPending, atkT: n.atkT };
     for (let i = 0; i < 40; i++) gp.npcSystem(rt, 1 / 60);
     return { afterKill, final: n.action };
   });
-  expect(die.afterKill).toMatchObject({ action: "fight", pending: true, hitPending: false });
-  expect(die.final).toBe("die");
+  expect(die.afterKill).toMatchObject({ action: "die", pending: false, hitPending: false, atkT: 0 });
+  expect(die.final).toBe("die");   // 倒地动画播完后仍保持 die，不会回战斗帧
 
   // HUD 右下角功能按钮：任务 / 菜单
   {
@@ -698,7 +704,11 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     await page.waitForTimeout(250);
     await page.locator("#editorRoot table.ed-table tbody tr").first().click();
     await page.waitForTimeout(200);
-    const labels = await page.evaluate(() => [...document.querySelectorAll("#editorRoot .ed-grid label")].map(x => x.textContent));
+    // 分组标题（如“弹道”）渲染为 .ed-grouptitle，不是 <label>，
+    // 所以这里把 label 与分组标题一并收集，才能验证字段/分组是否齐全。
+    const labels = await page.evaluate(() => [
+      ...document.querySelectorAll("#editorRoot .ed-grid label, #editorRoot .ed-grid .ed-grouptitle"),
+    ].map(x => x.textContent));
     expect(labels.some(l => /攻击方式/.test(l))).toBe(true);   // mode 下拉
     expect(labels.some(l => /弹道/.test(l))).toBe(true);       // projectile 字段
     expect(labels.some(l => /命中时施加 Buff/.test(l))).toBe(true);   // onHit buff 字段
@@ -712,7 +722,9 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     expect(rows).toBeGreaterThan(0);
     await page.locator("#editorRoot table.ed-table tbody tr").first().click();
     await page.waitForTimeout(200);
-    const blabels = await page.evaluate(() => [...document.querySelectorAll("#editorRoot .ed-grid label")].map(x => x.textContent));
+    const blabels = await page.evaluate(() => [
+      ...document.querySelectorAll("#editorRoot .ed-grid label, #editorRoot .ed-grid .ed-grouptitle"),
+    ].map(x => x.textContent));
     expect(blabels.some(l => /持续/.test(l))).toBe(true);
     expect(blabels.some(l => /最大层数/.test(l))).toBe(true);
     await page.locator('.ed-nav button:has-text("地图")').click(); await page.waitForTimeout(200);
@@ -735,13 +747,24 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     return !!(map && Array.isArray(map.ground) && Array.isArray(map.collision) && Array.isArray(map.decorations) && Array.isArray(map.units) && !("cells" in map));
   }, curMap)).toBe(true);   // 补丁即图层化 MapDoc
 
-  // 撤销 / 重做
+  // 撤销 / 重做：验证“内容确实回滚”，而不是“补丁条目消失”。
+  // 前面已经保存过这张地图的改动，所以 patch.maps[curMap] 会一直存在（补丁是差异快照，
+  // 不代表“这次刚改的”）。真正要验证的是撤销前后 MapDoc 的内容不同，且重做能回到原样。
+  const sig = m => page.evaluate(mm => {
+    const map = (window.__PACK__ || {}).patch && window.__PACK__.patch.maps[mm];
+    return map ? JSON.stringify(map) : null;
+  }, m);
+  const sigPainted = await sig(curMap);
+  expect(sigPainted).not.toBeNull();
+
   await page.keyboard.press("Control+z"); await page.waitForTimeout(400); await savePack(page);
   pack = await readPack(page);
-  expect(!!(pack.patch && pack.patch.maps && pack.patch.maps[curMap])).toBe(false);
+  const sigUndo = await sig(curMap);
+  expect(sigUndo).not.toBe(sigPainted);        // 撤销确实改动了内容
+
   await page.keyboard.press("Control+y"); await page.waitForTimeout(400); await savePack(page);
   pack = await readPack(page);
-  expect(!!(pack.patch && pack.patch.maps && pack.patch.maps[curMap])).toBe(true);
+  expect(await sig(curMap)).toBe(sigPainted);   // 重做完整回到刷过的状态
 
   // NPC 内容补丁
   await page.locator('.ed-nav button:has-text("NPC")').click(); await page.waitForTimeout(250);
@@ -757,7 +780,13 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     await page.waitForTimeout(150);
     expect(await selIdx()).toBe(1);
     expect(await selIdx()).not.toBe(first);
-    const loaded = await page.evaluate(() => [...document.querySelectorAll("#editorRoot .ed-imgwrap img")].filter(im => im.complete && im.naturalWidth > 0).length);
+    // 图片类字段（type:image/frames）的预览容器是 .ed-imgthumbs（.ed-imgwrap 是另一类
+    // 内联预览，NPC/物品等表单不用它）。行走图/贴图异步加载，这里等真正加载完成。
+    await page.waitForFunction(() => {
+      const ims = [...document.querySelectorAll("#editorRoot .ed-imgthumbs img")];
+      return ims.length > 0 && ims.some(im => im.complete && im.naturalWidth > 0);
+    }, null, { timeout: 8000 }).catch(() => {});
+    const loaded = await page.evaluate(() => [...document.querySelectorAll("#editorRoot .ed-imgthumbs img")].filter(im => im.complete && im.naturalWidth > 0).length);
     expect(loaded).toBeGreaterThan(0);
   }
 
@@ -805,9 +834,10 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   await page.locator('.ed-nav button:has-text("装饰物")').click(); await page.waitForTimeout(250);
   expect(await page.locator("#editorRoot table.ed-table tbody tr").count()).toBeGreaterThan(10);
   await page.locator("#editorRoot table.ed-table tbody tr").nth(2).click(); await page.waitForTimeout(150);
-  await page.selectOption("#editorRoot .ed-side select", { label: "手画地基线" }); await page.waitForTimeout(200);
-  expect(await page.locator("#editorRoot .ed-side canvas").count()).toBeGreaterThan(0);   // 出现地基线编辑画布
-  await page.selectOption("#editorRoot .ed-side select", { label: "整体单一深度（树木等）" }); await page.waitForTimeout(150);
+  // 装饰物侧栏是 .ed-split-form（不是 .ed-side：后者是地图编辑器里另一套容器）
+  await page.selectOption("#editorRoot .ed-split-form select", { label: "手画地基线" }); await page.waitForTimeout(250);
+  expect(await page.locator("#editorRoot .ed-split-form canvas").count()).toBeGreaterThan(0);   // 出现地基线编辑画布
+  await page.selectOption("#editorRoot .ed-split-form select", { label: "整体单一深度（树木等）" }); await page.waitForTimeout(200);
   await savePack(page); pack = await readPack(page);
   { const dt = pack.patch && pack.patch.content && pack.patch.content.decorTemplates;
     expect(dt && Object.values(dt).some(t => t.single)).toBe(true);   // 模板（跨地图共用）已持久化到内容包
