@@ -38,13 +38,21 @@ export function loadIndex() {
 }
 function saveIndex(idx) { try { localStorage.setItem(INDEX_KEY, JSON.stringify(idx)); } catch (e) { } }
 
+// 静态清单缓存（versions/index.json）。versionName 读它，所以要声明在使用点之前。
+let _staticVersions = null;
+
 export function listVersions() { return loadIndex().packs; }
 export function activeId() { return loadIndex().active || DEFAULT_VERSION; }
 export function setActive(id) { const idx = loadIndex(); idx.active = id || DEFAULT_VERSION; saveIndex(idx); }
+// 版本显示名。三级回退：磁盘后端列表 → 静态清单 → 浏览器版本。
+// 静态清单是异步加载的，这里读同步缓存；titleBar 会在启动时预热它
+// （见 ensureVersionNames），否则静态部署下名字永远回退成「默认版本」。
 export function versionName(id) {
   if (!id || id === DEFAULT_VERSION) return "默认版本";
   const d = _diskVersions.find(x => x.id === id);
   if (d) return d.name;
+  const st = _staticVersions && _staticVersions.find(x => x.id === id);
+  if (st) return st.name;
   const p = loadIndex().packs.find(x => x.id === id);
   return p ? p.name : "默认版本";
 }
@@ -66,7 +74,9 @@ export function isDiskReadonly(id) { const d = _diskVersions.find(x => x.id === 
 // 静态版本清单：versions/index.json（由 tools/gen-versions-index.mjs 生成）。
 // 静态服务器（http.server / nginx / Pages）列不出目录，没有它前端就发现不了
 // 磁盘上的版本——这正是「AI 素材试验场」在 8082 上看不到的原因。
-let _staticVersions = null;
+// 预热静态清单（启动时调用一次）。静态部署下 versionName 否则只能回退成「默认版本」。
+export async function ensureVersionNames() { await listStaticVersions(); }
+
 async function listStaticVersions() {
   if (_staticVersions) return _staticVersions;
   try {

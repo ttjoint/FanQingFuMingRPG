@@ -1,9 +1,10 @@
 // 各类面板：屏幕提示、任务/记事/技能面板、包裹、存档面板、设置面板。
 import { G } from "../core/state.js";
-import { VW, ctx } from "../core/constants.js";
+import { VW, VH, ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { wrapText } from "./text.js";
 import { drawItemSlot } from "./hud.js";
+import { SETTINGS_BOX, SETTINGS_BAR, SETTINGS_BTN } from "../core/layout.js";
 import { PACK_BOX } from "../core/layout.js";
 import { SAVE_SLOTS, saveSlotInfo } from "../systems/save.js";
 
@@ -94,12 +95,17 @@ export function drawSavePanel() {
   ctx.fillStyle = "#888"; ctx.font = "11px sans-serif"; ctx.fillText("Esc / F5 关闭", x + w - 110, y + h - 12);
 }
 
+// 系统设置面板：音量 + 系统菜单按钮（回到游戏 / 读档存档 / 退出游戏）。
+// 版式常量定义在 core/layout.js（绘制与命中测试共用同一份，避免两处坐标漂移）。
 export function drawSettingsPanel() {
   if (!G.settingsPanel) return;
-  const w = 380, h = 200, x = (VW - w) / 2, y = 80, bx = x + 110, bw = 220;
-  ctx.fillStyle = "rgba(18,14,10,0.96)"; ctx.fillRect(x, y, w, h);
+  const { w, h, x, y } = SETTINGS_BOX, bx = SETTINGS_BAR.x, bw = SETTINGS_BAR.w;
+  // 半透明遮罩：面板是模态的，压暗背后场景以突出焦点。
+  ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(0, 0, VW, VH);
+  ctx.fillStyle = "rgba(18,14,10,0.97)"; ctx.fillRect(x, y, w, h);
   ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2); ctx.lineWidth = 1;
-  ctx.fillStyle = "#f0d060"; ctx.font = "bold 16px 'Microsoft YaHei',SimHei,sans-serif"; ctx.fillText("设置", x + 16, y + 30);
+  ctx.fillStyle = "#f0d060"; ctx.font = "bold 16px 'Microsoft YaHei',SimHei,sans-serif"; ctx.fillText("系统设置", x + 16, y + 30);
+
   const bar = (label, val, by, col) => {
     ctx.fillStyle = "#efe8d8"; ctx.font = "14px 'Microsoft YaHei',SimHei,sans-serif"; ctx.fillText(label, x + 20, by + 14);
     ctx.fillStyle = "#000"; ctx.fillRect(bx, by, bw, 16);
@@ -107,11 +113,30 @@ export function drawSettingsPanel() {
     ctx.strokeStyle = "#b8a468"; ctx.strokeRect(bx + .5, by + .5, bw - 1, 15);
     ctx.fillStyle = "#fff"; ctx.font = "11px sans-serif"; ctx.fillText(Math.round(val * 100) + "%", bx + bw + 4, by + 13);
   };
-  bar("背景音乐", G.settings.bgm, y + 70, "#7ac0ff");
-  bar("音效", G.settings.sfx, y + 120, "#8fbf6a");
-  ctx.fillStyle = G.settings.bgm > 0 ? "#8fbf6a" : "#a05050"; ctx.fillRect(bx, y + 150, 80, 22);
-  ctx.fillStyle = "#1a140e"; ctx.font = "12px 'Microsoft YaHei',SimHei,sans-serif"; ctx.fillText("音乐静音", bx + 10, y + 165);
-  ctx.fillStyle = G.settings.sfx > 0 ? "#8fbf6a" : "#a05050"; ctx.fillRect(bx + 90, y + 150, 80, 22);
-  ctx.fillStyle = "#1a140e"; ctx.fillText("音效静音", bx + 100, y + 165);
-  ctx.fillStyle = "#888"; ctx.font = "11px sans-serif"; ctx.fillText("点击或拖动音量条调节　Esc 关闭", x + 20, y + h - 12);
+  bar("背景音乐", G.settings.bgm, y + 62, "#7ac0ff");
+  bar("音效", G.settings.sfx, y + 112, "#8fbf6a");
+  ctx.fillStyle = G.settings.bgm > 0 ? "#8fbf6a" : "#a05050"; ctx.fillRect(bx, y + 142, 80, 22);
+  ctx.fillStyle = "#1a140e"; ctx.font = "12px 'Microsoft YaHei',SimHei,sans-serif"; ctx.fillText("音乐静音", bx + 10, y + 157);
+  ctx.fillStyle = G.settings.sfx > 0 ? "#8fbf6a" : "#a05050"; ctx.fillRect(bx + 120, y + 142, 80, 22);
+  ctx.fillStyle = "#1a140e"; ctx.fillText("音效静音", bx + 130, y + 157);
+
+  // 分隔线 + 系统菜单按钮
+  ctx.strokeStyle = "rgba(184,164,104,0.45)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x + 20, y + 222); ctx.lineTo(x + w - 20, y + 222); ctx.stroke();
+
+  const mx = G.mouse.sx, my = G.mouse.sy;
+  for (const b of SETTINGS_BTN) {
+    const hover = mx >= b.x && mx < b.x + b.w && my >= b.y && my < b.y + b.h;
+    // 退出游戏用暖红，与其它操作区分（不可逆）。
+    const base = b.k === "quit" ? (hover ? "#b8644c" : "#8a4a3a") : (hover ? "#c8b070" : "#8fbf6a");
+    ctx.fillStyle = b.k === "quit" && !hover ? "rgba(138,74,58,0.85)" : base;
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.strokeStyle = hover ? "#ffe07a" : "rgba(0,0,0,0.5)"; ctx.lineWidth = hover ? 2 : 1;
+    ctx.strokeRect(b.x + .5, b.y + .5, b.w - 1, b.h - 1); ctx.lineWidth = 1;
+    ctx.fillStyle = "#1a140e"; ctx.font = "13px 'Microsoft YaHei',SimHei,sans-serif";
+    const tw = ctx.measureText(b.label).width;
+    ctx.fillText(b.label, b.x + (b.w - tw) / 2, b.y + b.h / 2 + 5);
+  }
+  ctx.fillStyle = "#888"; ctx.font = "11px sans-serif";
+  ctx.fillText("点击或拖动音量条调节　Esc 关闭", x + 20, y + h - 10);
 }

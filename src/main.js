@@ -10,7 +10,7 @@ import { buildMapData, loadMap, setPlayer } from "./world/map.js";
 import { castSkill } from "./systems/combat.js";
 import { spawnProjectile } from "./systems/projectiles.js";
 import { fromLegacyMap } from "./content/mapDoc.js";
-import { loadPack, defaultPack, loadIndex } from "./content/store.js";
+import { loadPack, defaultPack, loadIndex, ensureVersionNames } from "./content/store.js";
 import { getRuntime } from "./runtime/context.js";
 import { loadSettings } from "./systems/audio.js";
 import { addInput } from "./input/input.js";
@@ -146,6 +146,9 @@ export async function boot() {
   preloadChar("role");
   preloadSceneArt();
   addInput();
+  // 预热版本清单：标题栏「数据版本：X」读的是同步缓存，静态部署下
+  // 不预热会一直显示「默认版本」（磁盘版本名来自 versions/index.json）。
+  await ensureVersionNames();
   enterBoot(runtime);
   const el = document.getElementById("load"); if (el) el.remove();
   requestAnimationFrame(loop);

@@ -11,7 +11,7 @@ import { castSelf, playerCanAttack } from "../systems/combat.js";
 import { setPlayerRun } from "../systems/motion.js";
 import { hasGoods, openShop, closeShop, sellCursor } from "../systems/shop.js";
 import { advanceDialog, startScript, openSay } from "../script/vm.js";
-import { slotAt, insideShop, insideShopClose, insideDialog, settingsHit, menuHit, fnButtonAt } from "../core/layout.js";
+import { slotAt, insideShop, insideShopClose, insideDialog, settingsHit, menuHit, fnButtonAt, SETTINGS_BAR } from "../core/layout.js";
 import { handleSlotClick } from "./slots.js";
 import { saveBtnAt, saveSlot, loadSlot } from "../systems/save.js";
 import { applyVolumes, playSound, saveSettings } from "../systems/audio.js";
@@ -142,7 +142,7 @@ export function addInput() {
   cv.addEventListener("mousemove", e => {
     if (!G.volDrag) return;
     const sp = screenPos(e.clientX, e.clientY);
-    const w = 380, bw = 220, bx = (VW - w) / 2 + 110;
+    const bw = SETTINGS_BAR.w, bx = SETTINGS_BAR.x;
     const v = Math.max(0, Math.min(1, (sp.x - bx) / bw));
     G.settings[G.volDrag] = v;
     applyVolumes(G);
@@ -156,11 +156,15 @@ export function addInput() {
     if (G.bgm && G.bgm.paused && G.bgmSrc && G.settings.bgm > 0) G.bgm.play().catch(() => { });
     const sh = settingsHit(sp.x, sp.y);
     if (sh) {
-      const bw = 220, bx = (VW - 380) / 2 + 110;
+      const bw = SETTINGS_BAR.w, bx = SETTINGS_BAR.x;
       if (sh.k === "bgm") { G.settings.bgm = Math.max(0, Math.min(1, (sp.x - bx) / bw)); G.volDrag = "bgm"; }
       else if (sh.k === "sfx") { G.settings.sfx = Math.max(0, Math.min(1, (sp.x - bx) / bw)); G.volDrag = "sfx"; }
       else if (sh.k === "mutBgm") G.settings.bgm = G.settings.bgm > 0 ? 0 : 0.6;
       else if (sh.k === "mutSfx") G.settings.sfx = G.settings.sfx > 0 ? 0 : 0.8;
+      // 系统菜单按钮
+      else if (sh.k === "resume") { applyVolumes(G); G.settingsPanel = false; return; }
+      else if (sh.k === "save") { applyVolumes(G); G.settingsPanel = false; G.savePanel = true; return; }
+      else if (sh.k === "quit") { applyVolumes(G); G.settingsPanel = false; quitToMenu(); return; }
       // 注意：applyVolumes 的参数是**游戏状态 G**（它读 g.settings），不是 runtime。
       // 早先误传 getRuntime() 导致 g.settings 为 undefined，赋值 bgm.volume=undefined 抛错，
       // 音量完全不生效、设置也不落盘。
@@ -212,6 +216,17 @@ export function addInput() {
     const sp = screenPos(e.clientX, e.clientY);
     G.mouse.sx = sp.x; G.mouse.sy = sp.y; G.mouse.wx = sp.x + G.cam.x; G.mouse.wy = sp.y + G.cam.y;
   });
+  // 退出游戏 → 回到首页（标题菜单）。与「主角死亡回菜单」走同一条路，
+  // 但额外清理运行时状态，避免存档/地图残留到下一局。
+  function quitToMenu() {
+    const rt = getRuntime();
+    enterMenu(rt, { music: true });
+    G.panel = null; G.savePanel = false; G.packOpen = false; G.cursor = null;
+    G.dialog = null; G.script = null; G.shop = null;
+    G.player = null; G.currentMap = null; G.map = null;
+    G.npcs = []; G.ground = []; G.effects = []; G.projectiles = [];
+  }
+
   // 打开设置面板（Esc 主入口；会收起其它面板，避免层层叠叠）。
   function openSettings() {
     G.settingsPanel = !G.settingsPanel;
@@ -234,9 +249,17 @@ export function addInput() {
   window.addEventListener("keydown", e => {
     if (G.scene === "editor" || G.scene === "version") return;   // 编辑器/版本界面自己处理键盘
     if (G.scene !== "game") {
+      // 设置面板是全局模态：任何场景下 Esc 都能开关它（选单界面同样需要调音量）。
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (G.settingsPanel) { G.settingsPanel = false; saveSettings(G); return; }
+        if (G.scene === "menu") { G.settingsPanel = true; return; }
+        // 片头/关于/结局：Esc 回标题
+        enterMenu(getRuntime()); return;
+      }
+      if (G.settingsPanel) return;              // 面板打开时吞掉其它按键
       if (G.scene === "flash" && (e.key === "Enter" || e.key === " ")) handleSceneClick(0, 0);
       else if (G.scene === "menu" && (e.key === "Enter" || e.key === " ")) startGame(getRuntime());
-      else if (e.key === "Escape") enterMenu(getRuntime());
       return;
     }
     if (G.dialog) {

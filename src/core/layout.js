@@ -89,15 +89,29 @@ export function displayEntry(slot) {
   return entryOf(slot);
 }
 
-// 设置面板的命中测试
+// ---- 系统设置面板（音量 + 系统菜单）----
+// 绘制（render/panels.js）与命中测试（本文件）共用这一份坐标，避免两处各写一遍对不上。
+export const SETTINGS_BOX = { w: 380, h: 320, x: (VW - 380) / 2, y: 80 };
+export const SETTINGS_BAR = { x: SETTINGS_BOX.x + 110, w: 220 };
+export const SETTINGS_BTN = [
+  { k: "resume", label: "回到游戏", x: SETTINGS_BOX.x + 30, y: SETTINGS_BOX.y + 236, w: 150, h: 30 },
+  { k: "save", label: "读档 / 存档", x: SETTINGS_BOX.x + 200, y: SETTINGS_BOX.y + 236, w: 150, h: 30 },
+  { k: "quit", label: "退出游戏", x: SETTINGS_BOX.x + 30, y: SETTINGS_BOX.y + 274, w: 320, h: 30 },
+];
+
+// 设置面板的命中测试：音量条 / 静音 / 系统菜单按钮。
 export function settingsHit(x, y) {
   if (!G.settingsPanel) return null;
-  const w = 380, h = 200, px = (VW - w) / 2, py = 80, bx = px + 110, bw = 220;
-  if (y >= py + 70 && y < py + 86 && x >= bx && x < bx + bw) return { k: "bgm" };
-  if (y >= py + 120 && y < py + 136 && x >= bx && x < bx + bw) return { k: "sfx" };
-  if (y >= py + 150 && y < py + 172) {
+  const px = SETTINGS_BOX.x, py = SETTINGS_BOX.y, bx = SETTINGS_BAR.x, bw = SETTINGS_BAR.w;
+  // 系统菜单按钮优先（它们在面板下方，与音量区不重叠，但顺序更明确）
+  for (const b of SETTINGS_BTN) {
+    if (x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h) return { k: b.k };
+  }
+  if (y >= py + 62 && y < py + 78 && x >= bx && x < bx + bw) return { k: "bgm" };
+  if (y >= py + 112 && y < py + 128 && x >= bx && x < bx + bw) return { k: "sfx" };
+  if (y >= py + 142 && y < py + 164) {
     if (x >= bx && x < bx + 80) return { k: "mutBgm" };
-    if (x >= bx + 90 && x < bx + 170) return { k: "mutSfx" };
+    if (x >= bx + 120 && x < bx + 200) return { k: "mutSfx" };
   }
   return null;
 }

@@ -8,11 +8,20 @@ export function endMusic(ctx) { const A = ctx.assets; return (A.game && A.game.m
 export function flashPics(ctx) { const A = ctx.assets; return (A.game && A.game.flash && A.game.flash.length) ? A.game.flash : []; }
 export function endPic(ctx) { const A = ctx.assets; return (A.game && A.game.endpic) || ""; }
 
-// 启动时先播片头闪屏与标题音乐。
-export function enterBoot(ctx) {
+// 片头闪屏「已看过」标记。切换数据版本会整页 reload，没有这个标记的话
+// 每次改版本都要重看一遍片头——玩家只想回到标题菜单。
+const SEEN_FLASH_KEY = "gsxy_seen_flash";
+
+// 启动：首次播放片头闪屏，之后直接进标题菜单。
+// opts.force=true 可强制重播（例如「重新观看片头」）。
+export function enterBoot(ctx, opts) {
   const G = ctx.state;
-  G.scene = "flash"; G.flashStep = 0; G.flashT = 0; G.pendingEnd = false;
+  let seen = false;
+  try { seen = localStorage.getItem(SEEN_FLASH_KEY) === "1"; } catch (e) { }
   playBGM(G, titleMusic(ctx));
+  if (seen && !(opts && opts.force)) { enterMenu(ctx); return; }
+  G.scene = "flash"; G.flashStep = 0; G.flashT = 0; G.pendingEnd = false;
+  try { localStorage.setItem(SEEN_FLASH_KEY, "1"); } catch (e) { }
 }
 
 // 片头结束 / 跳过：进入标题菜单。
