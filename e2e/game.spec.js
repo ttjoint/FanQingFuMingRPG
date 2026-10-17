@@ -882,6 +882,31 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   })).toBe(true);
   await page.locator('.ed-nav button:has-text("地图")').click(); await page.waitForTimeout(150);
 
+  // 音频页波形：① 横向填满内容区（旧实现写死 560px，右侧空一大片）；
+  // ② 画布缓冲宽度 === 显示宽度（不等就会 seek/播放头与高亮按不同比例映射，
+  //    表现为“拖动时高亮与实际播放位置脱节”）；③ 柱数 * 柱距 === 画布宽度，
+  //    否则金色高亮按 peaks.length*PITCH 延伸、播放头按宽度走，越右偏得越多。
+  {
+    await page.locator('.ed-nav button:has-text("音频")').first().click();
+    await page.waitForSelector("#editorRoot table.ed-table tbody tr", { timeout: 20000 });
+    let hasWave = false;
+    for (let i = 0; i < 12; i++) {
+      await page.locator("#editorRoot table.ed-table tbody tr").nth(i).click();
+      await page.waitForTimeout(120);
+      if (await page.locator("#editorRoot canvas.ed-wave").count()) { hasWave = true; break; }
+    }
+    expect(hasWave).toBe(true);
+    const geo = await page.evaluate(() => {
+      const cv = document.querySelector("#editorRoot canvas.ed-wave");
+      const box = cv.closest(".ed-group");
+      const r = cv.getBoundingClientRect(), pr = box.getBoundingClientRect();
+      return { cssW: r.width, parentW: pr.width, bufW: cv.width, dpr: window.devicePixelRatio };
+    });
+    expect(geo.cssW).toBeGreaterThan(500);
+    expect(geo.cssW).toBeGreaterThan(geo.parentW - 40);        // 几乎贴满内容区
+    expect(geo.bufW).toBe(Math.round(geo.cssW * Math.max(1, Math.min(3, geo.dpr))));  // 缓冲=显示
+  }
+
   // 关闭编辑器 → 重开游戏，实例覆盖生效
   await page.evaluate(async () => { const m = await import("/src/editor/index.js"); await m.closeEditor(true); });
   await page.waitForFunction(() => window.__GAME__.G.scene === "menu");

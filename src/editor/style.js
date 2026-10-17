@@ -370,9 +370,12 @@ table.ed-table tbody tr.on td.ed-thumb img{border-color:#f0d060}
 .ed-decor-big{max-width:180px;max-height:180px;object-fit:contain;background:#0a0b0d;
   border:1px solid #2c3038;border-radius:4px;image-rendering:pixelated}
 /* ---- 音频详情：波形 + 进度 + 元数据 ---- */
-.ed-wavewrap{position:relative;margin:4px 0 8px}
-.ed-wave{display:block;width:100%;height:88px;border:1px solid #2c3038;border-radius:4px;
-  background:#0b0d11;cursor:pointer}
+/* 宽度由 JS（audio-view.js 的 resize）按容器实际宽度 + DPR 设定，
+   这里不再写 width:100% —— 否则 CSS 拉伸与 canvas 绘制缓冲宽度不一致，
+   会导至“播放头/高亮位置与实际播放位置偏离”。 */
+.ed-wavewrap{position:relative;margin:4px 0 8px;width:100%}
+.ed-wave{display:block;height:88px;border:1px solid #2c3038;border-radius:4px;
+  background:#0b0d11;cursor:pointer;max-width:100%}
 .ed-wave-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   color:#6b727c;font-size:12px;pointer-events:none}
 .ed-wave-time{font-size:12px;color:#9aa3b0;font-variant-numeric:tabular-nums;white-space:nowrap}

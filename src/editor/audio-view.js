@@ -265,107 +265,137 @@ export function peaksFromAudioBuffer(audio, n) {
  * 返回 { el, setProgress(0..1), setPeaks(data), setMsg(text) }
  */
 export function waveBar(opts) {
-  // 画布按 devicePixelRatio 放大后仍保持一致的外观尺寸；
-  // 柱子宽度按「每根柱子占几个设备像素」反推，保证在任意屏幕上疏密一致。
+  // 波形按容器实际宽度自适应（原来固定 560px，右侧留一大片空白）。
+  // 同时按 devicePixelRatio 放大绘制缓冲，保证高分屏上不糊、且
+  // **缓冲宽度与显示宽度严格一致** —— 否则 seek 换算（用 getBoundingClientRect）
+  // 与绘制（用缓冲宽度 W）会按不同比例缩放，点得越靠右、播放头与金色柱
+  // 偏离真实位置越远（拖动时"高亮与播放位置脱节"就是这么来的）。
   const H = 88;
   const BAR = 3;        // 单根柱子宽（CSS px）
   const GAP = 2;        // 柱间距（CSS px）
   const PITCH = BAR + GAP;
-  const CSSW = (opts && opts.width) || 560;
-  const N = Math.max(24, Math.floor(CSSW / PITCH));   // 柱子根数 = 宽度 / 间距
-  const W = N * PITCH;
-  const canvas = h("canvas", { class: "ed-wave", width: W, height: H });
-  canvas.style.width = W + "px";
-  canvas.style.maxWidth = "100%";
-  canvas.style.height = H + "px";
+  const canvas = h("canvas", { class: "ed-wave" });
   const msg = h("div", { class: "ed-wave-msg" }, opts && opts.msg || "加载中…");
   const wrap = h("div", { class: "ed-wavewrap" }, canvas, msg);
   const g = /** @type {CanvasRenderingContext2D|null} */ (canvas.getContext("2d"));
 
   /** @type {Float32Array|null} */
-  let peaks = null;
+  let peaks = null;      // 原始桶数据（按解码时的固定桶数，如 220）
+  let shown = null;      // 按当前柱数重采样后的可视数据（长度 = N）
   let progress = 0;
   let drag = false;
   const onSeek = (opts && opts.onSeek) || null;
 
-  // 底图（背景 + 中线 + 未播放部分的柱子）只画一次，缓存成 ImageBitmap/离屏 canvas。
-  // 播放时每帧只需「贴底图 + 重画已播放的那一小段 + 播放头」，
-  // 而不是每次 timeupdate 都重画 200 多根柱子。
+  // 当前逻辑尺寸（CSS px）与 DPR。用 CSSW 做所有"进度→像素"换算，
+  // 绘制时统一 ctx.scale(dpr)，于是逻辑坐标 == CSS 坐标，与鼠标换算完全一致。
+  let CSSW = (opts && opts.width) || 560;
+  let dpr = 1;
+  // N = 柱子根数；STEP = 实际柱距（可能略大于 PITCH，把余数摊到每根柱上）。
+  // 必须满足 N * STEP === CSSW，否则“最后一根柱的右边界”与“progress=1 的播放头”
+  // 对不上，越靠右偏得越多。
+  let N = 24, STEP = PITCH;
+  const layout = (cssw) => {
+    N = Math.max(24, Math.floor(cssw / PITCH));
+    STEP = cssw / N;
+  };
+
+  // 底图（背景 + 中线 + 未播放部分的柱子）只画一次，缓存成离屏 canvas。
+  // 播放时每帧只需「贴底图 + 重画已播放的那一小段 + 播放头」。
   const baseCv = document.createElement("canvas");
-  baseCv.width = W; baseCv.height = H;
   const bg = /** @type {CanvasRenderingContext2D|null} */ (baseCv.getContext("2d"));
   let baseDirty = true;
+  let lastCut = 0, lastPx = -1;
 
-  const barX = i => i * PITCH + GAP / 2;
+  // 把解码得到的峰值桶（固定条数，如 220）重采样成“当前画布能画的柱数 N”。
+  // **这一步是修“高亮与播放位置脱节”的关键**：绘制 x 用 barX(i)=i*PITCH，
+  // 而播放头 x 用 progress*CSSW。若柱数与 N 不匹配，金色高亮会按
+  // peaks.length*PITCH 的尺度延伸，而播放头按 CSSW 走，两者越到后面偏得越多。
+  const rebin = () => {
+    if (!peaks || !peaks.length || !N) { shown = null; return; }
+    const src = peaks, sn = src.length;
+    const out = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      // 每个输出柱覆盖源数据的一段，取最大值（峰值包络不会因缩放而变矮）
+      const a = Math.floor(i * sn / N), b = Math.max(a + 1, Math.ceil((i + 1) * sn / N));
+      let m = 0;
+      for (let k = a; k < b && k < sn; k++) if (src[k] > m) m = src[k];
+      out[i] = m;
+    }
+    shown = out;
+  };
+
+  const barX = i => i * STEP;
   const barH = v => Math.max(1, v * (H / 2 - 4));
 
-  /** 画柱子（x 从 from 到 to，颜色 c） */
+  /** 画柱子（逻辑坐标；from/to 为柱索引） */
   const bars = (ctx2, from, to, color, clearFirst) => {
-    if (!peaks || !peaks.length) return;
-    ctx2.fillStyle = color;
-    const n = peaks.length;
+    if (!shown || !shown.length) return;
+    const n = shown.length;
     for (let i = from; i < to && i < n; i++) {
-      const bh = barH(peaks[i]);
+      const bh = barH(shown[i]);
+      const bw = Math.max(1, STEP - GAP);   // 柱宽随柱距自适应，保证不重叠且填满
       if (clearFirst) {
         // 整列清掉再画：避免"已播放/未播放"两种柱高不同时残留旧像素
-        ctx2.clearRect(barX(i) - 1, 0, BAR + 2, H);
-        ctx2.fillStyle = color;
+        ctx2.clearRect(barX(i) - 1, 0, STEP + 1, H);
       }
-      ctx2.fillRect(barX(i), H / 2 - bh, BAR, bh * 2);
+      ctx2.fillStyle = color;
+      ctx2.fillRect(barX(i), H / 2 - bh, bw, bh * 2);
     }
   };
 
   const paintBase = () => {
     if (!bg) return;
-    bg.clearRect(0, 0, W, H);
-    bg.fillStyle = "#0b0d11"; bg.fillRect(0, 0, W, H);
+    bg.setTransform(dpr, 0, 0, dpr, 0, 0);
+    bg.clearRect(0, 0, CSSW, H);
+    bg.fillStyle = "#0b0d11"; bg.fillRect(0, 0, CSSW, H);
     bg.strokeStyle = "#1d222b"; bg.lineWidth = 1;
-    bg.beginPath(); bg.moveTo(0, H / 2); bg.lineTo(W, H / 2); bg.stroke();
-    bars(bg, 0, peaks ? peaks.length : 0, "#3b4557");
+    bg.beginPath(); bg.moveTo(0, H / 2); bg.lineTo(CSSW, H / 2); bg.stroke();
+    bars(bg, 0, shown ? shown.length : 0, "#3b4557");
     baseDirty = false;
   };
-
-  // 上一帧画过的进度（柱数），用于只重画变化的那一段
-  let lastCut = 0, lastPx = -1;
 
   const paintFull = () => {
     if (!g) return;
     if (baseDirty) paintBase();
-    g.clearRect(0, 0, W, H);
-    g.drawImage(baseCv, 0, 0);
-    if (!peaks || !peaks.length) { lastCut = 0; lastPx = -1; return; }
-    const cut = Math.floor(peaks.length * progress);
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, CSSW, H);
+    g.drawImage(baseCv, 0, 0, CSSW, H);
+    if (!shown || !shown.length) { lastCut = 0; lastPx = -1; return; }
+    const cut = Math.floor(shown.length * progress);
     bars(g, 0, cut, "#e8be52");
-    lastCut = cut; lastPx = progress * W;
+    lastCut = cut; lastPx = progress * CSSW;
     drawHead();
   };
 
   const drawHead = () => {
     if (!g) return;
-    const px = progress * W;
+    const px = progress * CSSW;
     g.strokeStyle = "#ffd85e"; g.lineWidth = 1.5;
     g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke();
   };
 
-  // 播放中的每帧重绘：不整张重画，只处理"上次已播放段"和"本次新增段"。
+  // 播放中的每帧重绘：只处理"上次已播放段"和"本次新增段"。
   // 进度前进时增量画金色柱；回退（拖动 seek）时才退回整张重画。
   const paintIncremental = () => {
-    if (!g || !peaks || !peaks.length) { paintFull(); return; }
+    if (!g || !shown || !shown.length) { paintFull(); return; }
     if (baseDirty) { paintFull(); return; }
-    const cut = Math.floor(peaks.length * progress);
-    const px = progress * W;
+    const cut = Math.floor(shown.length * progress);
+    const px = progress * CSSW;
     if (cut < lastCut) { paintFull(); return; }        // 回退：整张重画
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (cut > lastCut) {
       bars(g, lastCut, cut, "#e8be52", true);
       lastCut = cut;
     }
-    // 播放头：只擦掉旧位置的细条，再画新的
     if (lastPx >= 0 && Math.abs(px - lastPx) > 0.01) {
+      // 播放头：只擦掉旧位置的细条（贴回底图），再补回该段的金色柱
       const x0 = Math.max(0, Math.floor(Math.min(px, lastPx)) - 2);
-      const x1 = Math.min(W, Math.ceil(Math.max(px, lastPx)) + 2);
-      g.drawImage(baseCv, x0, 0, x1 - x0, H, x0, 0, x1 - x0, H);   // 贴回底图 = 擦掉旧头
-      bars(g, Math.max(0, Math.floor(x0 / PITCH)), Math.min(peaks.length, Math.ceil(x1 / PITCH)),
-        "#e8be52", true);                                          // 补回这段的金色柱
+      const x1 = Math.min(CSSW, Math.ceil(Math.max(px, lastPx)) + 2);
+      if (x1 > x0) {
+        g.drawImage(baseCv, x0 * dpr, 0, (x1 - x0) * dpr, H * dpr, x0, 0, x1 - x0, H);
+        bars(g, Math.max(0, Math.floor(x0 / STEP)), Math.min(shown.length, Math.ceil(x1 / STEP)),
+          "#e8be52", true);
+      }
       drawHead();
       lastPx = px;
     }
@@ -381,8 +411,44 @@ export function waveBar(opts) {
 
   const draw = () => { paintFull(); };
 
+  /** 按容器宽度重建绘制缓冲（DPR 变化 / 侧栏拖宽都会走这里） */
+  const resize = (cssw) => {
+    const w = Math.max(120, Math.round(cssw || CSSW));
+    if (w === CSSW && canvas.width === Math.round(CSSW * dpr)) return;
+    CSSW = w;
+    dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    layout(CSSW);
+    canvas.width = Math.round(CSSW * dpr);
+    canvas.height = Math.round(H * dpr);
+    // canvas 的 width/height 属性是“设备像素”，显示尺寸必须显式写 CSS 宽度，
+    // 否则高分屏下会按属性值渲染成 dpr 倍大。
+    canvas.style.width = CSSW + "px";
+    canvas.style.height = H + "px";
+    baseCv.width = Math.round(CSSW * dpr);
+    baseCv.height = Math.round(H * dpr);
+    rebin();            // 柱数变了，峰值要重新采样到 N 根
+    baseDirty = true;   // 尺寸变了，底图必须重画
+    lastCut = 0; lastPx = -1;
+    draw();
+  };
+
+  // 跟随容器宽度：编辑器侧栏可拖宽、窗口可缩放、音频页首次挂载时
+  // 容器宽度也还没有最终确定，所以用 ResizeObserver 而不是一次性测量。
+  let ro = null;
+  if (typeof ResizeObserver !== "undefined") {
+    ro = new ResizeObserver((entries) => {
+      for (const en of entries) {
+        const cw = en.contentRect ? en.contentRect.width : en.target.clientWidth;
+        if (cw > 0) resize(cw);
+      }
+    });
+    ro.observe(wrap);
+  }
+
   const seekTo = (clientX) => {
     const r = canvas.getBoundingClientRect();
+    if (!r.width) return;
+    // 一律用"显示宽度"换算 → 与绘制用的 CSSW 一致（二者已保证相同）
     const t = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
     progress = t; draw();
     if (onSeek) onSeek(t);
@@ -393,11 +459,14 @@ export function waveBar(opts) {
   const up = () => { drag = false; };
   window.addEventListener("mouseup", up);
 
-  draw();
+  layout(CSSW);
+  resize(CSSW);
+
   return {
     el: wrap,
     canvas,
     get progress() { return progress; },
+    get width() { return CSSW; },
     // 播放中的高频 progress：走 rAF + 增量重绘（一帧最多一次）
     setProgress(t) {
       const v = Math.min(1, Math.max(0, t));
@@ -405,11 +474,17 @@ export function waveBar(opts) {
       progress = v;
       scheduleDraw();
     },
-    setPeaks(data) { peaks = data && data.peaks; msg.style.display = peaks ? "none" : ""; baseDirty = true; draw(); },
+    setPeaks(data) {
+      peaks = data && data.peaks;
+      msg.style.display = peaks ? "none" : "";
+      rebin(); baseDirty = true; lastCut = 0; lastPx = -1; draw();
+    },
     setMsg(t) { msg.textContent = t; msg.style.display = ""; },
+    resize,
     destroy() {
       window.removeEventListener("mouseup", up);
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+      if (ro) { ro.disconnect(); ro = null; }
     },
   };
 }
