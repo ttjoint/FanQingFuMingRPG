@@ -205,6 +205,13 @@ function drawBuffIcons(e, camX, topY) {
   }
 }
 
+// 投射物贴图的绘制尺寸。
+// 素材是 64x64 画布且内容满幅，必须显式缩放，否则视觉上比角色还大。
+// 直径按 radius 推算后再乘一个美术系数，并夹在最小/最大值之间。
+const PROJ_ART_SCALE = 0.75;   // radius -> 绘制半径的系数
+const PROJ_MIN = 14;           // 最小绘制直径(px)
+const PROJ_MAX = 40;           // 最大绘制直径(px)
+
 // 弹道：优先画 projectile 帧动画，缺失时退化为发光圆点（保证“无素材可见”）。
 export function drawProjectiles(camX, camY) {
   const list = G.projectiles;
@@ -214,7 +221,16 @@ export function drawProjectiles(camX, camY) {
     const x = Math.round(p.x - camX), y = Math.round(p.y - camY);
     const fname = p.frames && p.frames.length ? p.frames[p.frame % p.frames.length] : null;
     const im = fname ? getImg("assets/projectile/" + String(fname).replace(/\.bmp$/, ".png")) : null;
-    if (im) { ctx.drawImage(im, Math.round(x - im.width / 2), Math.round(y - im.height / 2)); continue; }
+    if (im) {
+      // 投射物贴图按 skill.projectile.radius 缩放到屏幕直径，而不是 1:1 原图。
+      // 素材普遍是 64x64、内容几乎满幅，1:1 画出来比角色(内容约 48px 宽)还大一圈。
+      // diameter = radius * 2 * PROJ_ART_SCALE，并夹在 [PROJ_MIN, PROJ_MAX] 之间，
+      // 保证任何尺寸的素材都得到"小球"外观。
+      const dia = Math.max(PROJ_MIN, Math.min(PROJ_MAX, (p.radius || 12) * 2 * PROJ_ART_SCALE));
+      const sz = Math.round(dia);
+      ctx.drawImage(im, Math.round(x - sz / 2), Math.round(y - sz / 2), sz, sz);
+      continue;
+    }
     // 默认占位：一团带光晕的小球（无素材也能观察弹道轨迹）
     const r = Math.max(3, Math.min(14, p.radius * 0.6));
     const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2);
