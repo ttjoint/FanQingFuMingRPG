@@ -254,7 +254,25 @@ D2 的 build 多样性全部建立在这套正交体系上。
         `undefined` → **所有装备动作静默失败**（不报错、不提示，就是装不上）。
         判定必须只看 `items`。已加单测 `gameStateIsNotMistakenForAssets`，
         并反向验证过：还原旧判定则该测试失败。
-- [ ] **拆分 `editor/index.js`（1696 行）**：按标签页拆成 `editor/pages/*.js`。
+- [~] **拆分 `editor/index.js`**（起步 1862 行 → 当前 1342 行）
+      - 底座：新建 `editor/ed-ctx.js` 作为**会话级共享状态**单一实例。
+        `index.js` 在 `openEditor` 里 `initEditorCtx({ get ED(){...}, ... })` 一次，
+        页面模块通过 `edCtx()` 读取。原先所有标签页靠闭包共享 `mainEl/ED/mark/assetSrc`，
+        不先解决这个，任何拆分都得把 index.js 再 import 回来（成环）。
+      - 已拆出：
+        - `editor/schemas.js`（241 行）：全部 `*_SCHEMA` 表 + AI 预设 + AI 提示串。
+          纯数据，无 DOM 依赖。
+        - `editor/audio-tab.js`（311 行）：音频标签页整体自洽——
+          只读内容与素材索引、只写 `ED.sounds`，不参与别的页的编辑状态。
+      - 顺带把 `rfield`/`rnum`/`rhint`/`assetSrc`/`roleSrc`/`assetSrc2`
+        挪进 `ed-ctx.js`（多页共用）。
+      - ⚠️ **踩过的坑**：`initEditorCtx` 用 `Object.assign` 搬运 getter 会**立刻求值**，
+        拿到初始化那一刻的 `undefined`（`mainEl` 此时还没被 `buildShell` 赋值），
+        之后永不更新 → 拆出去的页面 `edCtx().mainEl.append(...)` 直接崩。
+        必须 `Object.defineProperty` 把访问器原样搬过去。
+        已加单测 `gettersStayLive` 并反向验证（换回 `Object.assign` 该测试失败）。
+      - 剩余：`tabConfig`(200 行)/`tabGame`(133)/`tabAssets`(164)/`map-editor` 依赖较多，
+        继续拆需先处理 `npcSchema`/`listTab` 等交叉引用。
 - [ ] **快照式撤销 → Command 模式**：当前每次编辑深拷贝整份 MapDoc（100 条上限），
       大地图内存与 GC 压力大。
 - [ ] **测试运行器二选一**：`test/run.mjs` 与 Vitest 适配层跑同一批用例，长期维护两份。

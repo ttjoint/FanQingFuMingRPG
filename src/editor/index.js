@@ -6,7 +6,6 @@ import { setAssetOverrides, assetURL } from "../core/assets.js";
 import { h, clear, deep } from "./dom.js";
 import { injectStyle } from "./style.js";
 import { renderForm, renderListEditor, mkSplitResizer, editorShell, imgPlaceholder } from "./fields.js";
-import { waveBar, decodePeaks, prefetchPeaks, fmtTime, fmtSize } from "./audio-view.js";
 import { mountMapEditor } from "./map-editor.js";
 import { modeControl, makeLineEditor, decorState } from "./decor-line.js";
 import { applyPatch, diffContent } from "../content/contentdb.js";
@@ -21,12 +20,20 @@ import {
 } from "../content/store.js";
 import { PACK_FORMAT, PACK_VERSION } from "../content/schema.js";
 import { newNpcTemplate } from "../content/npcFields.js";
-import { buildAssetIndexAsync, searchAssets, groupOf, fileName, assetIndex, audioIndex, musicFiles, soundFiles, audioSrc } from "./assets-index.js";
+import { buildAssetIndexAsync, searchAssets, groupOf, fileName, assetIndex, musicFiles } from "./assets-index.js";
 import { decorThumb, decorPreview } from "./atlas-preview.js";
 import { setImagesWriter } from "./asset-picker.js";
 import { pmgGrid } from "./pmg-view.js";
 import { mountUiTab } from "./ui-tab.js";
 import { normalizeUi } from "../content/ui.js";
+import { tabAudio } from "./audio-tab.js";
+import { initEditorCtx, edCtx, edProject, edMain, edMark, assetSrc, roleSrc, assetSrc2, rfield, rnum, rhint } from "./ed-ctx.js";
+
+import {
+  DMG_TYPE_OPTIONS, AI_COND_HINT, AI_ACT_HINT, AI_TEMPLATES,
+  NPC_SCHEMA_FIELDS, ITEM_SCHEMA, SKILL_SCHEMA, BUFF_SCHEMA,
+  EFFECT_SCHEMA, AFFIX_SCHEMA, WAYPOINT_SCHEMA, UNIQUE_SCHEMA,
+} from "./schemas.js";
 
 let root = null, ED = null, dirty = false, curTab = "maps";
 let mainEl, sideEl, statusEl, mapEditor = null, sideRszEl = null;
@@ -42,14 +49,6 @@ setImagesWriter((key, dataUrl) => {
   mark();
 });
 
-// 资源覆盆（上传替换）解析：assets 路径 → dataURL（若有覆盆），否则原路径。供表单图片预览用。
-const assetSrc = p => (ED && ED.images && ED.images[p]) || assetURL(p);
-const roleSrc = model => {
-  const m = String(model || "").replace(/\.pmg$/, "");
-  const ch = A.chars && A.chars[m]; if (!ch) return null;
-  const blocks = ch.stand || ch.walk; const b = blocks && blocks[0] && blocks[0];
-  return (b && b.length) ? assetSrc("assets/role/" + b[0].replace(/\.bmp$/, ".png")) : null;
-};
 
 // ---------- Project ----------
 // base: 默认版本 ContentDB；pack: 内容包（补丁）。
@@ -104,6 +103,19 @@ export async function openEditor() {
   }
   ED = createProject(base, pack);
   dirty = false;
+  // 把会话状态交给共享上下文：拆分出去的页面模块通过 edCtx() 读它。
+  // getter 保持与本地变量同步（ED/root/... 在编辑器运行期间会被重新赋值）。
+  initEditorCtx({
+    get ED() { return ED; },
+    get root() { return root; },
+    get dirty() { return dirty; },
+    get curTab() { return curTab; },
+    get mainEl() { return mainEl; },
+    get sideEl() { return sideEl; },
+    get statusEl() { return statusEl; },
+    get mapEditor() { return mapEditor; },
+    mark: () => { dirty = true; },
+  });
   injectStyle();
   G.scene = "editor";
   root = h("div", { id: "editorRoot" });
@@ -356,9 +368,7 @@ function tabMaps() {
 }
 
 // ---------- 装饰物模板（跨地图共享，按贴图源矩形）----------
-const rfield = (label, ctl) => h("div", { class: "ed-row" }, h("label", null, label), ctl);
-const rnum = (val, on) => { const i = h("input", { type: "number", value: val }); i.oninput = () => on(Number(i.value) || 0); return i; };
-const rhint = t => h("div", { class: "ed-hint" }, t);
+
 let decorSelKey = null;
 
 // 同一贴图源矩形 = 同一模板（跨地图共用）。遍历 ED.maps 本体，不依赖 mapsManifest（更健壮）。
@@ -539,43 +549,6 @@ function tabScripts() {
 
 // AI 配置：一条配置 = 一个行为档案（idle + targeting + 顺序匹配的 rules）。
 // 结构复杂且需可扩展，因此用 JSON 文本编辑器直接编辑，并提供常用模板一键插入。
-const AI_COND_HINT = "条件(when)可用：always, hpBelow, hpAbove, mpBelow, mpAbove, hasTarget, noTarget, targetDead, targetInRange(melee/aggro/数字), targetDistBelow, aggroOver, lostOver, allyBeingAttacked, nearbyEnemyCount, nearbyAllyCount, random, cooldownReady, leashExceeded（可组合 all/any/not）";
-const AI_ACT_HINT = "动作(do.action)可用：idle, wander(radius,interval,speed), chase(stopRange,maxTime,speed), attack(cooldown,rage), flee(range,speed), assist(radius), guard(leash)";
-
-// 伤害类型选项。引擎把类型当作不透明 key（engine/damage.js），
-// 这里只是给编辑器一个常用集合；抗性表里手写的自定义类型会原样保留。
-// "all" = 对所有类型生效（等价于 schema 把单数值规整成的形式）。
-// 形如 [值, 显示名]，与编辑器其它 select 字段的 options 约定一致。
-const DMG_TYPE_OPTIONS = [
-  ["physical", "物理"], ["fire", "火焰"], ["cold", "冰霜"],
-  ["lightning", "闪电"], ["poison", "毒素"], ["all", "全部(+抗性)"],
-];
-const AI_TEMPLATES = {
-  "站桩": { idle: { action: "idle" }, rules: [] },
-  "原地游荡": { idle: { action: "wander", radius: 160, interval: [2, 6] }, rules: [] },
-  "守卫(警戒+回防)": { idle: { action: "idle" }, targeting: { aggroRange: 260, retaliate: true, giveUpT: 8, leash: 480 }, rules: [
-    { when: { targetInRange: "melee" }, do: { action: "attack" } },
-    { when: { hasTarget: true }, do: { action: "guard", leash: 260 } },
-  ] },
-  "主动野兽(游荡+扑咬+低血逃)": { idle: { action: "wander", radius: 200, interval: [2, 5] }, targeting: { aggroRange: 200, retaliate: true, giveUpT: 6, leash: 420 }, rules: [
-    { when: { hpBelow: 0.25 }, do: { action: "flee", range: 420, speed: 1.5 } },
-    { when: { targetInRange: "melee" }, do: { action: "attack", cooldown: 1.1 } },
-    { when: { hasTarget: true }, do: { action: "chase", stopRange: "melee" } },
-  ] },
-  "强盗(呼朋引伴+低血逃)": { idle: { action: "wander", radius: 180, interval: [2, 6] }, targeting: { aggroRange: 260, retaliate: true, giveUpT: 8, leash: 520 }, rules: [
-    { when: { hpBelow: 0.2 }, do: { action: "flee", range: 480, speed: 1.5 } },
-    { when: { targetInRange: "melee" }, do: { action: "attack", cooldown: 1.1 } },
-    { when: { allyBeingAttacked: true }, do: { action: "assist", radius: 300 } },
-    { when: { hasTarget: true }, do: { action: "chase", stopRange: "melee" } },
-  ] },
-  "首领(分阶段)": { idle: { action: "idle" }, targeting: { aggroRange: 320, retaliate: true, giveUpT: 12, leash: 640 }, rules: [
-    { when: { hpBelow: 0.3 }, do: { action: "attack", cooldown: 0.7, rage: 1.5 } },
-    { when: { hpBelow: 0.6 }, do: { action: "attack", cooldown: 1.0 } },
-    { when: { targetInRange: "melee" }, do: { action: "attack", cooldown: 1.2 } },
-    { when: { hasTarget: true }, do: { action: "chase", stopRange: "melee" } },
-  ] },
-};
-
 function tabAis() {
   const list = ED.content.ais || (ED.content.ais = []);
   mainEl.append(h("h3", null, "AI 配置（共 " + list.length + "）"));
@@ -692,42 +665,9 @@ function listTab(title, arr, schema, columns, makeNew, opts) {
   });
 }
 
-// 缩略图 URL：值可能是纯文件名（老数据）也可能是完整 assets/ 路径。
-function assetSrc2(ref, dir) {
-  if (!ref) return null;
-  const s = String(ref);
-  if (/^(data:|blob:|https?:)/i.test(s)) return s;
-  if (s.startsWith("assets/")) return assetSrc(s);
-  return assetSrc("assets/" + String(dir).replace(/\/$/, "") + "/" + s.replace(/\.bmp$/i, ".png"));
-}
 
 // NPC 字段按语义分组呈现：身份 → 数值 → 行为 → 内容 → 掉落/交易 → 台词。
 // 带 group 的项是分隔项（无 k）；大段文本（lines/textarea）会自动独占整行。
-const NPC_SCHEMA_FIELDS = [
-  { group: "身份" },
-  { k: "id", label: "编号", type: "number" }, { k: "name", label: "名称", type: "text" },
-  { k: "model", label: "行走图", type: "model" }, { k: "portrait", label: "头像", type: "image", dir: "face" },
-
-  { group: "数值" },
-  { k: "level", label: "等级", type: "number" }, { k: "exp", label: "经验", type: "number" },
-  { k: "hp", label: "生命", type: "number" }, { k: "attack", label: "攻击", type: "number" },
-  { k: "defence", label: "防御", type: "number" },
-  { k: "resist", label: "抗性(%)", type: "resist", options: DMG_TYPE_OPTIONS, hint: "按伤害类型减免：正值减伤、负值受伤加重、>=100 免疫。" },
-  { k: "speed", label: "移动速度", type: "number", def: 45 }, { k: "runSpeed", label: "追击速度", type: "number", def: 70 },
-
-  { group: "行为" },
-  { k: "hostile", label: "主动敌对", type: "checkbox" },
-  { k: "ai", label: "AI 配置", type: "select" },
-  { k: "script", label: "对话脚本", type: "select" },
-  { k: "skills", label: "技能", type: "strlist" },
-
-  { group: "掉落与交易" },
-  { k: "drops", label: "掉落物品", type: "drops" },
-  { k: "inventory", label: "货物背包(商人)", type: "inventory" },
-
-  { group: "台词" },
-  { k: "talks", label: "闲话", hint: "每行一句，随机抽取", type: "lines", rows: 5 },
-];
 function npcSchema() {
   return NPC_SCHEMA_FIELDS.map(f => {
     const o = /** @type {any} */ ({ ...f });
@@ -741,74 +681,6 @@ function npcSchema() {
     return o;
   });
 }
-const ITEM_SCHEMA = [
-  { group: "基本" },
-  { k: "name", label: "名称", type: "text" },
-  { k: "type", label: "类型", type: "select", numeric: true, options: [[0, "消耗品"], [1, "武器"], [2, "防具"], [3, "饰品"], [4, "技能书"], [7, "包裹"], [8, "剧情物品"], [9, "宝石"], [10, "材料"]] },
-  { k: "subtype", label: "子类", type: "number" },
-  { k: "rarity", label: "稀有度", type: "select", options: [["common", "普通"], ["magic", "精良"], ["rare", "稀有"], ["unique", "传说"], ["quest", "任务"]] },
-  { k: "price", label: "价格", type: "number" }, { k: "reqLevel", label: "需求等级", type: "number" },
-  { k: "icon", label: "图标", type: "image", dir: "items_icons" },
-
-  { group: "属性加成" },
-  { k: "hp", label: "生命+", type: "number" }, { k: "mp", label: "精力+", type: "number" },
-  { k: "attack", label: "攻击+", type: "number" }, { k: "defence", label: "防御+", type: "number" },
-  { k: "attrA", label: "攻速+", type: "number" },
-  { k: "attrB", label: "属性B", type: "number" }, { k: "attrC", label: "属性C", type: "number" },
-
-  { group: "堆叠与耐久" },
-  { k: "stackable", label: "可堆叠", type: "checkbox" },
-  { k: "maxStack", label: "最大堆叠", type: "number", def: 0 },
-  { k: "socketCount", label: "镶嵌孔数", type: "number", def: 0 },
-  { k: "maxDurability", label: "最大耐久", type: "number", def: 0 },
-
-  { group: "宝石词条", hint: "仅 type=宝石 时生效" },
-  { k: "gem.mods.atk", label: "攻击+", type: "number" },
-  { k: "gem.mods.def", label: "防御+", type: "number" },
-  { k: "gem.mods.hp", label: "生命+", type: "number" },
-  { k: "gem.mods.hit", label: "攻速+", type: "number" },
-
-  { group: "特效" },
-  { k: "fx.aura", label: "装备光环", type: "select" },
-  { k: "fx.use", label: "使用时", type: "select" },
-
-  { group: "说明" },
-  { k: "desc", label: "物品说明", type: "textarea", rows: 4 },
-];
-const SKILL_SCHEMA = [
-  { group: "基本" },
-  { k: "name", label: "名称", type: "text" },
-  { k: "type", label: "类型", type: "select", numeric: true, options: [[0, "治疗(自身)"], [1, "攻击"]] },
-  { k: "mode", label: "攻击方式", type: "select", options: [["melee", "近战（瞬间命中）"], ["ranged", "远程（预留弹道）"]] },
-  { k: "passive", label: "被动技能", type: "checkbox",
-    hint: "被动技能不能主动施放、不进技能栏，只通过「协同」给其它技能加成。" },
-  { group: "数值" },
-  { k: "range", label: "射程", type: "number" },
-  { k: "resource", label: "消耗资源", type: "select", options: [["mp", "精力"], ["hp", "生命"], ["none", "无"]] },
-  { k: "mp", label: "消耗量", type: "number" },
-  { k: "power", label: "威力", type: "number" }, { k: "reqLevel", label: "需求等级", type: "number" },
-  { k: "damageType", label: "伤害类型", type: "select", options: DMG_TYPE_OPTIONS },
-  { group: "冷却与充能", hint: "充能技能（冲刺/闪避）：有 N 发可用，每 N 秒回 1 发；不填则走普通冷却。" },
-  { k: "cooldown", label: "冷却(秒)", type: "number", step: 0.1 },
-  { k: "maxCharges", label: "充能数", type: "number", hint: "0 = 不是充能技能" },
-  { k: "recharge", label: "每发回复(秒)", type: "number", step: 0.1, hint: "留 0 则沿用冷却时间" },
-  { group: "协同", hint: "「技能」每 1 级给本技能 +per 的加成，最多 max。作用于「作用数值」。" },
-  { k: "synergy", label: "协同加成", type: "synergy" },
-  { group: "表现" },
-  { k: "icon", label: "图标", type: "image", dir: "skill_icons" },
-  { k: "frames", label: "特效帧", type: "frames", dir: "skill" },
-  { k: "sound", label: "音效", type: "audio", filesFn: soundFiles },
-  { group: "弹道", hint: "仅「远程」方式使用" },
-  { k: "projectile.homing", label: "追踪目标", type: "checkbox" },
-  { k: "projectile.speed", label: "速度(像素/秒)", type: "number", def: 320 },
-  { k: "projectile.radius", label: "命中半径", type: "number", def: 18 },
-  { k: "projectile.pierce", label: "穿透次数", type: "number", def: 0 },
-  { k: "projectile.frames", label: "飞行帧", type: "frames", dir: "projectile" },
-  { group: "说明" },
-  { k: "desc", label: "说明", type: "textarea", rows: 2 },
-];
-
-// 技能表单按需构建（buff 候选随 ED.buffs 变化，避免模块加载时崩溃）。
 function skillSchema() {
   const buffIds = (ED.buffs || []).map(b => b.id).filter(Boolean);
   return SKILL_SCHEMA.concat([
@@ -828,57 +700,6 @@ function skillSchema() {
 }
 
 // Buff 配置表字段。
-const BUFF_SCHEMA = [
-  { group: "基本" },
-  { k: "id", label: "id", type: "text" },
-  { k: "name", label: "名称", type: "text" },
-  { k: "icon", label: "图标", type: "image", dir: "buff_icons" },
-
-  { group: "时长与叠层" },
-  { k: "duration", label: "持续(秒)", type: "number", def: 10 },
-  { k: "maxStacks", label: "最大层数", type: "number", min: 1, def: 1 },
-  { k: "stackMode", label: "叠层方式", type: "select", options: [["refresh", "刷新时长"], ["stack", "叠加层数"]] },
-
-  { group: "每层属性修正" },
-  { k: "mods.atk", label: "攻击", type: "number", def: 0 },
-  { k: "mods.def", label: "防御", type: "number", def: 0 },
-  { k: "mods.hpMax", label: "生命上限", type: "number", def: 0 },
-  { k: "mods.mpMax", label: "精力上限", type: "number", def: 0 },
-  { k: "mods.speed", label: "速度", type: "number", def: 0 },
-  { k: "mods.hit", label: "攻速", type: "number", def: 0 },
-
-  { group: "持续效果" },
-  { k: "dot.dps", label: "每秒伤害", type: "number", def: 0 },
-  { k: "hot.hps", label: "每秒治疗", type: "number", def: 0 },
-
-  { group: "表现" },
-  { k: "fx.aura", label: "光环(循环)", type: "select" },
-  { k: "fx.onApply", label: "施加时", type: "select" },
-  { k: "fx.onExpire", label: "到期时", type: "select" },
-
-  { group: "说明与标签" },
-  { k: "tags", label: "标签", hint: "每行一个", type: "lines", rows: 3 },
-  { k: "desc", label: "说明", type: "textarea", rows: 4 },
-];
-
-const EFFECT_SCHEMA = [
-  { k: "id", label: "id", type: "text" },
-  { k: "name", label: "名称", type: "text" },
-  { k: "layer", label: "层级(叠放次序)", type: "select", options: [["under", "地面（恒低于单位）"], ["over", "角色层（按 y 排序）"], ["top", "顶层（头顶，恒在上）"]] },
-  { k: "anchor", label: "锚点", type: "select", options: [["world", "世界坐标"], ["unit", "单位"], ["item", "物品"]] },
-  { k: "frames", label: "帧图", type: "frames", dir: "fx" },
-  { k: "fps", label: "帧率(帧/秒)", type: "number", def: 12 },
-  { k: "loop", label: "循环播放", type: "checkbox" },
-  { k: "holdFirst", label: "首帧停留(秒)", type: "number", def: 0 },
-  { k: "holdLast", label: "尾帧停留(秒)", type: "number", def: 0 },
-  { k: "life", label: "存在时长(秒,0=不限)", type: "number", def: 0 },
-  { k: "ox", label: "横向偏移", type: "number", def: 0 },
-  { k: "oy", label: "纵向偏移", type: "number", def: 0 },
-  { k: "scale", label: "缩放", type: "number", step: 0.1, def: 1 },
-  { k: "texture", label: "贴图(预留,留空=程序化)", type: "text" },
-  { k: "color", label: "颜色(程序化)", type: "text" },
-  { k: "radius", label: "半径(程序化)", type: "number", def: 18 },
-];
 function tabEffects() {
   const list = ED.content.effects || (ED.content.effects = []);
   listTab("特效（" + list.length + "）", list, EFFECT_SCHEMA,
@@ -887,21 +708,6 @@ function tabEffects() {
     { key: "effects", thumb: e => (e.frames && e.frames[0]) ? assetSrc2(e.frames[0], "fx") : null });
 }
 
-const AFFIX_SCHEMA = [
-  { k: "id", label: "id", type: "text" },
-  { k: "name", label: "名称", type: "text" },
-  { k: "prefix", label: "名称前缀", type: "text" },
-  { k: "rarity", label: "稀有度", type: "select", options: [["magic", "精良"], ["rare", "稀有"], ["unique", "传说"]] },
-  { k: "weight", label: "抽取权重", type: "number", def: 10 },
-  { k: "slots", label: "适用槽(每行一个)", type: "lines", rows: 3 },
-  { k: "mods.atk", label: "攻击+", type: "number" },
-  { k: "mods.def", label: "防御+", type: "number" },
-  { k: "mods.hp", label: "生命+", type: "number" },
-  { k: "mods.mp", label: "精力+", type: "number" },
-  { k: "mods.hit", label: "攻速+", type: "number" },
-  { k: "mods.spd", label: "速度+", type: "number" },
-];
-// ---------- 界面（HUD / 背包 / 商店等元件的可视化布局） ----------
 let uiTabCleanup = null;
 function tabUi() {
   mainEl.append(h("div", { class: "ed-hint" },
@@ -923,18 +729,6 @@ function tabAffixes() {
 
 // 传送点（P4）：踩到该格即解锁，解锁后可在地点之间往返传送。
 // map 必须与「地图」页的地图名完全一致，否则运行时会找不到图。
-const WAYPOINT_SCHEMA = [
-  { group: "基本" },
-  { k: "id", label: "id", hint: "稳定标识，存档记录解锁用它；改名会丢解锁进度" },
-  { k: "name", label: "显示名", type: "text" },
-  { k: "map", label: "所在地图", type: "text", hint: "必须与地图页的地图名一致" },
-  { group: "位置" },
-  { k: "row", label: "行", type: "number" }, { k: "col", label: "列", type: "number" },
-  { k: "act", label: "章节", type: "number", hint: "面板按章节分组，数字小的排前面" },
-  { group: "说明" },
-  { k: "desc", label: "描述", type: "textarea", rows: 2 },
-];
-
 function tabWaypoints() {
   const list = ED.content.waypoints || (ED.content.waypoints = []);
   mainEl.append(h("div", { class: "ed-hint" },
@@ -947,22 +741,6 @@ function tabWaypoints() {
 }
 
 // 暗金物品：绑定到一个物品模板名，掉落时用**固定词缀替换**随机词缀。
-const UNIQUE_SCHEMA = [
-  { group: "基本" },
-  { k: "id", label: "id", hint: "稳定标识；改名会让已有实例失去绑定" },
-  { k: "name", label: "物品模板名", hint: "必须是物品页里已有的名字，否则永远掉不出来" },
-  { k: "uname", label: "暗金名", hint: "玩家看到的独特名（如「破军·凌锋」）" },
-  { group: "固定属性" },
-  { k: "atk", label: "攻击", type: "number", hint: "会替换随机词缀，不是叠加" },
-  { k: "def", label: "防御", type: "number" },
-  { k: "hp", label: "气血", type: "number" },
-  { k: "mp", label: "内力", type: "number" },
-  { k: "spd", label: "攻速", type: "number" },
-  { group: "说明" },
-  { k: "desc", label: "描述", type: "textarea", rows: 2 },
-];
-
-// 把扁平的 atk/def/... 字段收成 mods 对象（engine 里存的是 mods）。
 function flattenMods(o) {
   const mods = {};
   for (const k of ["atk", "def", "hp", "mp", "spd", "hit"]) if (o[k]) mods[k] = Number(o[k]);
@@ -1396,304 +1174,6 @@ function tabPmg() {
   // 与其它分页一致：左列表行首缩略图
   drawList();
   drawRight();
-}
-
-// ---------- 音频（音乐 / 音效）----------
-// 之前音乐/音效都是手打文件名的文本框，容易打错且无从确认文件是否存在。
-// 这一页把版本里的音频全部列出来，可试听；其它分页的音频字段改成从这里选。
-function tabAudio() {
-  mainEl.append(h("h3", null, "音频（音乐 / 音效）"));
-  mainEl.append(rhint("列出「默认版本 + 当前版本」的全部音频。上传的新音频以 data URL 存进当前版本。"
-    + "其它分页里的音乐/音效字段会直接从这里选，不再手打文件名。"));
-
-  const idx0 = buildAssetIndexAsync({
-    versions: null, currentId: ED.id, images: ED.images,
-    items: ED.items, skills: ED.skills, npcs: ED.npcs, buffs: ED.buffs || [],
-    charsMap: A.chars || {}, maps: Object.values(ED.maps || {}),
-  });
-  // 编辑器里上传的音频覆盖表（与图片的 ED.images 同机制，独立存放以免混淆）
-  if (!ED.sounds) ED.sounds = {};
-
-  const split = h("div", { class: "ed-split" });
-  const left = h("div", { class: "ed-split-list" });
-  const right = h("div", { class: "ed-split-form" });
-  split.append(left, mkSplitResizer("audio", left), right);
-  mainEl.append(split);
-
-  let query = "";
-  let selPath = null;
-  let list = [];
-
-  const searchIn = h("input", { type: "text", placeholder: "搜索音频文件名…" });
-  const cntEl = h("span", { class: "ed-count" });
-  left.append(h("div", { class: "ed-tools", style: "padding:6px" }, h("div", { class: "ed-search" }, searchIn), cntEl));
-  const listWrap = h("div", { class: "ed-tablescroll" });
-  left.append(listWrap);
-
-  const rows = new Map();
-  const highlight = () => { for (const [k, tr] of rows) tr.classList.toggle("on", k === selPath); };
-
-  const drawList = () => {
-    rows.clear();
-    clear(listWrap);
-    const q = query.trim().toLowerCase();
-    const show = q ? list.filter(x => x.toLowerCase().includes(q)) : list;
-    cntEl.textContent = "共 " + list.length + " 个文件" + (q ? " / 显示 " + show.length : "");
-    const tbl = h("table", { class: "ed-table" });
-    tbl.append(h("thead", null, h("tr", null, h("th", null, "文件"), h("th", null, "目录"), h("th", null, "状态"))));
-    const tb = h("tbody");
-    let lastG = null;
-    for (const p2 of show) {
-      const g = p2.includes("/sound/") ? "音效 sound/" : "音乐 music/";
-      if (g !== lastG) { tb.append(h("tr", { class: "ed-grouprow" }, h("td", { colspan: 3 }, g))); lastG = g; }
-      const tr = h("tr", { class: p2 === selPath ? "on" : "" });
-      const over = !!ED.sounds[p2];
-      tr.append(h("td", { style: "font-size:11px;word-break:break-all" }, p2.split("/").pop()),
-        h("td", { style: "font-size:10px;color:#6b737e" }, p2.replace(/^assets\//, "").replace(/\/[^/]+$/, "")),
-        h("td", { style: "font-size:10px;color:" + (over ? "#f0d060" : "#6b737e") }, over ? "本版覆盖" : "原版"));
-      tr.onclick = () => { selPath = p2; highlight(); drawDetail(); };
-      rows.set(p2, tr);
-      tb.append(tr);
-    }
-    if (!show.length) tb.append(h("tr", null, h("td", { colspan: 3 }, h("div", { class: "ed-empty" }, "没有匹配的音频"))));
-    tbl.append(tb);
-    listWrap.append(tbl);
-  };
-  let searchT = 0;
-  searchIn.oninput = () => { query = searchIn.value; clearTimeout(searchT); searchT = setTimeout(drawList, 150); };
-
-  let au = null;
-  const stop = () => { if (au) { au.pause(); au = null; } };
-  // 每次重绘详情前先清理上一个详情的副作用（波形窗口监听 / AudioContext）
-  let detailCleanup = null;
-
-  const drawDetail = () => {
-    stop();
-    if (detailCleanup) { try { detailCleanup(); } catch (e) { } detailCleanup = null; }
-    clear(right);
-    if (!selPath) { right.append(h("div", { class: "ed-empty" }, "左侧选择一个音频文件")); return; }
-    const over = !!ED.sounds[selPath];
-    right.append(h("h3", { style: "margin-top:0" }, selPath.split("/").pop()));
-    right.append(rhint(selPath));
-
-    // 资源根是 versions/<id>/，裸写 assets/... 会 404 → 统一走 audioSrc 解析
-    const src = ED.sounds[selPath] || audioSrc(selPath, selPath.includes("/sound/") ? "sound" : "music");
-
-    // ---------- 试听：波形 + 进度条 + 变调 ----------
-    const g1 = h("div", { class: "ed-group" });
-    g1.append(h("div", { class: "ed-grouptitle" }, "试听预览"));
-
-    const playBtn = h("button", { class: "ed-btn" }, "▶ 播放");
-    const timeEl = h("span", { class: "ed-wave-time" }, "0:00.0 / --:--");
-    const srcEl = h("span", { class: "ed-hint", style: "margin-left:10px" },
-      "来源：" + (over ? "本版本上传" : "默认版本"));
-
-    const wave = waveBar({
-      msg: "正在解码波形…（后台进行，可先播放）",
-      onSeek: t => {
-        if (!au || !isFinite(au.duration)) return;
-        au.currentTime = t * au.duration;
-        wave.setProgress(t);
-        timeEl.textContent = fmtTime(au.currentTime) + " / " + fmtTime(au.duration);
-      },
-    });
-    g1.append(wave.el);
-    g1.append(h("div", { class: "ed-row" }, playBtn, timeEl, srcEl));
-
-    // 音高（只影响编辑器预览，不影响游戏内播放）
-    const pitch = h("input", { type: "range", min: "-12", max: "12", step: "1", value: "0" });
-    pitch.style.flex = "1";
-    const pitchVal = h("span", { class: "ed-wave-time", style: "min-width:150px" }, "原调");
-    const pitchReset = h("button", { class: "ed-btn ghost", title: "回到原调" }, "↺");
-    const pitchRow = h("div", { class: "ed-row wide" },
-      h("label", null, "音高"), h("div", { class: "ed-pitch" }, pitch, pitchVal, pitchReset));
-    const applyPitch = () => {
-      const semi = parseFloat(pitch.value) || 0;
-      const rate = Math.pow(2, semi / 12);
-      pitchVal.textContent = semi === 0 ? "原调" : (semi > 0 ? "+" : "") + semi + " 半音（×" + rate.toFixed(2) + "）";
-      if (au) {
-        // 变调而非变速：preservesPitch=false 才会真的改变音高
-        au.playbackRate = rate;
-        try { au.preservesPitch = false; } catch (e) { /* 旧浏览器忽略 */ }
-        try { au.mozPreservesPitch = false; } catch (e) { /* 同上 */ }
-        try { au.webkitPreservesPitch = false; } catch (e) { /* 同上 */ }
-      }
-    };
-    pitch.oninput = applyPitch;
-    pitchReset.onclick = () => { pitch.value = "0"; applyPitch(); };
-    g1.append(pitchRow);
-
-    // 音量：同样只影响编辑器试听（游戏内音量由玩家设置 / 配置页的「音频默认音量」决定）
-    const vol = h("input", { type: "range", min: "0", max: "100", step: "1", value: "80" });
-    vol.style.flex = "1";
-    const volVal = h("span", { class: "ed-wave-time", style: "min-width:150px" }, "80%");
-    const applyVol = () => {
-      const v = (parseFloat(vol.value) || 0) / 100;
-      volVal.textContent = Math.round(v * 100) + "%";
-      if (au) au.volume = v;
-    };
-    vol.oninput = applyVol;
-    g1.append(h("div", { class: "ed-row wide" }, h("label", null, "音量"),
-      h("div", { class: "ed-pitch" }, vol, volVal)));
-    g1.append(h("div", { class: "ed-ghint" },
-      "音高 / 音量只作用于编辑器里的试听，不写进数据、也不影响游戏内播放。"
-      + "游戏默认音量在「升级数值」页的「音频默认音量」里配。"));
-    right.append(g1);
-
-    // ---------- 元数据 ----------
-    const g2 = h("div", { class: "ed-group" });
-    g2.append(h("div", { class: "ed-grouptitle" }, "文件信息"));
-    const info = h("dl", { class: "ed-kv" });
-    const kv = (k, v, cls) => {
-      info.append(h("dt", null, k), h("dd", { class: cls || "" }, v));
-    };
-    kv("文件名", selPath.split("/").pop());
-    kv("路径", selPath, "mono");
-    const sizeDd = h("dd", null, "…"), lenDd = h("dd", null, "…");
-    const fmtDd = h("dd", null, "…"), rateDd = h("dd", null, "…"), chDd = h("dd", null, "…");
-    const decodeMsEl = h("dd", { class: "mono" }, "…");
-    info.append(h("dt", null, "文件大小"), sizeDd,
-      h("dt", null, "时长"), lenDd,
-      h("dt", null, "格式"), fmtDd,
-      h("dt", null, "采样率"), rateDd,
-      h("dt", null, "声道"), chDd,
-      h("dt", null, "波形解码"), decodeMsEl);
-    g2.append(info);
-    right.append(g2);
-
-    // ---- 元数据加载：HEAD 取大小/类型，Audio 取时长，WebAudio 解码出波形+采样率 ----
-    let dead = false;
-    const loadMeta = async () => {
-      // 1) 文件大小 / MIME
-      try {
-        const r = await fetch(src, { method: "HEAD" });
-        if (!dead && r.ok) {
-          const len = parseInt(r.headers.get("content-length") || "", 10);
-          sizeDd.textContent = isFinite(len) ? fmtSize(len) : "未知";
-          const ct = r.headers.get("content-type") || "";
-          fmtDd.textContent = ct || (selPath.match(/\.[^.]+$/) || [""])[0];
-        }
-      } catch (e) { if (!dead) { sizeDd.textContent = "未知"; } }
-      // 2) 真实采样率 / 声道数：从文件头读，不需要完整解码。
-      //    （decodePeaks 在 Worker 里用 8 kHz 上下文解码，
-      //      它返回的 sampleRate 是重采样后的值，不能当文件真实值显示。）
-      const readHeader = () => new Promise(res => {
-        const a = new Audio();
-        a.preload = "metadata";
-        let done = false;
-        const fin = v => { if (!done) { done = true; res(v); } };
-        a.onloadedmetadata = () => fin(a);
-        a.onerror = () => fin(null);
-        a.src = src;
-        setTimeout(() => fin(null), 5000);
-      });
-      readHeader().then(a => {
-        if (dead || !a) return;
-        if (a.duration) lenDd.textContent = fmtTime(a.duration) + "（" + a.duration.toFixed(2) + " 秒）";
-      });
-
-      // 3) 波形 + 时长：解码在 Web Worker 里做（不占主线程），结果按文件缓存
-      try {
-        const t0 = performance.now();
-        const d = await decodePeaks(null, src, 220);
-        if (dead || !d) return;
-        const ms = Math.round(performance.now() - t0);
-        wave.setPeaks(d);
-        lenDd.textContent = fmtTime(d.duration) + "（" + d.duration.toFixed(2) + " 秒）";
-        // 采样率/声道是解码时上下文的值（原文件采样率浏览器不暴露）
-        rateDd.textContent = d.sampleRate.toLocaleString() + " Hz";
-        rateDd.title = "解码时的采样率（原始采样率浏览器不提供；解码为画波形已重采样，不影响播放）";
-        chDd.textContent = d.channels === 1 ? "单声道" : (d.channels === 2 ? "立体声" : d.channels + " 声道");
-        timeEl.textContent = "0:00.0 / " + fmtTime(d.duration);
-        decodeMsEl.textContent = d.cached ? "已缓存" : (ms + " ms");
-        // 解码完当前文件后，后台预取列表里相邻的 2 个（用户左右切时就是 0 ms）。
-        // 解码很贵（~0.6 s/个），所以只预取相邻项，不整表预热。
-        if (!dead && !d.cached) {
-          const order = list.filter(p2 => p2 !== selPath);
-          for (const p2 of order.slice(0, 2)) prefetchPeaks(p2, 220);
-        }
-
-      } catch (e) {
-        if (!dead) {
-          wave.setMsg("无法解码波形（仍可播放）");
-          // 退化：只用 <audio> 拿时长
-          const a = new Audio(src);
-          a.onloadedmetadata = () => {
-            if (dead) return;
-            lenDd.textContent = fmtTime(a.duration) + "（" + a.duration.toFixed(2) + " 秒）";
-            timeEl.textContent = "0:00.0 / " + fmtTime(a.duration);
-          };
-          a.onerror = () => { if (!dead) lenDd.textContent = "无法读取"; };
-        }
-      }
-    };
-    loadMeta();
-
-    // ---- 播放：波形进度同步 ----
-    playBtn.onclick = () => {
-      if (au) { stop(); playBtn.textContent = "▶ 播放"; wave.setProgress(0); return; }
-      au = new Audio(src);
-      applyPitch();   // 新建的 Audio 要重新套用当前音高
-      applyVol();     // 以及当前音量
-      // 注意：这些回调里不能直接用外层 au —— stop() 会把它置 null，
-      // 但已排队的事件仍可能触发（切文件/重复点时），必须先判空。
-      const self = au;
-      au.onloadedmetadata = () => {
-        if (dead || !self) return;
-        timeEl.textContent = fmtTime(self.currentTime) + " / " + fmtTime(self.duration);
-      };
-      au.ontimeupdate = () => {
-        if (dead || !self || !isFinite(self.duration) || self.duration <= 0) return;
-        const t = self.currentTime / self.duration;
-        wave.setProgress(t);
-        timeEl.textContent = fmtTime(self.currentTime) + " / " + fmtTime(self.duration);
-      };
-      au.onended = () => { if (au === self) { au = null; playBtn.textContent = "▶ 播放"; wave.setProgress(0); } };
-      au.onerror = () => { if (au === self) { au = null; playBtn.textContent = "▶ 播放"; wave.setMsg("无法播放该文件"); } };
-      au.play().then(() => { playBtn.textContent = "■ 停止"; }).catch(() => { au = null; });
-    };
-    // 页面切走时清掉波形窗口的监听与动画帧（解码在 Worker 里，无需手动关闭）
-    detailCleanup = () => { dead = true; wave.destroy(); };
-
-    const g3 = h("div", { class: "ed-group" });
-    g3.append(h("div", { class: "ed-grouptitle" }, "替换音频"));
-    const file = h("input", { type: "file", accept: "audio/*", style: "display:none" });
-    file.onchange = async () => {
-      const f = file.files[0]; if (!f) return;
-      ED.sounds[selPath] = await readImageFile(f);   // 复用：FileReader → data URL
-      mark(); drawList(); drawDetail();
-    };
-    g3.append(h("div", { class: "ed-row" },
-      h("button", { class: "ed-btn", onclick: () => file.click() }, "上传替换…"), file,
-      over ? h("button", { class: "ed-btn danger", onclick: () => { delete ED.sounds[selPath]; mark(); drawList(); drawDetail(); } }, "还原为原版") : null));
-    right.append(g3);
-
-    // 引用情况：这个音频被谁用了（地图音乐 / 标题结局 / 技能音效 …）
-    const g4 = h("div", { class: "ed-group" });
-    g4.append(h("div", { class: "ed-grouptitle" }, "被引用处"));
-    const name = selPath.split("/").pop();
-    const refs = [];
-    for (const [mid, mp] of Object.entries(ED.maps || {})) {
-      if (mp && mp.music === name) refs.push("地图「" + (mp.name || mid) + "」");
-    }
-    const gm = (ED.content.game && ED.content.game.music) || {};
-    if (gm.start === name) refs.push("标题音乐");
-    if (gm.end === name) refs.push("结局音乐");
-    g4.append(h("div", { class: "ed-ghint" }, refs.length ? refs.join("、") : "（暂无引用）"));
-    right.append(g4);
-  };
-
-  clear(listWrap);
-  listWrap.append(h("div", { class: "ed-empty" }, "正在建立音频索引…"));
-  idx0.then(() => {
-    list = audioIndex().filter(p2 => /.(mp3|wav|ogg|m4a)$/i.test(p2));
-    // 编辑器里上传过、但磁盘清单没有的也列出来
-    for (const k of Object.keys(ED.sounds)) if (!list.includes(k)) list.push(k);
-    list.sort();
-    if (!selPath || !list.includes(selPath)) selPath = list[0] || null;
-    drawList();
-    drawDetail();
-  });
 }
 
 function tabAssets() {
