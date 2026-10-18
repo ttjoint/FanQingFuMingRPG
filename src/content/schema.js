@@ -18,6 +18,30 @@ const num = (v, d) => (typeof v === "number" && isFinite(v) ? v : (v == null || 
 const str = (v, d = "") => (v == null ? d : String(v));
 const arr = v => (Array.isArray(v) ? v : []);
 
+// 抗性规整。接受三种写法（见 engine/damage.js resistOf）：
+//   { fire: 50 } / [{type,value}] / 50（单值，对所有类型生效）
+// 统一输出为「有序数组」[{type,value}]，便于编辑器用表格编辑；
+// 空对象/无值返回 null（= 无抗性，避免在每个 NPC 上存一堆 0）。
+function normalizeResist(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return isFinite(v) && v !== 0 ? [{ type: "all", value: v }] : null;
+  const out = [];
+  if (Array.isArray(v)) {
+    for (const e of v) {
+      if (!e || typeof e !== "object") continue;
+      const t = str(e.type);
+      const n = num(e.value, 0);
+      if (t && n !== 0) out.push({ type: t, value: n });
+    }
+  } else if (typeof v === "object") {
+    for (const k of Object.keys(v)) {
+      const n = num(v[k], 0);
+      if (n !== 0) out.push({ type: k, value: n });
+    }
+  }
+  return out.length ? out : null;
+}
+
 // ---- NPC ----
 export function normalizeNpc(n) {
   const o = clone(n) || {};
@@ -29,6 +53,9 @@ export function normalizeNpc(n) {
   o.hp = num(o.hp, 100);
   o.attack = num(o.attack, 0);
   o.defence = num(o.defence, 0);
+  // 抗性：按伤害类型减免百分比（可负=弱点，>=100=免疫）。
+  // 也支持单一数值（对所有类型生效，兼容旧数据）。解析见 engine/damage.js resistOf()。
+  o.resist = normalizeResist(o.resist);
   o.level = num(o.level, 1);
   o.exp = num(o.exp, 0);
   o.hostile = num(o.hostile, 0);
@@ -136,6 +163,9 @@ export function normalizeSkill(sk) {
   o.mp = num(o.mp, 0);
   o.reqLevel = num(o.reqLevel, 1);
   o.power = num(o.power, 0);
+  // 伤害类型：物理/火焰/冰霜/闪电/毒素……由配置里的类型表给出合法值，
+  // 引擎层只当作不透明 key 使用（见 engine/damage.js）。缺省为物理。
+  o.damageType = str(o.damageType, "physical");
   o.sound = str(o.sound, "");
   o.icon = str(o.icon, "");
   o.frames = arr(o.frames).map(String);

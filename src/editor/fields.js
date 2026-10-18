@@ -205,6 +205,12 @@ export function renderForm(host, schema, obj, onChange) {
       groupHost.append(h("div", { class: "ed-field wide" }, lab, box));
       continue;
     }
+    if (f.type === "resist") {
+      const box = h("div", { class: "ed-drops" });
+      renderResist(box, obj, f, onChange);
+      groupHost.append(h("div", { class: "ed-field wide" }, lab, box));
+      continue;
+    }
     if (f.type === "buffeffects") {
       const box = h("div", { class: "ed-drops" });
       renderBuffEffects(box, obj, f, onChange);
@@ -643,4 +649,53 @@ export function autoGrow(ta, minRows) {
   const min = Math.round(line * rows + pad);
   const need = Math.max(min, ta.scrollHeight + 2);
   ta.style.height = need + "px";
+}
+
+// 抗性编辑器：obj[f.k] 为 [{type, value}]（schema.normalizeResist 的输出）。
+// 也兼容映射 {fire:50} / 单数值 50 的旧写法，编辑时统一成数组。
+// f.options 为可选的伤害类型列表（编辑器从配置/常量给出）。
+export function renderResist(host, obj, f, onChange) {
+  const types = f.options || [];
+  // 把各种写法统一成数组（就地替换，保持与 schema 一致）
+  const list = () => {
+    let v = obj[f.k];
+    if (!Array.isArray(v)) {
+      const conv = [];
+      if (typeof v === "number" && isFinite(v) && v !== 0) conv.push({ type: "all", value: v });
+      else if (v && typeof v === "object") {
+        for (const k of Object.keys(v)) {
+          const n = Number(v[k]);
+          if (Number.isFinite(n) && n !== 0) conv.push({ type: k, value: n });
+        }
+      }
+      v = obj[f.k] = conv;
+    }
+    return v;
+  };
+  const redraw = () => {
+    clear(host);
+    const arr = list();
+    arr.forEach((e, i) => {
+      const sel = h("select", { onchange: () => { e.type = sel.value; onChange && onChange(f); } });
+      for (const t of types) {
+        const tv = Array.isArray(t) ? t[0] : (t.value ?? t);
+        const tl = Array.isArray(t) ? t[1] : (t.label ?? String(t));
+        sel.append(h("option", { value: tv }, tl));
+      }
+      // 允许手写的未知类型，避免静默改写用户数据
+      if (e.type && !types.some(t => (Array.isArray(t) ? t[0] : (t.value ?? t)) === e.type))
+        sel.append(h("option", { value: e.type }, e.type + "（未知）"));
+      sel.value = e.type;
+      const num = h("input", { type: "number", value: String(e.value ?? 0), style: "width:72px",
+        oninput: () => { e.value = Number(num.value) || 0; onChange && onChange(f); } });
+      host.append(h("div", { class: "ed-row" }, sel, num, h("span", { class: "ed-dim" }, "%"),
+        h("button", { class: "ed-btn danger", onclick: () => { arr.splice(i, 1); onChange && onChange(f); redraw(); } }, "删")));
+    });
+    host.append(h("button", { class: "ed-btn", onclick: () => {
+      const t0 = types[0];
+      arr.push({ type: (Array.isArray(t0) ? t0[0] : (t0?.value ?? t0)) || "all", value: 0 });
+      onChange && onChange(f); redraw();
+    } }, "＋ 添加抗性"));
+  };
+  redraw();
 }

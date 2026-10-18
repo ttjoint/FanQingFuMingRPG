@@ -538,6 +538,15 @@ function tabScripts() {
 // 结构复杂且需可扩展，因此用 JSON 文本编辑器直接编辑，并提供常用模板一键插入。
 const AI_COND_HINT = "条件(when)可用：always, hpBelow, hpAbove, mpBelow, mpAbove, hasTarget, noTarget, targetDead, targetInRange(melee/aggro/数字), targetDistBelow, aggroOver, lostOver, allyBeingAttacked, nearbyEnemyCount, nearbyAllyCount, random, cooldownReady, leashExceeded（可组合 all/any/not）";
 const AI_ACT_HINT = "动作(do.action)可用：idle, wander(radius,interval,speed), chase(stopRange,maxTime,speed), attack(cooldown,rage), flee(range,speed), assist(radius), guard(leash)";
+
+// 伤害类型选项。引擎把类型当作不透明 key（engine/damage.js），
+// 这里只是给编辑器一个常用集合；抗性表里手写的自定义类型会原样保留。
+// "all" = 对所有类型生效（等价于 schema 把单数值规整成的形式）。
+// 形如 [值, 显示名]，与编辑器其它 select 字段的 options 约定一致。
+const DMG_TYPE_OPTIONS = [
+  ["physical", "物理"], ["fire", "火焰"], ["cold", "冰霜"],
+  ["lightning", "闪电"], ["poison", "毒素"], ["all", "全部(+抗性)"],
+];
 const AI_TEMPLATES = {
   "站桩": { idle: { action: "idle" }, rules: [] },
   "原地游荡": { idle: { action: "wander", radius: 160, interval: [2, 6] }, rules: [] },
@@ -698,6 +707,7 @@ const NPC_SCHEMA_FIELDS = [
   { k: "level", label: "等级", type: "number" }, { k: "exp", label: "经验", type: "number" },
   { k: "hp", label: "生命", type: "number" }, { k: "attack", label: "攻击", type: "number" },
   { k: "defence", label: "防御", type: "number" },
+  { k: "resist", label: "抗性(%)", type: "resist", options: DMG_TYPE_OPTIONS, hint: "按伤害类型减免：正值减伤、负值受伤加重、>=100 免疫。" },
   { k: "speed", label: "移动速度", type: "number", def: 45 }, { k: "runSpeed", label: "追击速度", type: "number", def: 70 },
 
   { group: "行为" },
@@ -767,6 +777,7 @@ const SKILL_SCHEMA = [
   { group: "数值" },
   { k: "range", label: "射程", type: "number" }, { k: "mp", label: "耗精力", type: "number" },
   { k: "power", label: "威力", type: "number" }, { k: "reqLevel", label: "需求等级", type: "number" },
+  { k: "damageType", label: "伤害类型", type: "select", options: DMG_TYPE_OPTIONS },
   { group: "表现" },
   { k: "icon", label: "图标", type: "image", dir: "skill_icons" },
   { k: "frames", label: "特效帧", type: "frames", dir: "skill" },

@@ -10,7 +10,10 @@ export const DEFAULT_CONFIG = {
   levelUp: { expMul: 1.5, expAdd: 200, hpMax: 40, mpMax: 20, attack: 5, defence: 3, attackSpeed: 3, maxLevel: 99, healOnLevel: true },
   combat: { rangeMin: 40, attackCD: 0.9, mpDrainRun: 1.6, npcAttackCD: 1.1, npcAggro: 260, npcMelee: 46, meleeMaxRange: 60,
             // 命中已改为“结算瞬间距离判定”：范围内必中，跑出 range+hitBuffer 才落空。
-            hitBuffer: 40, damageVariance: 0.25 },
+            hitBuffer: 40, damageVariance: 0.25,
+            // 抗性上限（百分数）：超过此值的抗性不再生效，除非内容显式抬高。
+            // 抗性 >=100 仍为完全免疫（优先级高于此上限，见 engine/damage.js）。
+            maxResist: 75 },
   economy: { sellRate: 0.5 },
   inventory: { packItem: "包裹", packSize: 25 },
   // 掉落物：存在时长 / 散布 / 拾取与保护 / 地面堆叠合并半径。

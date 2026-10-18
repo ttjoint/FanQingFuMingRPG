@@ -14,6 +14,7 @@ import { spawnProjectile } from "./projectiles.js";
 import { spawnFx } from "./effects.js";
 import { playBuffFx } from "./buffs.js";
 import { statMods, applyBuff } from "../engine/buff.js";
+import { resolveDamage, applyDamageBonus, DEFAULT_DAMAGE_TYPE } from "../engine/damage.js";
 
 // 阵营关系表（内容内置，只读）；缺失时 canAttack 退化为“有攻击力即可”。
 const factionTable = ctx => (ctx.assets && ctx.assets.factionTable) || null;
@@ -185,8 +186,18 @@ export function resolveHit(ctx, attacker, target, sk, opts) {
   const def = (target.defence || target.def || 0) + dm.def;
   // 伤害在 [min,max] 内浮动（不再"没打中 0 伤害"）。
   const variance = ctx.config.combat && ctx.config.combat.damageVariance;
-  const amount = dealDamage((o.atk || 0) + am.atk, power, def, variance);
-  const dead = applyDamage(ctx, target, amount, attacker);
+  const raw = dealDamage((o.atk || 0) + am.atk, power, def, variance);
+  // 元素/抗性结算：先应用攻方的伤害加成（词缀），再按守方抗性减免。
+  // 未标注类型的技能一律按物理处理，行为与旧版一致。
+  const dtype = (sk && sk.damageType) || DEFAULT_DAMAGE_TYPE;
+  const bonus = attacker && attacker.dmgBonus;
+  const boosted = applyDamageBonus(raw, dtype, bonus);
+  const res = resolveDamage([{ type: dtype, amount: boosted }], target, {
+    maxResist: ctx.config.combat && ctx.config.combat.maxResist,
+  });
+  // 完全免疫（抗性>=100 或被全部吸收）时伤害为 0，但仍然算“打中了”。
+  const amount = res.total;
+  const dead = amount > 0 ? applyDamage(ctx, target, amount, attacker) : false;
   // 命中施加 buff / 治疗 / 击退（阶段 C/D）。
   applyOnHit(ctx, attacker, target, sk);
   return { hit: true, dmg: amount, dead };

@@ -113,6 +113,44 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     return enemy.dead === true;
   })).toBe(true);
 
+  // 伤害类型/抗性：同一发攻击，火抗 50 的怪承伤减半，冰霜弱点 -25 承伤增加。
+  // 这是 P0 地基的端到端回归——纯逻辑单测在 test/damage.test.mjs。
+  expect(await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const c = await import("/src/systems/combat.js");
+    const G = window.__GAME__.G, A = window.__GAME__.A, rt = getRuntime();
+    const tmpl = A.npcsData.find(n => n.attack > 0);
+    const mk = (resist) => {
+      const e = makeNPC(tmpl, 0, 0);
+      e.x = G.player.x; e.y = G.player.y + 30;
+      e.hp = 100000; e.hpMax = 100000; e.resist = resist;
+      G.npcs.push(e);
+      return e;
+    };
+    // 固定伤害 100，用 forceHit + 固定威力，排除浮动与命中判定干扰
+    const hit = (victim, type) => {
+      const before = victim.hp;
+      c.resolveHit(rt, G.player, victim, { type: 1, power: 100, damageType: type, mode: "melee" },
+        { atk: 0, forceHit: true, reach: 9999 });
+      return before - victim.hp;
+    };
+    // 玩家攻击力拉到 0，只靠 power 走固定底数
+    const savedAtk = G.stats.attack; G.stats.attack = 0;
+    const e1 = mk([{ type: "fire", value: 50 }]);
+    const e2 = mk([{ type: "cold", value: -25 }]);
+    const e3 = mk([{ type: "fire", value: 100 }]);
+    const dmgFire = hit(e1, "fire");
+    const dmgCold = hit(e2, "cold");
+    const dmgImmune = hit(e3, "fire");
+    const dmgPlain = hit(mk(null), "physical");
+    G.stats.attack = savedAtk;
+    G.npcs = G.npcs.filter(n => n !== e1 && n !== e2 && n !== e3);
+    // 火抗 50 → 约一半；冰霜 -25 → 更多；免疫 → 0；无抗性 → 基准
+    return dmgPlain > 0 && dmgFire > 0 && dmgFire < dmgPlain
+      && dmgCold > dmgPlain && dmgImmune === 0;
+  })).toBe(true);
+
   // 阵营系统：按 faction 判定敌对（不靠 attack 有无），且实例阵营可动态改。
   expect(await page.evaluate(async () => {
     const { getRuntime } = await import("/src/runtime/context.js");
