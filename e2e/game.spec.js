@@ -1030,6 +1030,52 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     expect(sm.poor).toBe(false);                    // 没钱不能赌
   }
 
+  // ---- 难度分级（P4）----
+  // 所有敌人数值此前都是写死的，想"再来一遍更硬"只能改 NPC 表（会影响所有存档）。
+  // 难度是玩家侧乘数，与内容数据正交。
+  const df = await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const { loadMap } = await import("/src/world/map.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    // 切图有副作用：后面的编辑器用例依赖"当前地图 = 进入时那张"。
+    // 所以先记下来，测完必须切回去。
+    const orig = G.currentMap;
+    const maps = Object.values(rt.assets.mapsIndex || {});   // {序号: 地图名}
+    // 别按名字挑（名字里带中文，脚本/终端编码容易出岔子）：
+    // 直接找第一张"有可战斗单位"的图。
+    let map = maps[0];
+    for (const m of maps) {
+      loadMap(rt, m);
+      if (G.npcs.some(x => !x.dead && x.hpMax > 0 && x.atk > 0)) { map = m; break; }
+    }
+    const pick = () => {
+      const n = G.npcs.find(x => !x.dead && x.hpMax > 0 && x.atk > 0);
+      return n ? { hp: n.hpMax, atk: n.atk, name: n.name } : null;
+    };
+    const out = { map };
+    G.difficulty = "normal"; loadMap(rt, map); out.normal = pick();
+    G.difficulty = "nightmare"; loadMap(rt, map); out.nm = pick();
+    G.difficulty = "hell"; loadMap(rt, map); out.hell = pick();
+    // 缺省/未知 id 必须退回普通档，而不是把怪变成 0 血 0 攻
+    G.difficulty = "不存在的档"; loadMap(rt, map); out.unknown = pick();
+    G.difficulty = "normal";
+    loadMap(rt, orig);          // 恢复原图，别把副作用留给后面的用例
+    out.restored = G.currentMap;
+    return out;
+  });
+  if (df.normal) {
+    expect(df.normal.hp).toBeGreaterThan(0);
+    expect(df.normal.atk).toBeGreaterThan(0);
+    // 逐档变强
+    expect(df.nm.hp).toBeGreaterThan(df.normal.hp);
+    expect(df.hell.hp).toBeGreaterThan(df.nm.hp);
+    expect(df.nm.atk).toBeGreaterThan(df.normal.atk);
+    expect(df.hell.atk).toBeGreaterThan(df.nm.atk);
+    // 未知难度 id → 退回第一档（普通），不能变成 0
+    expect(df.unknown.hp).toBe(df.normal.hp);
+    expect(df.unknown.atk).toBe(df.normal.atk);
+  }
+
   // ---- 编辑器 ----
   await page.evaluate(() => { window.prompt = () => "PW版本"; window.confirm = () => true; });
   await page.evaluate(async () => { const m = await import("/src/editor/index.js"); await m.openEditor(); });

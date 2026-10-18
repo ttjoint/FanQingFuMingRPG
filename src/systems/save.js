@@ -46,6 +46,7 @@ export function serializeGame(ctx) {
     missions: JSON.parse(JSON.stringify(G.missions)), vars: { ...G.vars },
     notes: G.notes.slice(), factions: G.factions.slice(), love: { ...G.love }, vips: { ...G.vips },
     ground: JSON.parse(JSON.stringify(G.ground)),
+    difficulty: G.difficulty || "normal",
     npcs: G.npcs.map(n => diffNpc(ctx, n)),
   };
 }
@@ -81,6 +82,10 @@ export function deserializeGame(ctx, d) {
   G.skills = (d.skills || (CFG.player.startSkills || [])).slice(); G.skill = d.skill || G.skills[0] || CFG.player.startSkill;
   G.missions = d.missions || {}; G.vars = d.vars || {}; G.notes = d.notes || [];
   G.factions = d.factions || []; G.love = d.love || {}; G.vips = d.vips || {}; G.cursor = null;
+  // 难度必须在 loadMap **之前**恢复：loadMap 会按 spawns 重建 NPC，
+  // 而 spawnNPC 用的就是此刻 G.difficulty 的倍率。
+  // 顺序反了的话，读档后场上会是一批"普通难度数值"的怪。
+  G.difficulty = d.difficulty || "normal";
   reindex(G);
   loadMap(ctx, d.currentMap);
   if (!G.map) throw new Error("地图「" + d.currentMap + "」不存在（可能已被编辑器删除/改名）");   // 避免读档后黑屏

@@ -167,7 +167,25 @@ D2 的 build 多样性全部建立在这套正交体系上。
       - 单测 `test/smith.test.mjs` 12 例；E2E 钉住"钱扣了就必须真修好"、
         鉴定清标记、赌博只扣一次钱、没钱不能赌
 - [ ] **套装 / 暗金物品**（有稀有度，缺独特命名层级）
-- [ ] **难度分级**（依赖 P2 的 monsterLevel）
+- [x] **难度分级**
+      - `engine/difficulty.js`（纯逻辑）：`DIFFICULTIES`（普通/噩梦/地狱）/
+        `normalizeDifficulty` / `normalizeDifficulties` / `difficultyById` /
+        `scaleBy` / `monsterMults` / `difficultyIndex` / `cycleDifficulty`
+      - 只放大怪物侧（血量/伤害/经验/掉落），**不削弱玩家**——
+        削弱会让同一套装备在不同难度下手感割裂
+      - 掉落倍率**故意小于**强度倍率（地狱 hp×4 但 drop 只有 ×1.5），
+        否则最优解永远是无脑开最高难度；单测 `builtinsAreMonotonic` 钉住
+      - 倍率在 `spawnNPC` 时**烘进单位实例**（`applyDifficulty`），
+        战斗/经验/掉落各处不必再查难度，也保证同一场战斗内倍率一致
+      - `G.difficulty` 存**难度 id 字符串**（存档也存 id，不存下标——改顺序不串档）；
+        未知 id 退回第一档而不是报错（旧存档删过难度也能进游戏）
+      - UI：游戏内 **F2** 开难度面板，点一行切换，Esc 关闭
+      - 编辑器可覆盖难度表（`config.difficulties`，null = 用内置三档）
+      - ⚠️ **踩过的坑**：`scaleBy(x, null)` 曾按 0 处理（`Number(null) === 0`），
+        会让"没配倍率"变成"血量归零"。现在显式排除 null，单测钉住。
+      - ⚠️ **读档顺序**：`G.difficulty` 必须在 `loadMap` **之前**恢复，
+        否则读档后场上是一批普通难度数值的怪
+      - 单测 `test/difficulty.test.mjs` 9 例；E2E 钉住逐档变强 + 未知 id 退回普通
 - [ ] **雇佣兵 / 随从**（敌人 AI 已有协防/仇恨基础）
 
 ## P5 · 技术债与解耦

@@ -5,6 +5,7 @@ import { preloadChar } from "../core/assets.js";
 import { resolveNpc } from "../content/contentdb.js";
 import { npcFieldsFromTemplate } from "../content/npcFields.js";
 import { attachAll } from "../engine/ecs.js";
+import { monsterMults, scaleBy, difficultyById } from "../engine/difficulty.js";
 import { UNIT_COMPONENTS } from "../runtime/components.js";
 import { buildAiTable, normalizeProfile, makeBlackboard, stepAi } from "../engine/ai.js";
 import { createAiRuntime } from "../systems/aiActions.js";
@@ -31,7 +32,7 @@ function defaultPlans(ctx) {
 
 export function npcDataByName(ctx, nm) { return ctx.assets.npcsData.find(n => n.name === nm); }
 
-export function makeNPC(d, row, col, overrides) {
+export function makeNPC(d, row, col, overrides, ctx) {
   d = resolveNpc(d, overrides);   // 地图单位实例可用 overrides 单独覆盖模板属性
   const p = cellCenter(row, col);
   /** @type {any} */
@@ -39,11 +40,31 @@ export function makeNPC(d, row, col, overrides) {
     x: p.x, y: p.y, row, col, dir: 4, action: "stand", frame: 0, ft: 0,
     target: null, path: null, attackCD: 0, aggro: false, dead: false, dieT: 0, dmgT: 0, wanderT: 1 + Math.random() * 3 };
   attachAll(n, UNIT_COMPONENTS);   // 统一补齐组件默认字段（半径/速度/姿态…）
+  // 难度倍率：只放大怪物侧（血量/伤害），玩家不受影响。
+  // 在 spawn 时一次性烘进实例字段，战斗/经验/掉落各处都不用再查难度，
+  // 也保证"同一只怪在整场战斗里倍率一致"（中途改难度不会半血变满血）。
+  applyDifficulty(n, ctx);
   preloadChar(n.model);
   placeFree(n);   // 防止出生点与已有单位重叠
   // 记录"家"（出生/巡逻锚点）：AI 追击超出范围后据此返回，也用于 leashFrom 判定。
   n.homeX = n.x; n.homeY = n.y;
   return n;
+}
+
+// 把当前难度的倍率烘进单位。ctx 缺省（编辑器预览 / 旧调用）时按普通难度，
+// 即完全不改数值 —— 这样编辑器里看到的模板数字与游戏内一致。
+function applyDifficulty(n, ctx) {
+  const id = ctx && ctx.state && ctx.state.difficulty;
+  if (!id) return;
+  // G.difficulty 存的是**难度 id 字符串**（存档里也是），不是难度对象。
+  // 这里按配置表解析回定义；配置里没表时用内置三档。
+  const list = ctx.config && ctx.config.difficulties;
+  const mul = monsterMults(difficultyById(list, id));
+  if (mul.hp === 1 && mul.damage === 1) return;
+  n.hpMax = scaleBy(n.hpMax, mul.hp);
+  n.hp = scaleBy(n.hp, mul.hp);
+  n.atk = scaleBy(n.atk, mul.damage);
+  n.def = scaleBy(n.def, mul.damage);
 }
 
 // 若当前位置与其它单位重叠，就在附近格心找一个空位（最多外扩 3 圈）。
@@ -64,7 +85,7 @@ export function placeFree(e) {
 
 export function spawnNPC(ctx, id, row, col, overrides) {
   const d = ctx.assets.npcsData.find(n => n.id === id);
-  return d ? makeNPC(d, row, col, overrides) : null;
+  return d ? makeNPC(d, row, col, overrides, ctx) : null;
 }
 
 // 解析单位要用的 AI plan：优先 n.ai 引用 assets.ais；否则按是否有攻击力给默认。

@@ -8,6 +8,7 @@ import { dropGround } from "../systems/ground.js";
 import { startScript } from "../script/vm.js";
 import { canAttack } from "../engine/faction.js";
 import { rollDrops } from "../engine/lootTable.js";
+import { monsterMults, scaleBy, difficultyById } from "../engine/difficulty.js";
 import { skillRange as skRange, rollAttackHit, damage as dmgFormula } from "../engine/skill.js";
 import { normalizeTargeting, selectTargets, needsPrimary, isSelfOnly, tickCooldowns, isReady, startCooldown, knockbackTarget, hasCharge, spendCharge } from "../engine/targeting.js";
 import { applySynergy } from "../engine/skill.js";
@@ -343,7 +344,12 @@ export function killNPC(ctx, n) {
   n.atkT = 0; n.swingT = 0; n.hitPending = false; n.swingTarget = null; n.animSpeed = 1;
   if (n.ai$) { n.ai$.target = null; if (n.ai$.state) { n.ai$.state.returning = 0; n.ai$.state.aggroT = 0; } }
   n.action = "die"; n.frame = 0; n.ft = 0;
-  addExp(G, n.exp);
+  // 难度倍率：经验与掉落都按当前难度放大。
+  // 注意伤害/血量已经在 spawnNPC 时烘进单位了，这里只处理"击杀结算"部分。
+  // drop 倍率**故意小于** hp/damage 倍率（见 engine/difficulty.js），
+  // 否则最优解永远是无脑开最高难度。
+  const dmul = monsterMults(difficultyById(ctx.config && ctx.config.difficulties, G.difficulty));
+  addExp(G, scaleBy(n.exp, dmul.exp));
   G.stats.honor += 1;
   // 掉落由数据驱动（npcs.json 的 drops 字段）。经掉落表 roll，支持几率/数量区间/词缀。
   // 缩放旋钮来自 config.economy（dropRate/players）+ NPC 自身 level，见 engine/lootScale.js。
@@ -352,7 +358,8 @@ export function killNPC(ctx, n) {
   const eco = (ctx && ctx.config && ctx.config.economy) || {};
   const scale = {
     monsterLevel: n.level || 1,
-    dropRate: eco.dropRate == null ? 1 : eco.dropRate,
+    // 难度掉落倍率与经济的 dropRate 相乘（两者是独立的旋钮）。
+    dropRate: (eco.dropRate == null ? 1 : eco.dropRate) * dmul.drop,
     players: eco.players == null ? 1 : eco.players,
     levelStep: eco.rarityLevelStep == null ? 5 : eco.rarityLevelStep,
     strength: eco.rarityStrength == null ? 0.5 : eco.rarityStrength,

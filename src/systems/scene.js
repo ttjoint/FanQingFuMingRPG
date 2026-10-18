@@ -64,6 +64,8 @@ export function resetNewGame(ctx) {
   // 传送点解锁进度（P4）：属于"永久进度"，随存档走；新游戏从空开始。
   // 起始地图的传送点会在玩家踩上去时自动解锁（见 systems/waypoint.js）。
   G.waypoints = {};
+  // 难度默认普通档。存档会覆盖它（读档时写回 G.difficulty）。
+  G.difficulty = "normal";
 }
 
 // 开始新游戏：真正启动 main.gsp（其第一条就是 LoadInitialMap）。

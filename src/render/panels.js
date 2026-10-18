@@ -7,6 +7,7 @@ import { drawItemSlot } from "./hud.js";
 import { SETTINGS_BOX, SETTINGS_BAR, SETTINGS_BTN, uiRect, uiSlotRect } from "../core/layout.js";
 import { PACK_BOX } from "../core/layout.js";
 import { SAVE_SLOTS, saveSlotInfo } from "../systems/save.js";
+import { normalizeDifficulties } from "../engine/difficulty.js";
 import { getRuntime } from "../runtime/context.js";
 
 export function drawTip() {
@@ -175,6 +176,55 @@ export function drawSmith() {
   }
   ctx.fillStyle = "#6a6050"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
   ctx.fillText("Esc 关闭", B.x + 16, B.y + B.h - 10);
+}
+
+// 难度选择面板（P4）：一个小列表，显示当前档与各项倍率。
+export const DIFF_BOX = { x: 190, y: 130, w: 260, h: 190 };
+const DIFF_ROW_H = 44;
+
+export function diffRows(ctx) {
+  // 渲染层不直接拿列表，走配置（编辑器可改难度表）。
+  const list = (ctx && ctx.config && ctx.config.difficulties) || null;
+  const arr = normalizeDifficulties(list);
+  const cur = (G && G.difficulty) || "normal";
+  return arr.map(d => ({ ...d, current: d.id === cur }));
+}
+
+export function diffRowRect(i) {
+  const B = DIFF_BOX;
+  return { x: B.x + 12, y: B.y + 46 + i * DIFF_ROW_H, w: B.w - 24, h: DIFF_ROW_H - 8 };
+}
+
+export function diffRowAt(sx, sy) {
+  if (!G.diffPanel) return -1;
+  const rows = diffRows(getRuntime());
+  for (let i = 0; i < rows.length; i++) {
+    const r = diffRowRect(i);
+    if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return i;
+  }
+  return -1;
+}
+
+export function drawDifficulty() {
+  if (!G.diffPanel) return;
+  const B = DIFF_BOX;
+  ctx.fillStyle = "rgba(16,12,8,0.96)"; ctx.fillRect(B.x, B.y, B.w, B.h);
+  ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(B.x + 1, B.y + 1, B.w - 2, B.h - 2); ctx.lineWidth = 1;
+  ctx.fillStyle = "#f0d060"; ctx.font = "bold 14px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.fillText("难度", B.x + 14, B.y + 26);
+  const rows = diffRows(getRuntime());
+  rows.forEach((d, i) => {
+    const r = diffRowRect(i);
+    ctx.fillStyle = d.current ? "rgba(120,90,30,0.9)" : "rgba(50,40,24,0.85)";
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = d.current ? "#e0c060" : "#7a6438";
+    ctx.strokeRect(r.x + .5, r.y + .5, r.w - 1, r.h - 1);
+    ctx.fillStyle = d.current ? "#ffe98a" : "#e0d0a0";
+    ctx.font = "bold 13px 'Microsoft YaHei',SimHei,sans-serif";
+    ctx.fillText(d.name, r.x + 10, r.y + 18);
+    ctx.fillStyle = "#9a8e78"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
+    ctx.fillText("血×" + d.hp + "  伤×" + d.damage + "  经验×" + d.exp + "  掉落×" + d.drop, r.x + 10, r.y + 32);
+  });
 }
 
 export function drawSavePanel() {

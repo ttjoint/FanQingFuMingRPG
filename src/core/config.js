@@ -21,6 +21,11 @@ export const DEFAULT_CONFIG = {
   // - rarityLevelStep / rarityStrength：怪物等级每 N 级把稀有度权重往上挪一档，
   //   每次挪「当前权重 × strength」。曲线见 engine/lootScale.js。
   economy: { sellRate: 0.5, dropRate: 1, players: 1, rarityLevelStep: 5, rarityStrength: 0.5, gambleBase: 120, gambleLevelStep: 8 },
+  // 难度表（P4）：玩家侧乘数，与内容数据正交。
+  // 只放大怪物侧（血/伤/经验/掉落），不削弱玩家——削弱会让同一套装备
+  // 在不同难度下手感割裂。掉 drop 倍率故意**小于** hp/damage 倍率，
+  // 否则最优解永远是无脑开最高难度。见 engine/difficulty.js。
+  difficulties: null,           // null = 用 engine/difficulty.js 的内置三档
   inventory: { packItem: "包裹", packSize: 25 },
   // 共享仓库（P4）：账号级、不随存档。格子数影响玩家能攒多少东西。
   stash: { size: 100 },
