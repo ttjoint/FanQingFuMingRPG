@@ -364,7 +364,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 class ReuseServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
+    # 关服务时不等子线程：浏览器 keep-alive 连接会长命，等它们会卡住退出。
     daemon_threads = True
+    # 监听队列深度。socketserver 默认只有 5，而游戏启动时浏览器会一口气并发
+    # 拉 2700+ 个资源（角色帧、地图、图标），连接数远超 5。
+    # 超出队列的 SYN 会被内核直接丢掉/回 RST，浏览器表现为 ERR_CONNECTION_REFUSED，
+    # 而前端的 fetch 大多写的是 .catch(() => null)——于是**资源静默缺失**，
+    # 页面永远卡在“加载资源中…”。
+    # E2E 偶发启动超时（一次只发出 194 个请求 vs 正常的 2768）就是这个原因，
+    # 跟测试代码无关；单跑时机器空闲就不出现，连跑或机器负载高就复现。
+    request_queue_size = 256
 
     def handle_error(self, request, client_address):
         # 浏览器在资源全部加载完后会主动断开 keep-alive 连接，Windows 下本机

@@ -16,7 +16,8 @@ import { spawnProjectile } from "./projectiles.js";
 import { spawnFx } from "./effects.js";
 import { playBuffFx } from "./buffs.js";
 import { statMods, applyBuff } from "../engine/buff.js";
-import { resolveDamage, applyDamageBonus, DEFAULT_DAMAGE_TYPE } from "../engine/damage.js";
+import { resolveDamage, applyDamageBonus, DEFAULT_DAMAGE_TYPE, isImmune } from "../engine/damage.js";
+import { pushFloat, makeDamageFloat } from "../engine/floatText.js";
 
 // 阵营关系表（内容内置，只读）；缺失时 canAttack 退化为“有攻击力即可”。
 const factionTable = ctx => (ctx.assets && ctx.assets.factionTable) || null;
@@ -208,9 +209,38 @@ export function resolveHit(ctx, attacker, target, sk, opts) {
   // 完全免疫（抗性>=100 或被全部吸收）时伤害为 0，但仍然算“打中了”。
   const amount = res.total;
   const dead = amount > 0 ? applyDamage(ctx, target, amount, attacker) : false;
+  // 伤害数字：按类型着色上浮。免疫（抗性>=100）单独显示“免疫”而不是 0，
+  // 否则玩家会以为是漏伤害。这里只负责生成数据，绘制在 render 层。
+  spawnDamageFloat(ctx, target, {
+    amount,
+    type: dtype,
+    immune: isImmune(target, dtype),
+  });
   // 命中施加 buff / 治疗 / 击退（阶段 C/D）。
   applyOnHit(ctx, attacker, target, sk);
   return { hit: true, dmg: amount, dead };
+}
+
+// 生成一条浮动伤害数字。
+//
+// 数据挂在单位自己身上（n.floats）而不是全局列表：这样单位被移除（死亡清场、
+// 切图）时数字自然一起消失，不需要额外的清理/关联逻辑。
+// 玩家自己也有 floats（被反击时同样要看到数字）。
+function spawnDamageFloat(ctx, target, hit) {
+  if (!target) return;
+  const cfg = (ctx.config && ctx.config.floatText) || {};
+  if (cfg.enabled === false) return;
+  if (!Array.isArray(target.floats)) target.floats = [];
+  pushFloat(target.floats, makeDamageFloat({
+    amount: hit.amount,
+    type: hit.type,
+    x: target.x,
+    y: target.y,
+    immune: hit.immune,
+  }, { colors: cfg.colors, offsetY: cfg.offsetY }), {
+    maxCount: cfg.maxCount,
+    mergeWindow: cfg.mergeWindow,
+  });
 }
 
 // 命中后效果：施加 buff（按概率）、命中治疗、击退。

@@ -208,6 +208,52 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     return carried && dmgFire > 0 && dmgFire * 2 === dmgPhys;
   })).toBe(true);
 
+  // 浮动伤害数字：真实命中后应真的生成一条带类型颜色的浮动数字，
+  // 且颜色随伤害类型变化（“按类型着色”的端到端回归）。
+  // 纯逻辑单测在 test/floatText.test.mjs；这里验的是 combat → 单位 → 渲染数据这条链路。
+  expect(await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const c = await import("/src/systems/combat.js");
+    const { floatVisual, DAMAGE_COLORS } = await import("/src/engine/floatText.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    const player = G.player;
+    const mk = () => {
+      const n = makeNPC({ id: -2, name: "数字测试怪", model: "npc001.pmg", hp: 1e6, attack: 1, level: 1 }, 1, 1, null, rt);
+      n.hp = 1e6; n.x = player.x; n.y = player.y + 10; n.floats = [];
+      return n;
+    };
+    const saved = { atk: G.stats.attack, variance: rt.config.combat.damageVariance };
+    G.stats.attack = 0;
+    rt.config.combat.damageVariance = 0;
+    // 火
+    const nf = mk();
+    c.resolveHit(rt, player, nf, { type: 1, power: 100, damageType: "fire", mode: "melee" },
+      { atk: 0, forceHit: true, reach: 9999 });
+    const fCount = Array.isArray(nf.floats) ? nf.floats.length : 0;
+    const fColor = fCount ? floatVisual(nf.floats[0]).color : null;
+    const fText = fCount ? floatVisual(nf.floats[0]).text : null;
+    // 冰（不同类型应不同色）
+    const nc = mk();
+    c.resolveHit(rt, player, nc, { type: 1, power: 100, damageType: "cold", mode: "melee" },
+      { atk: 0, forceHit: true, reach: 9999 });
+    const cColor = nc.floats && nc.floats.length ? floatVisual(nc.floats[0]).color : null;
+    // 免疫：抗性 100 时显示“免疫”而不是 0
+    const ni = mk();
+    ni.resist = [{ type: "physical", value: 100 }];
+    c.resolveHit(rt, player, ni, { type: 1, power: 100, damageType: "physical", mode: "melee" },
+      { atk: 0, forceHit: true, reach: 9999 });
+    const iText = ni.floats && ni.floats.length ? floatVisual(ni.floats[0]).text : null;
+    G.stats.attack = saved.atk;
+    rt.config.combat.damageVariance = saved.variance;
+    return fCount === 1
+      && fText !== null && /^[0-9]/.test(fText)
+      && fColor === DAMAGE_COLORS.fire
+      && cColor === DAMAGE_COLORS.cold
+      && cColor !== fColor
+      && iText === "免疫";
+  })).toBe(true);
+
   // 阵营系统：按 faction 判定敌对（不靠 attack 有无），且实例阵营可动态改。
   expect(await page.evaluate(async () => {
     const { getRuntime } = await import("/src/runtime/context.js");

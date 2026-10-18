@@ -4,6 +4,7 @@ import { VW, VH, ctx, BUILD } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { itemByName } from "../core/registry.js";
 import { drawHUD, drawCursorItem } from "./hud.js";
+import { drawFloats } from "./floatText.js";
 import { drawDialog } from "./dialog-ui.js";
 import { drawTip, drawPanels, drawPack, drawSavePanel, drawSettingsPanel, drawWaypointPanel, drawStash, drawSmith, drawDifficulty, drawMercPanel } from "./panels.js";
 import { drawShop } from "./shop-ui.js";
@@ -153,6 +154,9 @@ export function render(rt) {
   drawProjectiles(camX, camY);
   // 2) 顶层特效（top）：头顶 buff/称号 —— 永远在最顶层。
   for (const inst of topEffects(G)) drawEffect(inst, camX, camY);
+  // 浮动伤害数字：在所有单位与特效之上（不能被尸体/地面物盖住），
+  // 但仍在 HUD 之下（不能盖住血条/技能栏）。
+  drawFloats(rt, camX, camY);
   drawHUD(rt); drawDialog(rt); drawPanels(rt); drawPack(rt); drawShop(rt); drawSavePanel(rt);
   drawWaypointPanel(rt); drawStash(rt); drawSmith(rt); drawDifficulty(rt); drawMercPanel(rt);
   drawSettingsPanel(rt); drawTip(rt); drawCursorItem(rt); drawTooltip(rt);
