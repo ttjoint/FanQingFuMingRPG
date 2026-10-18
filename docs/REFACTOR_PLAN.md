@@ -71,7 +71,8 @@
 - ✅ 内容包**图片已迁 IndexedDB**（`content/idb.js`）；无 IDB 环境自动降级内联；导出内联 dataURL。
 - ✅ **项目 zip 导出/导入**（`content/projectZip.js`，零依赖 store 模式）：`project.json` + `images/`；
   版本管理界面加「导出 zip / 导入 zip」。
-- ✅ **TypeScript + Vite + Vitest**：`tsconfig.json`（`checkJs`，`tsc --noEmit` 0 错误）；`vitest` 跑现有用例；
+- ✅ **TypeScript + Vite + node:test**：`tsconfig.json`（`checkJs`，`tsc --noEmit` 0 错误）；
+  用例用 Node 内置 `node:test` 跑（`node test/run.mjs`，`--coverage` 带覆盖率），零依赖；
   `vite` 可选开发服务器，生产仍零构建静态部署。
 - ✅ **Playwright E2E**（`e2e/game.spec.js`）：自动起静态服务器，覆盖引导/玩法/编辑器/补丁/IDB。
 - ⏳ 可选深化：UI 组件化（Preact/Lit）、脚本编辑器（Monaco/CodeMirror）。

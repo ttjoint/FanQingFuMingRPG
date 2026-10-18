@@ -80,7 +80,7 @@
 | 运行时经适配层消费新模型 | `main.js` |
 | 运行时上下文（拥有 G/A/MAPS） | `runtime/context.js` |
 | 架构约束检查（分层/无 DOM） | `tools/check-arch.mjs` |
-| TypeScript 类型检查 / Vitest / Vite | `tsconfig.json` · `vitest.config.js` · `vite.config.js` |
+| 类型检查 / 单元测试 / 开发服务器 | `tsconfig.json` · `test/run.mjs`（node:test） · `vite.config.js` |
 | 逻辑层去全局（systems/world/script 收 `ctx`/`g`） | `src/systems` · `src/world` · `src/script` |
 | 实体组件对象化（+非枚举旧字段别名） | `engine/ecs.js` · `runtime/components.js` |
 | 编辑器历史 / 选择模型 / 多选框选 | `editor/history.js` · `editor/selection.js` · `editor/map-editor.js` |

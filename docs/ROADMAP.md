@@ -311,7 +311,33 @@ D2 的 build 多样性全部建立在这套正交体系上。
       - 另一个隐蔽点：`raw.spawns`/`raw.objects` 是 live view（Proxy + 不可写 getter），
         **不能整体赋值**（`setPath` 会静默失败），只能原地 `splice` 对齐长度。
       - E2E 钉住改格/增删单位后的撤销·重做·再来回，含“重做要删对位置”。
-- [ ] **测试运行器二选一**：`test/run.mjs` 与 Vitest 适配层跑同一批用例，长期维护两份。
+- [x] **测试运行器二选一 → 统一到 Node 内置 `node:test`**
+      原先同一批用例有两套跑法（自建 `test/run.mjs` + `test/all.test.mjs` 的 Vitest 适配层），
+      本质上是在维护两份。实测后发现**两套都不必要**：
+      - 用例本来就是“每个导出函数即一个用例”，`node:test` 直接吃这个形状，**用例体零改动**；
+      - `node:test` 自带 `--experimental-test-coverage`，覆盖率达 **96.3% 行 / 79% 分支**，
+        并直接列出未覆盖行号——这是唯一一个当初上 Vitest 的理由，原生就有；
+      - 去掉 `vitest` 依赖与 `vitest.config.js`/`test/all.test.mjs`，启动从 4.5s 降到 ~1s；
+      - mock/spy/fake timer/describe/并行——实际一个都没用。
+      - 保留 `vite`：它只用于 `npm run dev` 开发服务器，与测试无关。
+      - 新增 `test/runner.test.mjs`（6 例）守运行器自身。**回退验证踩到两个坑**：
+        1. 初版自检从 `run.mjs` 源码里正则提取过滤条件再“复现”一遍——同义反复，
+           实测把 `patch.test.mjs` 从过滤里漏掉后仍有 `fail 0`（少跑 16 例但绿灯）。
+           改为真的 spawn 一次运行器本体（`FQFM_PROBE_ONLY=1` 只收集不执行）与磁盘导出数对平。
+        2. 探针里不能再套 `node --test`（自检本身就在一次 node:test 运行里），
+           会得到 “run() is being called recursively ... skipping” 而不是结果。
+      验证：人为漏掉一个用例文件 → 自检 `fail 1`（旧写法静默绿灯）。
+- [x] **顺手修掉两个 E2E 环境噪声**（排查“启动偶发超时”时拓出来的）：
+      1. `serve.py` 的 `ReuseServer` 没抑制“对端断开”（Windows `WinError 10053` /
+         `ConnectionAbortedError`）——浏览器加载完资源后主动关 keep-alive 连接，
+         属于正常现象，但 socketserver 默认会打完整 traceback，
+         **一次页面启动就是几十条 stderr**，堆在 Playwright 日志里既淹没真错误也拖慢写入。
+         新增 `handle_error` 只静默 ECONNRESET/EPIPE/ECONNABORTED，其他异常照报。
+      2. 反复跑 E2E 会残留无头 Chrome（实测卡了 2 个），占 CPU/内存干扰后续启动。
+         `tools/kill-chrome.sh` 在 `AGENTS.md` 里一直被引用却**一直不存在**，现已真正建出：
+         按 `--headless` / `--remote-debugging-port=<PORT>` / `--user-data-dir` 精确匹配，
+         验证：起两个专属端口实例 → `--port` 全部清除，用户 35 个正常浏览器零影响。
+      - 修复后 E2E 连续 12 次全绿（修复前 3 次挂 2 次）。
 
 ---
 

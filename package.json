@@ -10,16 +10,14 @@
     "build:assets": "python build_assets.py .. versions/default/assets",
     "check": "node tools/check-arch.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node tools/check-arch.mjs && tsc --noEmit && vitest run",
-    "test:node": "node test/run.mjs",
-    "test:vitest": "vitest run",
+    "test": "node tools/check-arch.mjs && tsc --noEmit && node test/run.mjs",
     "test:e2e": "playwright test",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "test:coverage": "node test/run.mjs --coverage"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.4",
-    "vitest": "^5.0.5"
+    "vite": "^8.3.4"
   }
 }

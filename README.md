@@ -148,18 +148,20 @@ FanQingFuMingRPG/
 ## 测试
 
 ```bash
-npm test                     # = 架构检查 + TypeScript 类型检查(tsc --noEmit) + Vitest
+npm test                     # = 架构检查 + tsc --noEmit + 单测（node:test）
 npm run typecheck            # 仅 TypeScript 检查（tsconfig 开启 checkJs，JSDoc 类型）
 npm run dev                  # 可选：Vite 开发服务器（生产仍用零构建静态部署）
+npm run test:coverage        # 单测 + 覆盖率（含未覆盖行号）
 npm run test:e2e             # 可选：Playwright 端到端（自动起 python serve.py）
 node tools/check-arch.mjs    # 仅架构约束检查
-node test/run.mjs            # 仅单测（无依赖的 Node 运行器）
+node test/run.mjs            # 仅单测（零依赖）
+node test/run.mjs patch      # 只跑文件名/用例名含 patch 的
 # E2E（Playwright，自动起服务器）：npx playwright test
 ```
 
 单测覆盖：引用解析、schema 规整、MapDoc 无损往返/旧视图、ContentDB 构建与补丁 diff/apply、
 IdRegistry、等距坐标/方向、A* 寻路与视线/路径平滑、流场、空间哈希、等距深度切块、冲突、GSP 解析、History/SelectionModel、存档 schema。
-（可用 Vitest 或 `node test/run.mjs` 两种方式运行同一批用例。）
+（用例就是 `test/*.test.mjs` 里导出的函数，由 Node 内置 `node:test` 执行，无第三方依赖。）
 
 ## 操作
 

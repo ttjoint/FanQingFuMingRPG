@@ -22,6 +22,7 @@
 
 安全：所有写操作仅允许在 versions/ 下、且禁止修改 readonly 版本。
 """
+import errno
 import http.server
 import socketserver
 import sys
@@ -364,6 +365,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 class ReuseServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # 浏览器在资源全部加载完后会主动断开 keep-alive 连接，Windows 下本机
+        # 复现为 ConnectionAbortedError / WinError 10053（macOS/Linux 上是
+        # ConnectionResetError）。这是**正常现象**，不是服务端错误，但 socketserver
+        # 默认会把整个 traceback 打到 stderr——一次页面启动就是几十条，
+        # 既淹没真正的错误，也让日志写入拖慢启动（E2E 偶发启动超时就是这个）。
+        # 这里只静默这类“对端断开”，其他异常照常报。
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+            return
+        if isinstance(exc, OSError) and getattr(exc, "winerror", None) in (10053, 10054, 10058):
+            return
+        if isinstance(exc, OSError) and getattr(exc, "errno", None) in (
+            errno.ECONNRESET, errno.EPIPE, errno.ECONNABORTED,
+        ):
+            return
+        super().handle_error(request, client_address)
 
 
 if __name__ == "__main__":
