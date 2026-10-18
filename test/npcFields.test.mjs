@@ -1,5 +1,6 @@
 import { NPC_FIELDS, NPC_FIELD_KEYS, npcFieldsFromTemplate, npcFieldDefaults, newNpcTemplate, NPC_DEFAULT_SPEED, NPC_DEFAULT_RUN_SPEED } from "../src/content/npcFields.js";
 import { assert, assertEq } from "./helpers.mjs";
+import { resolveDamage } from "../src/engine/damage.js";
 
 // NPC 字段映射单一来源：模板 -> 运行时字段派生，含“模板缺省”的默认值。
 // 重点回归：inventory（货物背包）等新增字段必须能从模板派生，不因字段表漏项而丢失。
@@ -66,4 +67,48 @@ export function newNpcTemplateIsConsistent() {
   assert(t.name && t.model, "新 NPC 有名称与模型");
   assertEq(t.id, 0, "新 NPC 编号 0");
   assertEq(t.faction, "", "新 NPC 无阵营");
+}
+
+// ---- P0 抗性/伤害类型的运行时搬运（回归） ----
+//
+// 真实 bug：engine/damage.js 的 resistOf 只看 target.resist，
+// schema 能定义、编辑器能改、引擎能算，但 NPC_FIELDS 里**没有** resist，
+// 于是 makeNPC 造出来的单位永远没有抗性 → 所有抗性静默失效（伤害恒按 0 抗算）。
+// 这个测试专门钉住“模板里的抗性必须真的进到单位对象上”。
+export function resistReachesUnitObject() {
+  const tpl = { name: "火抗怪", hp: 100, resist: [{ type: "fire", value: 50 }] };
+  const f = npcFieldsFromTemplate(tpl);
+  assert(Array.isArray(f.resist), "resist 应搬到单位对象上");
+  assertEq(f.resist.length, 1);
+  assertEq(f.resist[0].type, "fire");
+  assertEq(f.resist[0].value, 50);
+}
+
+// 抗性搬过去之后，必须真的影响伤害结算（端到端语义）。
+export function resistActuallyReducesDamage() {
+  const withRes = npcFieldsFromTemplate({ name: "x", resist: [{ type: "fire", value: 50 }] });
+  const without = npcFieldsFromTemplate({ name: "x" });
+  const hit = u => resolveDamage([{ type: "fire", amount: 100 }], u, {}).total;
+  assertEq(hit(withRes), 50, "50% 火抗应把 100 点火焰伤害减到 50");
+  assertEq(hit(without), 100, "无抗性时全额受伤");
+}
+
+// 没有配置抗性时保持 undefined（不能让空数组进存档 diff）
+export function noResistStaysUndefined() {
+  assertEq(npcFieldsFromTemplate({ name: "x" }).resist, undefined);
+  assertEq(npcFieldsFromTemplate({ name: "x", resist: [] }).resist, undefined);
+}
+
+// 伤害类型同样必须搬过去，否则怪物打出的元素伤害永远是物理。
+export function damageTypeReachesUnitObject() {
+  assertEq(npcFieldsFromTemplate({ name: "x", damageType: "fire" }).damageType, "fire");
+  assertEq(npcFieldsFromTemplate({ name: "x" }).damageType, "", "缺省应为空串（= 物理）");
+}
+
+// 抗性的另一种写法（单值 / 映射）也应原样搬运，resistOf 两种都认。
+export function resistOtherShapesPassThrough() {
+  assertEq(npcFieldsFromTemplate({ name: "x", resist: 30 }).resist, 30);
+  const m = npcFieldsFromTemplate({ name: "x", resist: { fire: 20, cold: 10 } }).resist;
+  assertEq(m.fire, 20);
+  assertEq(m.cold, 10);
 }

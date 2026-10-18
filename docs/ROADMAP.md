@@ -13,19 +13,37 @@
 
 ## P0 · 伤害类型与抗性体系（地基）
 
-现状：伤害是一个无类型的数字，`applyDamage` 直接 `hp -= amount`。
-全项目搜 `resist/fire/cold/poison` 零命中。
+初衷：原本伤害是一个无类型的数字（`hp -= amount`），于是“+30% 火焰伤害”
+这类词缀根本无意义，怪物差异化只能堆血量，装备追求塌缩成“攻击力更高”。
+D2 的 build 多样性全建立在这套正交体系上。
 
-为什么是 P0：没有抗性，**词缀池设计不出来**（“+30% 火焰伤害”无意义），
-怪物差异化只能堆血量数字，装备追求塌缩成“攻击力更高”。
-D2 的 build 多样性全部建立在这套正交体系上。
-
-- [ ] `engine/damage.js`：伤害类型枚举、抗性表、减免曲线（纯函数 + 单测）
-- [ ] `content/schema.js`：定义 `damageType`、`resist`、`immune` 字段
-- [ ] `systems/combat.js`：`applyDamage` 走减免管线
-- [ ] 词缀池接入（`affixes.json` 支持元素伤害/抗性词条）
-- [ ] 编辑器表单暴露新字段
-- [ ] UI：伤害数字按类型着色
+- [x] `engine/damage.js`：伤害类型枚举、抗性表、减免曲线（纯函数 + 单测 16 例）
+- [x] `content/schema.js`：定义 `damageType`、`resist`、`immune` 字段
+- [x] `systems/combat.js`：`applyDamage` 走减免管线
+- [x] 编辑器表单暴露新字段
+- [x] **打通“配置 → 运行时”两处断链（重要）**：
+      引擎层当初写得很完整（`resistOf` / `applyDamageBonus` 都有单测），
+      但**数据从来没真正流到单位身上**，整条功能静默无效：
+      1. `NPC_FIELDS` 里没有 `resist` / `damageType` → `makeNPC` 不搬 →
+         目标身上永远没有 `resist`，`resistOf` 恒返回 0，
+         **编辑器里配的抗性完全无效**（实测：带 50% 火抗的模板受 100 点火焰伤害，实际扣 100 而不是 50）。
+         补字段后已正常（`test/npcFields.test.mjs` 新增 5 例，已反向验证）。
+      2. `g.dmgBonus` 只有**读取方**（`combat.js`）没有**写入方**，
+         `attacker && attacker.dmgBonus` 恒为 undefined → 元素伤害加成永远是 0%。
+         现在 `inventory.js` 的 `applyBonus` 按 ±sign 增量维护 `g.dmgBonus` / `g.resist`。
+      这两个坑的共同点：是“管线搭好了，但两端没接”。单测都在测引擎纯函数，
+      所以全绿；只有从模板 → 单位对象 → 伤害结算走一遍才会暴露。
+- [x] 词缀池接入：`affixes.json` 新增 10 条元素词缀（烈焰/寒霜/雷霆/邵毒 /
+      御火/御寒/避雷/解毒/元素壁垒）。
+      同时修了一个**静默丢数据**的问题：`normalizeAffix` 把 mods 硬编码成固定 6 个
+      基础键，`dmgFire` / `resCold` 这类元素键在规整时被直接丢掉——
+      数据里写了、编辑器里看得到，但实例上查不到。已改为保留元素键
+      （`ELEMENT_MOD_KEYS`），`instanceStats` 同步汇总。
+- [ ] **浮动伤害数字**（含按类型着色）：
+      排查后发现项目**根本没有浮动伤害数字系统**（全仓库无相关绘制代码），
+      伤害在视觉上完全不可感知，只能盯血条。所以“按类型着色”缺的不是颜色，
+      而是整个载体。这是一个独立的功能块（需要伤害事件 → 屏幕投影 → 生命周期
+      管理 → 像素绘制），不宜塞进 P0 尾巴，已拆到 P4 后续条目。
 
 ## P1 · 可编辑 UI 层（用户明确要求）
 

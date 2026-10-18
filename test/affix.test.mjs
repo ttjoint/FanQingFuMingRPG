@@ -1,6 +1,6 @@
 // 词缀表 / 词缀 roll 测试。
 import { assert, assertEq, readJSON, ASSETS_DIR } from "./helpers.mjs";
-import { normalizeAffix, rollAffix, rollAffixes } from "../src/engine/item.js";
+import { normalizeAffix, rollAffix, rollAffixes, instanceStats } from "../src/engine/item.js";
 
 const POOL = [
   { id: "a", name: "锋利的", prefix: "锋利的", rarity: "magic", mods: { atk: 4 }, weight: 10, slots: ["weapon"] },
@@ -57,7 +57,27 @@ export function assetsAffixesNormalize() {
   for (const a of list) {
     const n = normalizeAffix(a);
     assert(n.id && n.name, "每条词缀有 id/name");
-    const sum = Math.abs(n.mods.atk) + Math.abs(n.mods.def) + Math.abs(n.mods.hp) + Math.abs(n.mods.mp) + Math.abs(n.mods.hit) + Math.abs(n.mods.spd);
-    assert(sum > 0, "词缀 " + n.id + " 应至少有一项属性");
+    const sum = Object.keys(n.mods).reduce((s, k) => s + Math.abs(n.mods[k] || 0), 0);
+    assert(sum > 0, "词缀 " + n.id + " 应至少有一项属性（含元素键）");
   }
+}
+
+// 元素键回归：normalizeAffix 曾经把 mods 硬编码成固定 6 个基础键，
+// 于是 dmgFire/resPoison 这类元素词缀在规整时被**静默丢光**——
+// 数据里写了、编辑器里显示，但实例上查不到，伤害加成永远是 0。
+export function elementModsSurviveNormalize() {
+  const a = normalizeAffix({ id: "af_flame", name: "烈焰的", mods: { dmgFire: 35, resCold: 20 } });
+  assertEq(a.mods.dmgFire, 35, "火焰伤害加成应保留");
+  assertEq(a.mods.resCold, 20, "冰冷抗性应保留");
+  // 基础键仍要正常出现（值为 0）
+  assertEq(a.mods.atk, 0, "基础键仍在");
+}
+
+// 元素键必须一路走到 instanceStats（词缀 → 实例 → 属性汇总）。
+export function elementModsReachInstanceStats() {
+  const def = { name: "测试剑", mods: { atk: 5 } };
+  const entry = { name: "测试剑", inst: { affixes: [{ id: "af_flame", mods: { dmgFire: 35 } }], sockets: [] } };
+  const st = instanceStats(entry, def, {});
+  assertEq(st.atk, 5, "基础属性照常");
+  assertEq(st.dmgFire, 35, "元素加成应汇总进属性");
 }

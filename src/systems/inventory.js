@@ -11,7 +11,8 @@ import { CFG } from "../core/config.js";
 import { syncMissions } from "./missions.js";
 import { instanceStats, equipSlotOf, canStack as canStackEntries, normalizeInstance,
   socketGem as socketGemPure, unsocketGem as unsocketGemPure, canSocket,
-  enhance as enhancePure, canEnhance, enhanceCost, wearDurability, isBroken } from "../engine/item.js";
+  enhance as enhancePure, canEnhance, enhanceCost, wearDurability, isBroken,
+  ELEMENT_MOD_KEYS } from "../engine/item.js";
 
 // 条目是否为「有实例的单件」。
 export function isInstanceEntry(e) { return !!(e && e.inst); }
@@ -151,6 +152,56 @@ export function applyBonus(g, it, sign, entry) {
   // 旧的"命中"属性已废除（命中改为距离判定），装备上的 hit 加成转投攻速，
   // 避免老物品数据/hit 字段变成"加了但没有任何效果"的废属性。
   g.stats.attackSpeed = (g.stats.attackSpeed || 0) + sign * (st.hit || 0);
+  // 元素加成/抗性（P0）：直接累加到玩家身上供 engine/damage.js 读取。
+  //
+  // 这两个字段是**读取方早就写好、写入方一直缺失**的典型：
+  // applyDamageBonus / resistOf 都已实现并带单测，但没有任何地方给
+  // g.dmgBonus / g.resist 赋过值，于是所有元素词缀“写了等于没写”。
+  // 与 stats 一样用 ±sign 增量维护，不出错就无需全量重算。
+  applyElementBonus(g, st, sign);
+}
+
+// 把一份 instanceStats 的元素字段按 sign 增（+1）/减（-1）到 p 上。
+// dmgXxx 累加成 g.dmgBonus[type]（百分数），resXxx 累加成 g.resist[type]。
+function applyElementBonus(g, st, sign) {
+  if (!st) return;
+  const touched = [];
+  for (const k of ELEMENT_MOD_KEYS || []) { if (st[k]) touched.push(k); }
+  if (!touched.length) return;
+  for (const k of touched) {
+    const v = sign * (st[k] || 0);
+    if (k.startsWith("res")) {
+      const t = k.slice(3).toLowerCase();
+      const cur = resistMapOf(g);
+      const nv = (cur[t] || 0) + v;
+      // 归零就删键：避免背包反复穿脱后 g.resist 里堆一堆 0。
+      if (nv) cur[t] = nv; else delete cur[t];
+      g.resist = cur;
+    } else {
+      const t = k.slice(3).toLowerCase();
+      if (!g.dmgBonus) g.dmgBonus = {};
+      const nv = (g.dmgBonus[t] || 0) + v;
+      if (nv) g.dmgBonus[t] = nv; else delete g.dmgBonus[t];
+    }
+  }
+}
+
+// 把 g.resist 归一成 { type: value } 映射（兼容旧的数字/数组写法）。
+function resistMapOf(g) {
+  const r = g.resist;
+  if (!r) return {};
+  if (typeof r === "number") return r ? { all: r } : {};
+  if (Array.isArray(r)) {
+    const out = {};
+    for (const e of r) {
+      if (!e) continue;
+      const t = e.type || "all";
+      out[t] = (out[t] || 0) + (typeof e.value === "number" ? e.value : 0);
+    }
+    return out;
+  }
+  if (typeof r === "object") return { ...r };
+  return {};
 }
 
 // 套装加成（P4）：按已穿件数算阶梯加成，把差额补进 stats。

@@ -158,23 +158,40 @@ export function canStack(a, b, def) {
 
 // ---- 属性汇总 ----
 // 词缀形如 { id, mods:{atk,def,...} }；强化每级按 enhancePerLevel 加成。
+//
+// 元素键（P0）：`dmg<Type>` = 对某系伤害的百分比加成（如 dmgFire:30），
+// `res<Type>` = 对该系抗性（如 resFire:20）。引擎侧的结算函数早就有
+// （engine/damage.js 的 applyDamageBonus / resistOf），但这里不汇总的话，
+// 词缀写了也永远不会影响伤害——所以必须与基础属性一起累加。
+// 类型名首字母大写（fire → dmgFire），与 uniqueItem 的 MOD_KEYS 保持同一约定。
+const DMG_TYPES = ["physical", "fire", "cold", "lightning", "poison", "magic"];
+const elemKey = (kind, t) => kind + t.charAt(0).toUpperCase() + t.slice(1);
+export const ELEMENT_MOD_KEYS = DMG_TYPES.flatMap(t => [elemKey("dmg", t), elemKey("res", t)]);
+export const BASE_MOD_KEYS = ["hp", "mp", "atk", "def", "hit", "spd"];
+
+// 把一份 mods 累加进 out（缺的键按 0）。
+function addMods(out, m) {
+  if (!m) return;
+  for (const k of BASE_MOD_KEYS) out[k] = num(out[k]) + num(m[k]);
+  for (const k of ELEMENT_MOD_KEYS) {
+    // 只在真的用到时才建键，避免每个物品都带一整套 0，存档/日志都会变大。
+    if (m[k] == null) continue;
+    out[k] = num(out[k]) + num(m[k]);
+  }
+}
+
 export function instanceStats(entry, def, opts) {
   const o = opts || {};
   const base = (def && def.mods) || {};
-  const out = { hp: num(base.hp), mp: num(base.mp), atk: num(base.atk), def: num(base.def), hit: num(base.hit), spd: num(base.spd) };
+  const out = { hp: 0, mp: 0, atk: 0, def: 0, hit: 0, spd: 0 };
+  addMods(out, base);
   const inst = entry && entry.inst;
   if (!inst) return out;
-  for (const af of inst.affixes || []) {
-    const m = (af && af.mods) || {};
-    out.hp += num(m.hp); out.mp += num(m.mp); out.atk += num(m.atk);
-    out.def += num(m.def); out.hit += num(m.hit); out.spd += num(m.spd);
-  }
+  for (const af of inst.affixes || []) addMods(out, af && af.mods);
   // 镶嵌宝石同样提供属性（宝石条目形如 { name, gem:{mods} } 或直接 { mods }）。
   for (const g of inst.sockets || []) {
     if (!g) continue;
-    const m = (g.gem && g.gem.mods) || g.mods || {};
-    out.hp += num(m.hp); out.mp += num(m.mp); out.atk += num(m.atk);
-    out.def += num(m.def); out.hit += num(m.hit); out.spd += num(m.spd);
+    addMods(out, (g.gem && g.gem.mods) || g.mods);
   }
   const per = o.enhancePerLevel || 0;
   if (per && inst.enhance) {
@@ -291,7 +308,12 @@ export function normalizeAffix(a) {
   o.prefix = o.prefix != null ? String(o.prefix) : "";
   o.rarity = o.rarity || "magic";
   const m = o.mods || {};
-  o.mods = { hp: num(m.hp), mp: num(m.mp), atk: num(m.atk), def: num(m.def), hit: num(m.hit), spd: num(m.spd) };
+  const mods = { hp: num(m.hp), mp: num(m.mp), atk: num(m.atk), def: num(m.def), hit: num(m.hit), spd: num(m.spd) };
+  // 元素键（dmgFire / resPoison ...）必须原样保留：
+  // 以前这里只重建固定 6 个键，元素词缀会在规整时被**静默丢光**——
+  // 数据里写了、编辑器里能看到，但落到实例上就没了。
+  for (const k of ELEMENT_MOD_KEYS) if (m[k] != null && num(m[k])) mods[k] = num(m[k]);
+  o.mods = mods;
   o.weight = Math.max(0, num(o.weight, 10));
   o.slots = Array.isArray(o.slots) ? o.slots.slice() : null;
   return o;

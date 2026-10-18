@@ -171,6 +171,43 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
       && dmgImmune === 0;
   })).toBe(true);
 
+  // 上一条断言用了手工造的 mkTarget，直接往对象上写 resist —— 这恰恰掩盖了一个真 bug：
+  // NPC_FIELDS 里没有 resist，makeNPC 根本不搬，所以**真实怪物**身上永远没有抗性，
+  // 编辑器里配的抗性全部静默失效。这里专门走 makeNPC 验证数据链路。
+  expect(await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const c = await import("/src/systems/combat.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    const player = G.player;
+    // 用真实度最高的方式造怪：直接给模板（不手写单位对象）。
+    const tpl = { id: -1, name: "抗性测试怪", model: "npc001.pmg", hp: 1e6, attack: 1, defence: 0,
+      level: 1, resist: [{ type: "fire", value: 50 }] };
+    const mk = () => {
+      const n = makeNPC(tpl, 1, 1, null, rt);
+      n.hp = 1e6; n.x = player.x; n.y = player.y + 10;
+      return n;
+    };
+    const hit = (target, type) => {
+      const before = target.hp;
+      c.resolveHit(rt, player, target,
+        { type: 1, power: 100, damageType: type, mode: "melee" },
+        { atk: 0, forceHit: true, reach: 9999 });
+      return before - target.hp;
+    };
+    const saved = { atk: G.stats.attack, variance: rt.config.combat.damageVariance };
+    G.stats.attack = 0;
+    rt.config.combat.damageVariance = 0;
+    const npc = mk();
+    const carried = Array.isArray(npc.resist) && npc.resist[0] && npc.resist[0].type === "fire";
+    const dmgFire = hit(npc, "fire");
+    const dmgPhys = hit(mk(), "physical");
+    G.stats.attack = saved.atk;
+    rt.config.combat.damageVariance = saved.variance;
+    // 关键：resist 必须**真的在单位对象上**，且火焰伤害真的减半。
+    return carried && dmgFire > 0 && dmgFire * 2 === dmgPhys;
+  })).toBe(true);
+
   // 阵营系统：按 faction 判定敌对（不靠 attack 有无），且实例阵营可动态改。
   expect(await page.evaluate(async () => {
     const { getRuntime } = await import("/src/runtime/context.js");

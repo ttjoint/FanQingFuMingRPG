@@ -9,5 +9,15 @@
   {"id":"af_accurate","name":"精准的","prefix":"精准的","rarity":"magic","mods":{"hit":6},"weight":16,"slots":["weapon","trinket"]},
   {"id":"af_wise","name":"聪慧的","prefix":"聪慧的","rarity":"magic","mods":{"mp":20},"weight":14,"slots":["trinket"]},
   {"id":"af_mighty","name":"威猛的","prefix":"威猛的","rarity":"rare","mods":{"atk":5,"def":5},"weight":5,"slots":["weapon","armor"]},
-  {"id":"af_divine","name":"神圣的","prefix":"神圣的","rarity":"unique","mods":{"atk":10,"def":10,"hit":10},"weight":1,"slots":["weapon","armor","trinket"]}
+  {"id":"af_divine","name":"神圣的","prefix":"神圣的","rarity":"unique","mods":{"atk":10,"def":10,"hit":10},"weight":1,"slots":["weapon","armor","trinket"]},
+  {"id":"af_flame","name":"烈焰的","prefix":"烈焰的","rarity":"magic","mods":{"dmgFire":15},"weight":14,"slots":["weapon"]},
+  {"id":"af_frost","name":"寒霜的","prefix":"寒霜的","rarity":"magic","mods":{"dmgCold":15},"weight":14,"slots":["weapon"]},
+  {"id":"af_thunder","name":"雷霆的","prefix":"雷霆的","rarity":"magic","mods":{"dmgLightning":15},"weight":12,"slots":["weapon"]},
+  {"id":"af_venom","name":"淬毒的","prefix":"淬毒的","rarity":"magic","mods":{"dmgPoison":15},"weight":12,"slots":["weapon"]},
+  {"id":"af_ember","name":"炽炎的","prefix":"炽炎的","rarity":"rare","mods":{"dmgFire":35},"weight":5,"slots":["weapon"]},
+  {"id":"af_ward_fire","name":"御火的","prefix":"御火的","rarity":"magic","mods":{"resFire":20},"weight":16,"slots":["armor","trinket"]},
+  {"id":"af_ward_cold","name":"御寒的","prefix":"御寒的","rarity":"magic","mods":{"resCold":20},"weight":16,"slots":["armor","trinket"]},
+  {"id":"af_ward_light","name":"避雷的","prefix":"避雷的","rarity":"magic","mods":{"resLightning":20},"weight":14,"slots":["armor","trinket"]},
+  {"id":"af_ward_poison","name":"解毒的","prefix":"解毒的","rarity":"magic","mods":{"resPoison":20},"weight":16,"slots":["armor","trinket"]},
+  {"id":"af_bulwark","name":"元素壁垒","prefix":"元素壁垒","rarity":"rare","mods":{"resFire":15,"resCold":15,"resLightning":15,"resPoison":15},"weight":4,"slots":["armor"]}
 ]

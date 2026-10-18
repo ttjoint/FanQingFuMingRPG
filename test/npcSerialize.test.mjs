@@ -1,5 +1,5 @@
 import { diffNpcAgainst, npcFieldsFromSave, makeSchema } from "../src/engine/npcSerialize.js";
-import { NPC_SCHEMA } from "../src/content/npcFields.js";
+import { NPC_SCHEMA, npcFieldsFromTemplate } from "../src/content/npcFields.js";
 import { assert, assertEq } from "./helpers.mjs";
 
 // NPC 存档差异化 + 还原（纯函数）。重点回归：货物背包（inventory）、阵营（faction）
@@ -17,13 +17,14 @@ const TEMPLATE = {
 };
 
 // 按模板造一个“运行时实体”（含位置等非模板字段）。
+//
+// 注意：这里手写字段很容易与 npcFieldsFromTemplate 走调——新增字段时忘了同步，
+// 测试就会以“未改动的字段进了存档”失败（曾经 resist/damageType 就是这样）。
+// 所以先取模板派生值再做最小覆盖，与真实 makeNPC 一致。
 function makeUnit(t, over) {
   return {
-    id: t.id, name: t.name, model: (t.model || "").replace(/\.pmg$/, ""), portrait: t.portrait, script: t.script,
-    hp: t.hp, hpMax: t.hp, atk: t.attack, def: t.defence, level: t.level, exp: t.exp,
-    attackable: t.attack > 0, aggressive: !!t.hostile, ai: t.ai, speed: t.speed, runSpeed: t.runSpeed,
-    drops: t.drops, inventory: t.inventory, faction: t.faction, talks: t.talks, talk: "",
-    skills: Array.isArray(t.skillList) ? t.skillList.slice() : [],
+    ...npcFieldsFromTemplate(t),
+    id: t.id,
     x: 100, y: 200, dir: 4, dead: false,
     ...over,
   };

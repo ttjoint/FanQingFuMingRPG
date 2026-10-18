@@ -46,6 +46,23 @@ export const NPC_FIELDS = {
   // NPC 背包（脚本指令拾取/丢弃的目标容器）：条目数组，与玩家背包同一模型。
   // 空背包归一为 undefined（与未初始化的运行时实体一致），避免空数组与缺省值不等而误写入存档。
   bag: { fromTemplate: d => ((d && d.bag && d.bag.length) ? JSON.parse(JSON.stringify(d.bag)) : undefined), default: undefined },
+  // 抗性（P0）：模板上是 [{type,value}]（schema.normalizeResist 规整过），
+  // 单位上必须是**同一形状** —— engine/damage.js 的 resistOf 只看 target.resist。
+  //
+  // 这里曾经漏过很久：schema 能定义、编辑器能改、引擎能算，但 makeNPC 不搬，
+  // 于是目标身上永远没有 resist，所有抗性**静默失效**（伤害恒按 0 抗结算）。
+  // 缺省用 undefined 而不是 []：空数组与缺省值的差异会让存档 diff 误判（同 bag）。
+  resist: {
+    fromTemplate: d => {
+      const r = d && d.resist;
+      if (r == null) return undefined;
+      if (Array.isArray(r)) return r.length ? r.map(x => ({ type: x.type, value: x.value })) : undefined;
+      return r;   // 兼容单值 / 映射形式，resistOf 两种都认
+    },
+    default: undefined,
+  },
+  // 自身攻击的伤害类型（P0）：空串 = 物理（DEFAULT_DAMAGE_TYPE）。
+  damageType: { fromTemplate: d => (d && d.damageType) || "", default: "" },
   faction: { fromTemplate: d => (d && d.faction) || "", default: "" },
   talks: { fromTemplate: d => (d && d.talks) || [], default: [] },
   talk: { fromTemplate: d => ((d && d.talks && d.talks.length) ? d.talks[0].replace(/\\n/g, "\n") : ""), default: "" },
@@ -64,6 +81,8 @@ export function newNpcTemplate() {
     hp: 100, attack: 10, defence: 0, level: 1, exp: 0, hostile: 0, ai: 0,
     skills: [], speed: NPC_DEFAULT_SPEED, runSpeed: NPC_DEFAULT_RUN_SPEED,
     drops: [], talks: [], inventory: null, bag: undefined, faction: "",
+    // 抗性与伤害类型留空：物理无抗是旧行为的默认，不需要在每个模板里重复写。
+    resist: undefined, damageType: "",
   };
 }
 
