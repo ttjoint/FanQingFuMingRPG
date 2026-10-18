@@ -31,7 +31,7 @@ export function closeShop(ctx) {
 
 export function buyItem(ctx, name, cnt) {
   const G = ctx.state;
-  const it = itemByName(name); if (!it) return false;
+  const it = itemByName(ctx, name); if (!it) return false;
   cnt = cnt || 1;
   const price = (it.price || 0) * cnt;
   if (G.stats.money < price) { G.tip = "银两不足"; G.tipT = 2; return false; }
@@ -44,7 +44,7 @@ export function buyItem(ctx, name, cnt) {
 export function buyInto(ctx, slot) {
   const G = ctx.state;
   const c = G.cursor; if (!c || !c.fromShop) return false;
-  const it = itemByName(c.name); if (!it) return false;
+  const it = itemByName(ctx, c.name); if (!it) return false;
   const price = it.price || 0;
   if (G.stats.money < price) { G.tip = "银两不足"; G.tipT = 2; return false; }
   const entry = entryOf(slot);
@@ -57,7 +57,7 @@ export function buyInto(ctx, slot) {
 export function sellCursor(ctx) {
   const G = ctx.state;
   const c = G.cursor; if (!c || c.fromShop) return;
-  const it = itemByName(c.name), n = c.count || 1;
+  const it = itemByName(ctx, c.name), n = c.count || 1;
   const rate = (CFG.economy && CFG.economy.sellRate != null) ? CFG.economy.sellRate : 0.5;
   const gain = Math.max(1, Math.floor((it ? it.price : 0) * rate)) * n;
   G.stats.money += gain; G.cursor = null; playSound(G, "sell.wav");

@@ -31,7 +31,7 @@ export function handleSlotClick(slot, button, shift) {
   // 手上是从商店拿起的商品：只有“空格或可叠放的同类格”左键才算购入，否则放下
   if (G.cursor && G.cursor.fromShop) {
     if (button !== 0) { G.cursor = null; return; }
-    const it = itemByName(G.cursor.name);
+    const it = itemByName(G, G.cursor.name);
     const stackable = it && (it.type === 0 || it.type === 8 || it.type === 4);
     if (!entry || (entry.name === G.cursor.name && stackable)) {
       if (buyInto(rt, slot)) G.cursor = null;
@@ -49,7 +49,7 @@ export function handleSlotClick(slot, button, shift) {
     if (G.cursor.fromShop) { if (buyItem(rt, G.cursor.name, 1)) G.cursor = null; return; }
     // 手上是宝石、目标是装备：尝试镶嵌（而不是交换）。
     if (slot.kind === "equip") {
-      const gemIt = itemByName(G.cursor.name);
+      const gemIt = itemByName(G, G.cursor.name);
       if (gemIt && (gemIt.kind === "gem" || gemIt.type === 9)) {
         if (socketInto(G, entry, G.cursor, null, null)) { G.cursor = null; playSound(G, "drop_item.wav"); return; }
         // 镶嵌失败（如孔满）则回落到普通交换提示。

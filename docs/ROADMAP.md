@@ -238,8 +238,22 @@ D2 的 build 多样性全部建立在这套正交体系上。
 
 - [ ] **渲染层/输入层去全局单例**：18 个文件仍 `import { G, A } from core/state`。
       `systems/` 已全部收 `ctx`，视图层应对齐（函数签名收 `ctx`，`main.js` 注入）。
-- [ ] **`core/registry.js` 后门**：`itemByName(name)` 内读 `A.items`，31 处调用点
-      （含 `systems/`）。目标 `itemByName(ctx, name)`，分批迁移。
+- [x] **`core/registry.js` 后门**
+      - 签名改为 `itemByName(ctx, name)` / `skillByName(ctx, name)`，
+        `ctx` 经 `assetsOf()` 归一：运行时上下文（`{assets}`）、裸资产表、
+        ContentDB（`{content}`）、游戏状态 `g` 都接受。
+      - **30 处调用点全部迁移**（inventory 9 / shop 3 / combat 3 / ground 2 /
+        hud 3 / input 2 / slots 2 / renderer 1 / shop-ui 1 / tooltip 1），
+        每处都显式传（`g` 或 `ctx`）。
+      - `tools/check-arch.mjs` 新增**规则 5**：拒绝单参调用。
+        兼容分支还在（外部脚本用），但新代码写不出来——已验证规则能拦住。
+      - ⚠️ **踩过的坑（很隐蔽）**：`assetsOf` 最初用
+        `Array.isArray(x.items) || Array.isArray(x.skills)` 判定"这是个资产表"。
+        但游戏状态 `g` 也有个 `skills` 数组（玩家已学技能名），
+        于是 `g` 被当成资产表 → 查 `g.items`（undefined）→ `itemByName` 永远返回
+        `undefined` → **所有装备动作静默失败**（不报错、不提示，就是装不上）。
+        判定必须只看 `items`。已加单测 `gameStateIsNotMistakenForAssets`，
+        并反向验证过：还原旧判定则该测试失败。
 - [ ] **拆分 `editor/index.js`（1696 行）**：按标签页拆成 `editor/pages/*.js`。
 - [ ] **快照式撤销 → Command 模式**：当前每次编辑深拷贝整份 MapDoc（100 条上限），
       大地图内存与 GC 压力大。

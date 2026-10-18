@@ -55,6 +55,20 @@ for (const f of files.filter(f => /^src\/(systems|world|script)\//.test(rel(f)))
   if (/from\s+["'][^"']*core\/state\.js["']/.test(read(f))) issues.push("逻辑层依赖全局状态：" + rel(f));
 }
 
+// 5) 数据表查询必须显式传上下文：itemByName(ctx, name) / skillByName(ctx, name)
+//    单参形式（依赖全局 A）是迁移期的兼容路径，新代码不许再用——
+//    它会让调用方隐式绑到全局状态，正是 P5 要拆掉的东西。
+for (const f of files) {
+  const t = read(f);
+  if (rel(f) === "src/core/registry.js") continue;
+  for (const m of t.matchAll(/(itemByName|skillByName)\(\s*(["'`]|[A-Za-z_$][\w$]*\s*[,)])/g)) {
+    // 形如 itemByName("xxx") 或 itemByName(x) 单参 = 未传上下文
+    const after = m[2];
+    const single = /^["'`]/.test(after) || after.includes(")");
+    if (single) issues.push("数据表查询未传上下文：" + rel(f) + " -> " + m[1] + "(" + after.replace(/[,)]/g, "") + "…)");
+  }
+}
+
 if (issues.length) {
   console.error("✗ 架构检查未通过：\n- " + issues.join("\n- "));
   process.exit(1);

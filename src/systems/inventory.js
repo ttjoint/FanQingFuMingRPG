@@ -20,7 +20,7 @@ export function isInstanceEntry(e) { return !!(e && e.inst); }
 export function entryStackable(g, entry) {
   if (!entry) return false;
   if (entry.inst) return false;
-  const it = itemByName(entry.name) || {};
+  const it = itemByName(g, entry.name) || {};
   return it.stackable !== false;
 }
 
@@ -74,7 +74,7 @@ export function normalizeEntry(e) {
 
 // 能否再容纳 count 个该物品（可叠放物品已有同类堆也算能）
 export function canAddItem(g, name, cnt) {
-  const it = itemByName(name) || {};
+  const it = itemByName(g, name) || {};
   const stackable = it.stackable !== false;
   if (stackable) for (const list of [g.hotbar, g.pack]) for (const s of list) if (s && !s.inst && s.name === name) return true;
   return !!freeSlot(g);
@@ -85,7 +85,7 @@ export function addItem(g, entryOrName, cnt) {
   const entry = normalizeEntry(typeof entryOrName === "string" ? { name: entryOrName, count: cnt || 1 } : entryOrName);
   if (!entry) return;
   if (!entry.inst && entry.count < 0) { removeItem(g, entry.name, -entry.count); return; }
-  const it = itemByName(entry.name) || {};
+  const it = itemByName(g, entry.name) || {};
   const stackable = !entry.inst && it.stackable !== false;
   if (stackable) {
     for (const list of [g.hotbar, g.pack]) for (const s of list) {
@@ -120,7 +120,7 @@ export function removeItem(g, name, cnt) {
     if (need <= 0) break;
   }
   if (need > 0) for (const k in g.equip) { const s = g.equip[k];
-    if (s && s.name === name) { const it = itemByName(name); if (it) applyBonus(g, it, -1); g.equip[k] = null; need--; if (need <= 0) break; } }
+    if (s && s.name === name) { const it = itemByName(g, name); if (it) applyBonus(g, it, -1); g.equip[k] = null; need--; if (need <= 0) break; } }
   reindex(g); syncMissions(g, name);
 }
 
@@ -195,7 +195,7 @@ export function equipSlotFor(g, it) {
 }
 
 export function equipFrom(g, entry, kind, key) {
-  const it = itemByName(entry.name), target = equipSlotFor(g, it);
+  const it = itemByName(g, entry.name), target = equipSlotFor(g, it);
   if (!target) { g.tip = "无法装备"; g.tipT = 2; return; }
   // 取出一件（实例条目整件取出；堆叠条目减一）。
   const moved = entry.inst ? { name: entry.name, count: 1, inst: entry.inst } : { name: entry.name, count: 1 };
@@ -209,7 +209,7 @@ export function equipFrom(g, entry, kind, key) {
 
 export function useEntry(g, entry, kind, key) {
   if (!entry) return;
-  const it = itemByName(entry.name); if (!it) return;
+  const it = itemByName(g, entry.name); if (!it) return;
   const kindTag = it.kind || (it.type === 1 ? "weapon" : it.type === 2 ? "armor" : it.type === 3 ? "trinket" : it.type === 0 ? "consumable" : it.type === 4 ? "scroll" : it.type === 7 ? "pack" : "misc");
   if (kindTag === "consumable") {
     // 使用效果数据化：优先 it.use，其次回退 to 旧 hp/mp 字段。
@@ -250,7 +250,7 @@ function findEquipKey(g, entry) {
 }
 function withStatRefresh(g, entry, mutate) {
   const key = findEquipKey(g, entry);
-  const it = itemByName(entry.name);
+  const it = itemByName(g, entry.name);
   if (key && it) applyBonus(g, it, -1, entry);   // 减掉旧值
   const r = mutate();
   if (key && it) applyBonus(g, it, +1, entry);   // 加回新值
@@ -297,7 +297,7 @@ export function enhanceEntry(g, entry) {
   const cfg = Object.assign({}, CFG.items, CFG.itemEnhance);
   const r = canEnhance(entry, cfg);
   if (!r.ok) { g.tip = r.reason; g.tipT = 2; return false; }
-  const cost = enhanceCost(itemByName(entry.name), entry.inst.enhance, cfg);
+  const cost = enhanceCost(itemByName(g, entry.name), entry.inst.enhance, cfg);
   if ((g.stats.money || 0) < cost) { g.tip = "金币不足（需 " + cost + "）"; g.tipT = 2; return false; }
   g.stats.money -= cost;
   if (findEquipKey(g, entry) != null) withStatRefresh(g, entry, () => enhancePure(entry, cfg));
@@ -311,7 +311,7 @@ export function enhanceEntry(g, entry) {
 export function wearEquip(g, key, amount) {
   const e = g.equip[key];
   if (!e || !e.inst) return;
-  const it = itemByName(e.name);
+  const it = itemByName(g, e.name);
   const before = isBroken(e, it), dur = e.inst.durability;
   if (!dur) return;
   withStatRefresh(g, e, () => wearDurability(e, amount));

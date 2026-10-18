@@ -59,7 +59,7 @@ export function drawTooltip() {
   const slot = slotAt(G.mouse.sx, G.mouse.sy);
   const entry = displayEntry(slot);
   if (!entry) return;
-  const it = itemByName(entry.name);
+  const it = itemByName(G, entry.name);
   if (!it) return;
   const lines = itemInfoLines(it, entry);
   ctx.font = "12px 'Microsoft YaHei',SimHei,sans-serif";

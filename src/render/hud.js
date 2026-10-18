@@ -108,7 +108,7 @@ function drawButton(c, p) {
   if (im) ctx.drawImage(im, p.x, p.y, c.w, c.h);
   // 技能图标：绑定了 skill.icon 时叠在按钮上，并在右侧写技能名
   if (c.bind === "skill.icon") {
-    const sk = skillByName(G.skill);
+    const sk = skillByName(G, G.skill);
     if (sk && sk.icon) {
       const ic = getImg("assets/skill_icons/" + sk.icon.replace(/\.bmp$/, ".png"));
       if (ic) ctx.drawImage(ic, p.x, p.y, c.w, c.h);
@@ -162,7 +162,7 @@ function drawSlotGrid(c) {
 // 商店格由 shop-ui.js 画（它需要处理售罄/悬停等状态），这里不重复。
 export function drawItemSlot(entry, x, y, w, h) {
   if (!entry) return;
-  const it = itemByName(entry.name);
+  const it = itemByName(G, entry.name);
   const im = it && it.icon ? getImg("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png")) : null;
   if (im) ctx.drawImage(im, x + 3, y + 3, w - 6, h - 6);
   if (entry.count > 1) { ctx.fillStyle = "#ffe9a8"; ctx.font = "10px sans-serif"; ctx.fillText(String(entry.count), x + w - 14, y + h - 4); }
@@ -170,7 +170,7 @@ export function drawItemSlot(entry, x, y, w, h) {
 
 export function drawCursorItem() {
   if (!G.cursor) return;
-  const it = itemByName(G.cursor.name);
+  const it = itemByName(G, G.cursor.name);
   const im = it && it.icon ? getImg("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png")) : null;
   if (im) ctx.drawImage(im, G.mouse.sx - 16, G.mouse.sy - 16, 32, 32);
 }

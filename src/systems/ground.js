@@ -30,7 +30,7 @@ export function dropCfg() {
 export function dropGround(g, entryOrName, x, y, countOrOpts, maybeOpts) {
   const entry = normalizeEntry(typeof entryOrName === "string" ? { name: entryOrName, count: (typeof countOrOpts === "number" ? countOrOpts : 1) } : entryOrName);
   if (!entry) return null;
-  if (!itemByName(entry.name)) return null;
+  if (!itemByName(g, entry.name)) return null;
   const opts = (countOrOpts && typeof countOrOpts === "object") ? countOrOpts : (maybeOpts || {});
   const cfg = dropCfg();
   const sc = opts.scatter != null ? opts.scatter : cfg.scatter;
@@ -118,7 +118,7 @@ export function npcPickup(ctx, n, gr) {
   if (!canPickup(G, gr, n)) return false;
   const bag = npcBag(n, (CFG.npc && CFG.npc.bagSize) || 9);
   const entry = gr.inst ? { name: gr.name, count: 1, inst: gr.inst } : { name: gr.name, count: gr.count || 1 };
-  const it = itemByName(gr.name) || {};
+  const it = itemByName(G, gr.name) || {};
   if (!entry.inst && it.stackable !== false) {
     for (const s of bag) if (s && !s.inst && s.name === entry.name) { s.count += entry.count; G.ground.splice(G.ground.indexOf(gr), 1); return true; }
   }

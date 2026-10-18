@@ -31,7 +31,7 @@ export function drawShop() {
     const p = uiSlotRect("shop.grid", i) || shopSlotPos(i);
     if (i >= G.shop.goods.length) continue;
     const name = G.shop.goods[i];
-    const it = itemByName(name);
+    const it = itemByName(G, name);
     drawItemSlot({ name }, p.x, p.y, 38, 38);
     if (it && it.price > 0) {
       ctx.fillStyle = "#5a3a10"; ctx.font = "9px 'Microsoft YaHei',SimHei,sans-serif";

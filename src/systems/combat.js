@@ -28,7 +28,7 @@ export function playerCanAttack(ctx, t) {
 }
 
 export function skillRange(ctx) {
-  const sk = skillByName(ctx.state.skill);
+  const sk = skillByName(ctx, ctx.state.skill);
   return sk ? skRange(sk, ctx.config.combat.rangeMin) : ctx.config.combat.rangeMin;
 }
 
@@ -135,7 +135,7 @@ export function playerAttackTarget(ctx, dt) {
   p.moveGoal = null; setAnim(p, "fight"); faceTarget(p, t);
   if (p.attackCD > 0) { p.atkT = 0.08; p.swingTotal = 0.08; p.swingT = 0; p.hitPending = false; p.animSpeed = 1; return; }   // 冷却中：保持面朝并继续播放攻击帧
 
-  const sk = skillByName(G.skill) || { power: 0, mp: 0 };
+  const sk = skillByName(ctx, G.skill) || { power: 0, mp: 0 };
   // 技能级冷却（阶段 D）：冷却中不发起新攻击（保持面朝）。
   if (sk.name && !isReady(p, sk)) {
     p.atkT = 0.08; p.swingTotal = 0.08; p.swingT = 0; p.hitPending = false; p.animSpeed = 1;
@@ -378,7 +378,7 @@ export function killNPC(ctx, n) {
 export function castSelf(ctx) {
   const G = ctx.state;
   const p = G.player; if (!p) return;
-  const sk = skillByName(G.skill); if (!sk) return;
+  const sk = skillByName(ctx, G.skill); if (!sk) return;
   // 被动技能不能主动施放（它只通过 synergy 给别的技能加成）。
   if (sk.passive) return;
   // 技能级冷却：原先这条路径完全没接冷却，导致带 cooldown 的治疗/自身技能

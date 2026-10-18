@@ -77,7 +77,7 @@ export function handleLeft(wx, wy) {
     return;
   }
   if (p0) p0.pickup = null;
-  const sk = skillByName(G.skill);
+  const sk = skillByName(G, G.skill);
   const n = npcAt(wx, wy);
   if (sk && sk.type === 0 && !n) { castSelf(getRuntime()); return; }
   if (n) {

@@ -244,7 +244,7 @@ export function drawProjectiles(camX, camY) {
 // 地面掉落物：小图标 + 微微上下浮动
 export function drawGroundItem(g, camX, camY) {
   if (camX == null) { camX = Math.round(G.cam.x); camY = Math.round(G.cam.y); }
-  const it = itemByName(g.name);
+  const it = itemByName(G, g.name);
   const im = it && it.icon ? getImg("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png")) : null;
   const bob = Math.sin(G.time * 3 + g.x) * 1.5;
   const x = Math.round(g.x - camX), y = Math.round(g.y - camY + bob);
