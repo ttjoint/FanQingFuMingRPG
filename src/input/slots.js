@@ -8,8 +8,19 @@ import { buyItem, buyInto, sellCursor } from "../systems/shop.js";
 import { playSound } from "../systems/audio.js";
 import { entryOf } from "../core/layout.js";
 
-export function handleSlotClick(slot, button, shift) {
-  const rt = getRuntime();
+
+// P5：视图层的状态入口。
+// 允许调用方显式传入运行时（rt）或游戏状态（g），不传则回退到当前全局实例。
+// 这样离屏渲染/单测可以喂一份独立状态，而不必改全局单例。
+function stateOf(x) {
+  if (!x) return G;
+  if (x.state) return x.state;      // runtime ctx
+  return x;                          // 直接是游戏状态
+}
+
+export function handleSlotClick(slot, button, shift, rt) {
+  rt = rt || getRuntime();
+  const G = stateOf(rt);
   if (slot.kind === "shop") {
     const name = G.shop.goods[slot.key];
     if (button === 2) { buyItem(rt, name, 1); return; }

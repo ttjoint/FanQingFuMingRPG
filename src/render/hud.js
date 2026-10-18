@@ -12,10 +12,20 @@ import { resolvePos, slotRect } from "../content/ui.js";
 import { getRuntime } from "../runtime/context.js";
 import { installUiLayout } from "../core/layout.js";
 
+
+// P5：视图层的状态入口。
+// 允许调用方显式传入运行时（rt）或游戏状态（g），不传则回退到当前全局实例。
+// 这样离屏渲染/单测可以喂一份独立状态，而不必改全局单例。
+function stateOf(x) {
+  if (!x) return G;
+  if (x.state) return x.state;      // runtime ctx
+  return x;                          // 直接是游戏状态
+}
+
 // 取当前 UI 配置。内容缺失时返回 null（不画任何元件），
 // 这比“退回一份硬编码”更容易发现装配问题。
-function uiOf() {
-  const rt = getRuntime();
+function uiOf(rt) {
+  rt = rt || getRuntime();
   const c = rt && rt.content;
   return (c && c.ui) || null;
 }
@@ -44,8 +54,9 @@ function bindValue(bind, st) {
   }
 }
 
-export function drawHUD() {
-  const ui = uiOf();
+export function drawHUD(rt) {
+  const G = stateOf(rt);
+  const ui = uiOf(rt);
   // 把同一份配置交给命中测试（core/layout.js 的 slotAt/insideShop），
   // 保证“画在哪”和“点在哪”永远同源——否则改了布局就会出现点不中的格子。
   installUiLayout(ui);
@@ -168,7 +179,8 @@ export function drawItemSlot(entry, x, y, w, h) {
   if (entry.count > 1) { ctx.fillStyle = "#ffe9a8"; ctx.font = "10px sans-serif"; ctx.fillText(String(entry.count), x + w - 14, y + h - 4); }
 }
 
-export function drawCursorItem() {
+export function drawCursorItem(rt) {
+  const G = stateOf(rt);
   if (!G.cursor) return;
   const it = itemByName(G, G.cursor.name);
   const im = it && it.icon ? getImg("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png")) : null;

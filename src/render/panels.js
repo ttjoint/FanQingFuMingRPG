@@ -11,7 +11,16 @@ import { normalizeDifficulties } from "../engine/difficulty.js";
 import { mercList, mercInfo } from "../systems/merc.js";
 import { getRuntime } from "../runtime/context.js";
 
-export function drawTip() {
+
+// P5：视图层的状态入口。允许传入运行时（rt）或游戏状态（g），不传回退全局。
+function stateOf(x) {
+  if (!x) return G;
+  if (x.state) return x.state;      // runtime ctx
+  return x;                          // 直接是游戏状态
+}
+
+export function drawTip(rt) {
+  const G = stateOf(rt);
   if (G.tipT <= 0 || !G.tip) return;
   ctx.font = "13px sans-serif";
   const w = ctx.measureText(G.tip).width + 24;
@@ -20,7 +29,8 @@ export function drawTip() {
   ctx.fillStyle = "#ffe9a8"; ctx.textAlign = "center"; ctx.fillText(G.tip, VW / 2, 90); ctx.textAlign = "left";
 }
 
-export function drawPanels() {
+export function drawPanels(rt) {
+  const G = stateOf(rt);
   if (!G.panel) return;
   // 面板矩形取自可编辑 UI 配置（info.panel）；缺配置时回退旧硬编码。
   const R = uiRect("info.panel") || { x: (VW - 420) / 2, y: 40, w: 420, h: 300 };
@@ -62,7 +72,8 @@ export function drawPanels() {
   ctx.fillStyle = "#888"; ctx.font = "11px sans-serif"; ctx.fillText("按 Esc 关闭", x + w - 80, y + 20);
 }
 
-export function drawPack() {
+export function drawPack(rt) {
+  const G = stateOf(rt);
   if (!G.packOpen) return;
   // 包裹面板矩形取自可编辑 UI 配置（pack.panel）；缺配置时回退 PACK_BOX。
   const PB = uiRect("pack.panel") || PACK_BOX;
@@ -113,7 +124,8 @@ export function stashSlotAt(sx, sy) {
   return -1;
 }
 
-export function drawStash() {
+export function drawStash(rt) {
+  const G = stateOf(rt);
   if (!G.stashPanel) return;
   const B = stashRect();
   ctx.fillStyle = "rgba(16,12,8,0.96)"; ctx.fillRect(B.x, B.y, B.w, B.h);
@@ -155,7 +167,8 @@ export function smithButtonAt(sx, sy) {
   return null;
 }
 
-export function drawSmith() {
+export function drawSmith(rt) {
+  const G = stateOf(rt);
   if (!G.smithPanel) return;
   const B = SMITH_BOX;
   ctx.fillStyle = "rgba(16,12,8,0.96)"; ctx.fillRect(B.x, B.y, B.w, B.h);
@@ -206,7 +219,8 @@ export function diffRowAt(sx, sy) {
   return -1;
 }
 
-export function drawDifficulty() {
+export function drawDifficulty(rt) {
+  const G = stateOf(rt);
   if (!G.diffPanel) return;
   const B = DIFF_BOX;
   ctx.fillStyle = "rgba(16,12,8,0.96)"; ctx.fillRect(B.x, B.y, B.w, B.h);
@@ -247,7 +261,8 @@ export function mercRowAt(sx, sy) {
   return -1;
 }
 
-export function drawMercPanel() {
+export function drawMercPanel(rt) {
+  const G = stateOf(rt);
   if (!G.mercPanel) return;
   const B = MERC_BOX;
   ctx.fillStyle = "rgba(16,12,8,0.96)"; ctx.fillRect(B.x, B.y, B.w, B.h);
@@ -298,7 +313,8 @@ export function drawMercPanel() {
   ctx.fillText("点击招募；Esc 关闭", B.x + 14, B.y + B.h - 10);
 }
 
-export function drawSavePanel() {
+export function drawSavePanel(rt) {
+  const G = stateOf(rt);
   if (!G.savePanel) return;
   const R = uiRect("save.panel") || { x: (VW - 460) / 2, y: 40, w: 460, h: 340 };
   const { w, h, x, y } = R;
@@ -328,7 +344,8 @@ export function drawSavePanel() {
 export const WP_BOX = { x: 150, y: 50, w: 340, h: 320 };
 const WP_ROW_H = 34;
 
-export function drawWaypointPanel() {
+export function drawWaypointPanel(rt) {
+  const G = stateOf(rt);
   if (!G.waypointPanel) return;
   const { w, h, x, y } = WP_BOX;
   ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(0, 0, VW, VH);
@@ -385,7 +402,8 @@ function waypointRows() {
 
 // 系统设置面板：音量 + 系统菜单按钮（回到游戏 / 读档存档 / 退出游戏）。
 // 版式常量定义在 core/layout.js（绘制与命中测试共用同一份，避免两处坐标漂移）。
-export function drawSettingsPanel() {
+export function drawSettingsPanel(rt) {
+  const G = stateOf(rt);
   if (!G.settingsPanel) return;
   const { w, h, x, y } = SETTINGS_BOX, bx = SETTINGS_BAR.x, bw = SETTINGS_BAR.w;
   // 半透明遮罩：面板是模态的，压暗背后场景以突出焦点。

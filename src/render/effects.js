@@ -1,6 +1,7 @@
 // 特效渲染：脚底圈（under）、深度排序特效（over）、顶层特效（top）。
 // 程序化绘制（圆环/光晕/落点），后续可切换到贴图动画帧（def.texture / def.frames）。
-import { G, A } from "../core/state.js";
+import { G } from "../core/state.js";
+import { getRuntime } from "../runtime/context.js";
 import { ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { CFG } from "../core/config.js";
@@ -139,7 +140,8 @@ export function drawIndicatorRings(camX, camY) {
   if (ui.locked) {
     // 敌对判红、其余判蓝。用阵营敌对关系（isHostile），而不是 canAttack ——
     // canAttack 额外要求"施动方有攻击力"，玩家 raw 实例没有 atk 字段，会恒为 false。
-    const hostile = isHostile(G.player || {}, ui.locked, (A && A.factionTable) || null);
+    const ft = getRuntime().assets.factionTable || null;
+    const hostile = isHostile(G.player || {}, ui.locked, ft);
     drawRing(Math.round(ui.locked.x - camX), Math.round(ui.locked.y - camY + 3), hostile ? rings.target : rings.interact, 22);
   }
   if (ui.target) drawRing(Math.round(ui.target.x - camX), Math.round(ui.target.y - camY + 3), rings.target, 20);

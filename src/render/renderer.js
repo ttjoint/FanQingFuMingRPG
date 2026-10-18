@@ -1,5 +1,5 @@
 // 主渲染：世界（地形 + 对象 + 角色 + 掉落物 + 特效）与所有 UI 的叠加顺序。
-import { G, A } from "../core/state.js";
+import { G } from "../core/state.js";
 import { VW, VH, ctx, BUILD } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { itemByName } from "../core/registry.js";
@@ -14,7 +14,18 @@ import { effectPos } from "../engine/effect.js";
 import { computeIndicators } from "../systems/indicators.js";
 import { getRuntime } from "../runtime/context.js";
 
-export function spriteFor(e) {
+// 视图层取资产的统一入口。
+// P5：render/input 不再直接依赖全局 A —— 但这两层每次绘制都要读地形图/角色表，
+// 逐个函数加 ctx 参数会污染 20+ 个签名。折中：内部经此处取值，
+// 允许调用方显式传入（单测/多实例用），不传则回退到当前运行时。
+function assetsOf(rt) {
+  if (rt && rt.assets) return rt.assets;
+  if (rt && rt.chars) return rt;
+  return getRuntime().assets;
+}
+
+export function spriteFor(e, rt) {
+  const A = assetsOf(rt);
   const ch = A.chars[e.model]; if (!ch) return null;
   const blocks = ch[e.action] || ch.stand || ch.walk; if (!blocks) return null;
   const block = blocks[e.dir % blocks.length] || blocks[0]; if (!block || !block.length) return null;
@@ -27,7 +38,8 @@ export function spriteFor(e) {
 // 帧锚点：(x=身体水平中心, y=脚底)。优先用 build_assets.py 生成的 anchors.json；
 // 若缺失（例如旧版资源），则实时从 alpha 包围盒算一次并缓存。
 const ANCHOR = {};
-export function anchorOf(im, name) {
+export function anchorOf(im, name, rt) {
+  const A = assetsOf(rt);
   if (A.anchors && A.anchors[name]) return A.anchors[name];
   if (ANCHOR[name]) return ANCHOR[name];
   let a = [im.width / 2, im.height];
@@ -54,18 +66,21 @@ export function entitySortY(e) {
   return e.y;
 }
 
-export function render() {
+export function render(rt) {
+  // 显式传入时用传入的，否则用当前运行时（启动/单测可传）。
+  rt = rt || getRuntime();
+  const A = assetsOf(rt);
   if (G.scene === "editor" || G.scene === "version") return;   // 这些界面是 DOM 浮层，遮住画布
   // 标题菜单 / 片头 / 结局等非游玩场景：只画场景与存档、设置浮层。
   if (G.scene !== "game") {
-    drawScene();
-    drawSavePanel();
-    drawSettingsPanel();
-    drawTip();
+    drawScene(rt);
+    drawSavePanel(rt);
+    drawSettingsPanel(rt);
+    drawTip(rt);
     return;
   }
   ctx.fillStyle = "#0a0a0a"; ctx.fillRect(0, 0, VW, VH);
-  if (!G.map) { drawHUD(); drawDialog(); return; }
+  if (!G.map) { drawHUD(rt); drawDialog(rt); return; }
   const m = G.map, cam = G.cam;
   // 整帧只用一个“取整后的相机偏移”。否则地形(大图)、对象、角色各自 Math.round，
   // 会因 cam 小数部分不同而相差 1px，表现为跟随镜头时地面与其他精灵相对晃动。
@@ -73,7 +88,7 @@ export function render() {
   ctx.drawImage(m.terrain, m.minX - camX, m.minY - camY);
 
   // 指示数据（红/蓝圈、落点、物品高亮）——每帧重算，渲染层只读。
-  computeIndicators(getRuntime());
+  computeIndicators(rt);
   // 1) 底层特效（under）：脚底圈、地面标记 —— 永远在所有单位之下。
   drawIndicatorRings(camX, camY);
   drawMoveMarkerAt(camX, camY);
@@ -138,7 +153,9 @@ export function render() {
   drawProjectiles(camX, camY);
   // 2) 顶层特效（top）：头顶 buff/称号 —— 永远在最顶层。
   for (const inst of topEffects(G)) drawEffect(inst, camX, camY);
-  drawHUD(); drawDialog(); drawPanels(); drawPack(); drawShop(); drawSavePanel(); drawWaypointPanel(); drawStash(); drawSmith(); drawDifficulty(); drawMercPanel(); drawSettingsPanel(); drawTip(); drawCursorItem(); drawTooltip();
+  drawHUD(rt); drawDialog(rt); drawPanels(rt); drawPack(rt); drawShop(rt); drawSavePanel(rt);
+  drawWaypointPanel(rt); drawStash(rt); drawSmith(rt); drawDifficulty(rt); drawMercPanel(rt);
+  drawSettingsPanel(rt); drawTip(rt); drawCursorItem(rt); drawTooltip(rt);
   if (typeof window !== "undefined" && window.__POLY_DEBUG__) {
     ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(6, 26, 236, 18);
     ctx.fillStyle = "#8fd0ff"; ctx.font = "12px sans-serif"; ctx.textAlign = "left";

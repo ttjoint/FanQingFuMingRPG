@@ -60,7 +60,7 @@ function loop(now) {
   // 测试用暂停开关：置 true 时暂停 update（渲染照常），
   // 便于 e2e 在 evaluate 中独占推进逻辑，避免与 rAF 竞争。
   if (!globalThis.__GAME_PAUSED__) { update(dt); }
-  render();
+  render(runtime);
   requestAnimationFrame(loop);
 }
 
@@ -154,7 +154,7 @@ export async function boot() {
 
   preloadChar("role");
   preloadSceneArt();
-  addInput();
+  addInput(runtime);
   // 预热版本清单：标题栏「数据版本：X」读的是同步缓存，静态部署下
   // 不预热会一直显示「默认版本」（磁盘版本名来自 versions/index.json）。
   await ensureVersionNames();

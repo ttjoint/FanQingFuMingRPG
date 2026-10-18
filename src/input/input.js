@@ -1,5 +1,5 @@
 // 输入：鼠标 / 键盘，包含世界点击（移动、攻击、对话）、物品拖拽、UI 交互分发。
-import { G } from "../core/state.js";
+import { G as GLOBAL_STATE } from "../core/state.js";
 import { VW, cv } from "../core/constants.js";
 import { screenPos, worldToCell, walkable, cellCenter } from "../core/utils.js";
 import { nearestWalkable, nearestWalkablePixel, findPathPoints } from "../world/pathfinding.js";
@@ -26,6 +26,30 @@ import { applyVolumes, playSound, saveSettings } from "../systems/audio.js";
 import { enterMenu, startGame, flashPics } from "../systems/scene.js";
 import { getRuntime } from "../runtime/context.js";
 import { isEditorAvailable } from "../content/store.js";
+
+// P5：输入层的状态绑定。
+//
+// input.js 有 100+ 处直接读 G。逐处改签名收益很低，而且事件回调是注册时
+// 就绑死的，加参数还得层层透传。这里改成"绑定一次、全局生效"：
+//   addInput(rt) → bindState(rt) → 之后所有回调读的就是这份状态。
+// 不绑定时回退到全局实例（既有行为，测试/热重载都能跑）。
+let BOUND = null;
+function G_now() { return BOUND || GLOBAL_STATE; }
+function bindState(rt) {
+  BOUND = (rt && rt.state) ? rt.state : (rt || null);
+  return BOUND;
+}
+// 局部别名：保留既有 `G.xxx` 写法不变，但每次读都走当前绑定。
+/** @type {any} */
+const G = new Proxy(/** @type {any} */ ({}), {
+  get(_t, k) { return G_now()[k]; },
+  set(_t, k, v) { G_now()[k] = v; return true; },
+  has(_t, k) { return k in G_now(); },
+  ownKeys() { return Reflect.ownKeys(G_now()); },
+  getOwnPropertyDescriptor(_t, k) {
+    return { configurable: true, enumerable: true, value: G_now()[k] };
+  },
+});
 
 // 五个功能窗口（属性/记事/荣辱/任务/菜单/设置）互斥：开一个就关掉其余，避免互相遮挡。
 function setPanel(kind) {
@@ -150,7 +174,8 @@ export function cycleSkill(d) {
   G.skill = G.skills[i]; G.tip = "技能：" + G.skill; G.tipT = 2;
 }
 
-export function addInput() {
+export function addInput(rt) {
+  bindState(rt);
   // 拖动音量条：按下后移动持续调整（否则只能“点一下跳一格”，很难用）。
   cv.addEventListener("mousemove", e => {
     if (!G.volDrag) return;

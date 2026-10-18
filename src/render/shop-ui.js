@@ -6,7 +6,18 @@ import { itemByName } from "../core/registry.js";
 import { SHOP_BOX, SHOP_COLS, SHOP_ROWS, shopSlotPos, shopCloseBtn, uiRect, uiSlotRect, uiComp } from "../core/layout.js";
 import { drawItemSlot } from "./hud.js";
 
-export function drawShop() {
+
+// P5：视图层的状态入口。
+// 允许调用方显式传入运行时（rt）或游戏状态（g），不传则回退到当前全局实例。
+// 这样离屏渲染/单测可以喂一份独立状态，而不必改全局单例。
+function stateOf(x) {
+  if (!x) return G;
+  if (x.state) return x.state;      // runtime ctx
+  return x;                          // 直接是游戏状态
+}
+
+export function drawShop(rt) {
+  const G = stateOf(rt);
   if (!G.shop) return;
   // 面板矩形优先取可编辑 UI 配置（在编辑器里挪动商店 → 这里跟着走）；缺失才回退旧常量。
   const B = uiRect("shop.panel") || SHOP_BOX;

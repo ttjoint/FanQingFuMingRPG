@@ -7,6 +7,16 @@ import { flashPics, endPic } from "../systems/scene.js";
 import { MENU_BUTTONS, menuHit } from "../core/layout.js";
 import { isEditorAvailable, activeId, versionName } from "../content/store.js";
 
+
+// P5：视图层的状态入口。
+// 允许调用方显式传入运行时（rt）或游戏状态（g），不传则回退到当前全局实例。
+// 这样离屏渲染/单测可以喂一份独立状态，而不必改全局单例。
+function stateOf(x) {
+  if (!x) return G;
+  if (x.state) return x.state;      // runtime ctx
+  return x;                          // 直接是游戏状态
+}
+
 // 把资源名规范成 assets/ui/*.png：允许 "mainmenu"、"end.bmp"、"end.png" 三种写法。
 function ui(name) {
   if (!name) return null;
@@ -22,7 +32,8 @@ export function preloadSceneArt() {
   for (const b of MENU_BUTTONS) if (b.img) ui(b.img);
 }
 
-export function drawScene() {
+export function drawScene(rt) {
+  const G = stateOf(rt);
   switch (G.scene) {
     case "flash": return drawFlash();
     case "menu": return drawMenu();

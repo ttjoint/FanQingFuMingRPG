@@ -236,8 +236,28 @@ D2 的 build 多样性全部建立在这套正交体系上。
 
 ## P5 · 技术债与解耦
 
-- [ ] **渲染层/输入层去全局单例**：18 个文件仍 `import { G, A } from core/state`。
-      `systems/` 已全部收 `ctx`，视图层应对齐（函数签名收 `ctx`，`main.js` 注入）。
+- [x] **渲染层/输入层去全局单例**
+      - **资产表 `A` 彻底断开**（这才是这块的真正价值：资产是纯数据，
+        必须能注入，否则离屏渲染/单测/多实例都无从下手）。
+        `renderer.js` 加 `assetsOf(rt)`；`effects.js` 经 `getRuntime()`。
+        现在 `render/` 与 `input/` 里**没有一处** import 全局 `A`。
+      - **状态 `G` 改为可注入**：所有绘制函数收可选 `rt`
+        （`drawHUD/drawPanels/drawPack/drawShop/drawTooltip/drawDialog/
+        drawScene/drawStash/drawSmith/drawDifficulty/drawMercPanel/
+        drawSavePanel/drawWaypointPanel/drawSettingsPanel/drawTip/drawCursorItem`），
+        内部用 `stateOf(rt)` 归一，不传则回退全局（既有调用不变）。
+        `render(rt)` 一次性把 rt 透传给全部绘制；`main.js` 传 `runtime`。
+      - `input.js` 有 100+ 处 `G.xxx`，逐处改签名收益很低（事件回调注册时就绑死了）。
+        改成 `addInput(rt) → bindState(rt)` 绑定一次，`G` 用 Proxy 转发读写：
+        **不传 rt 时行为与改造前完全一致**，传了则整体切到那份状态。
+      - `check-arch.mjs` 新增**规则 6**：视图层不得 import 全局 `A`。
+        已验证能拦住（往 tooltip.js 加 `A` 立刻报错）。
+      - ⚠️ **踩过的坑**：`check-arch.mjs` 与单测里的正则，
+        经过多层转写（heredoc → Python 字符串 → JS 字符串）会把
+        `\b`/`\s`/`\(` 吃掉——退格符被写进文件、正则退化成字面量。
+        **教训：写文件里的正则要用 write 工具或 Python 原始字符串，
+        别在多层 shell 转义里揉。** 单测已改用纯字符串定位（`indexOf`/`includes`）
+        而非正则拼装，从根上避开这个坑。
 - [x] **`core/registry.js` 后门**
       - 签名改为 `itemByName(ctx, name)` / `skillByName(ctx, name)`，
         `ctx` 经 `assetsOf()` 归一：运行时上下文（`{assets}`）、裸资产表、

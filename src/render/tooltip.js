@@ -6,6 +6,16 @@ import { itemByName } from "../core/registry.js";
 import { slotAt, displayEntry } from "../core/layout.js";
 import { displayName, instanceStats, rarityColor } from "../engine/item.js";
 
+
+// P5：视图层的状态入口。
+// 允许调用方显式传入运行时（rt）或游戏状态（g），不传则回退到当前全局实例。
+// 这样离屏渲染/单测可以喂一份独立状态，而不必改全局单例。
+function stateOf(x) {
+  if (!x) return G;
+  if (x.state) return x.state;      // runtime ctx
+  return x;                          // 直接是游戏状态
+}
+
 export function itemInfoLines(it, entry) {
   const st = entry && entry.inst ? instanceStats(entry, it) : null;
   const L = [entry && entry.inst ? displayName(entry, it) : it.name];
@@ -54,7 +64,8 @@ export function rarityLabel(r) {
   return ({ common: "普通", magic: "精良", rare: "稀有", unique: "传说", quest: "任务" })[r] || r;
 }
 
-export function drawTooltip() {
+export function drawTooltip(rt) {
+  const G = stateOf(rt);
   if (G.savePanel || G.settingsPanel) return;
   const slot = slotAt(G.mouse.sx, G.mouse.sy);
   const entry = displayEntry(slot);

@@ -4,7 +4,18 @@ import { ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { parseRich, drawRichText } from "./text.js";
 
-export function drawDialog() {
+
+// P5：视图层的状态入口。
+// 允许调用方显式传入运行时（rt）或游戏状态（g），不传则回退到当前全局实例。
+// 这样离屏渲染/单测可以喂一份独立状态，而不必改全局单例。
+function stateOf(x) {
+  if (!x) return G;
+  if (x.state) return x.state;      // runtime ctx
+  return x;                          // 直接是游戏状态
+}
+
+export function drawDialog(rt) {
+  const G = stateOf(rt);
   if (!G.dialog) return;
   // 头像（有则显示；旁白的 portrait 为 NULL/空）
   const has = G.dialog.portrait && G.dialog.portrait !== "NULL";

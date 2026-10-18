@@ -69,6 +69,20 @@ for (const f of files) {
   }
 }
 
+// 6) 视图层（render/input）不得直接 import 全局资产表 A。
+//    资产表是纯数据，视图层应当由调用方注入（render(rt) / 各 draw 函数收 rt），
+//    否则离屏渲染、单测、多实例都无从下手。
+for (const f of files.filter(f => /^src\/(render|input)\//.test(rel(f)))) {
+  const t = read(f);
+  // 只看 import 语句里的具名导入，避免误伤注释与字符串
+  for (const m of t.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']([^"']*core\/state\.js)["']/g)) {
+    if (m[1].split(",").some(x => x.trim() === "A")) {
+      issues.push("视图层直接依赖全局 A：" + rel(f));
+      break;
+    }
+  }
+}
+
 if (issues.length) {
   console.error("✗ 架构检查未通过：\n- " + issues.join("\n- "));
   process.exit(1);
