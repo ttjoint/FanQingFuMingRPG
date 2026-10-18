@@ -1042,6 +1042,11 @@ function tabConfig() {
     { k: "packItem", label: "背包道具名", type: "text" }, { k: "packSize", label: "背包格数", type: "number" },
   ]);
 
+  sec("共享仓库", "stash", [
+    { k: "size", label: "仓库格数", type: "number",
+      hint: "账号级存储，不随存档；改小只会让超出的格子看不见（数据仍保留）。" },
+  ]);
+
   // ---- 音频：默认音量（玩家在游戏内设置面板改的值会覆盖这里）----
   sec("音频默认音量", "audio", [
     { k: "bgm", label: "背景音乐", type: "number", step: 0.05, min: 0, max: 1, def: 0.6 },

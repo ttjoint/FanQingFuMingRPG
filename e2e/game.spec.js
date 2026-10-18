@@ -934,6 +934,42 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   expect(wp.map).toBe(wp.wantMap);                       // 真的切到了目标图
   expect(wp.panelClosed).toBe(true);
 
+  // ---- 共享仓库（P4）----
+  // 背包 25 格，掉落系统会持续产出物品；没有仓库就只能卖或丢地上（不跨图，
+  // 等于扔了就没）。这里钉住：存/取是两个方向、仓库是账号级持久化（不随存档）。
+  const st = await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const S = await import("/src/systems/stash.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    try { localStorage.removeItem("gsxy_stash"); } catch (e) { /* 隐私模式下忽略 */ }
+    G.stash = null;                                  // 丢掉内存缓存，从零开始
+    const slots = S.stashOf(rt);
+    const out = { size: slots.length };
+    G.pack = new Array(25).fill(null);
+    G.pack[0] = { name: "金创药", count: 3 };
+    out.storeOk = S.storeFromPack(rt, 0);
+    out.packEmptied = G.pack[0] === null;            // 存入后背包格清空
+    out.stored = slots[0] && { n: slots[0].name, c: slots[0].count };
+    out.takeOk = S.takeToPack(rt, 0);
+    out.packBack = G.pack[0] && { n: G.pack[0].name, c: G.pack[0].count };
+    out.stashCleared = slots[0] === null;
+    // 再存一件，然后**清掉内存缓存**重新读 —— 验证真的落到了持久化里
+    G.pack[0] = { name: "金创药", count: 3 };
+    S.storeFromPack(rt, 0);
+    G.stash = null;
+    const again = S.stashOf(rt);
+    out.reloaded = again[0] && { n: again[0].name, c: again[0].count };
+    return out;
+  });
+  expect(st.size).toBe(100);
+  expect(st.storeOk).toBe(true);
+  expect(st.packEmptied).toBe(true);
+  expect(st.stored).toEqual({ n: "金创药", c: 3 });   // 整格转移，数量不变
+  expect(st.takeOk).toBe(true);
+  expect(st.packBack).toEqual({ n: "金创药", c: 3 }); // 取出后数量不变
+  expect(st.stashCleared).toBe(true);
+  expect(st.reloaded).toEqual({ n: "金创药", c: 3 }); // 清缓存后仍能读回 = 真持久化
+
   // ---- 编辑器 ----
   await page.evaluate(() => { window.prompt = () => "PW版本"; window.confirm = () => true; });
   await page.evaluate(async () => { const m = await import("/src/editor/index.js"); await m.openEditor(); });

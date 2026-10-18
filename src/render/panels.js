@@ -78,6 +78,58 @@ export function drawPack() {
   ctx.fillStyle = "#6a4a20"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif"; ctx.fillText("左键拿起 / 右键使用", px + 12, py + 292);
 }
 
+// 仓库面板（P4）：叠在包裹右侧，10 列 × 10 行，每格 26px。
+// 与包裹同屏显示是有意的——存/取都是"背包 ⇄ 仓库"的移动，分成两屏要点两次开关。
+export const STASH_BOX = { x: 12, y: 40, cols: 10, rows: 10, cell: 26, gap: 2 };
+const STASH_PAD = 32;
+
+export function stashRect() {
+  const { x, y, cols, rows, cell, gap } = STASH_BOX;
+  const w = cols * cell + (cols - 1) * gap + STASH_PAD;
+  const h = rows * cell + (rows - 1) * gap + STASH_PAD + 18;
+  return { x, y, w, h };
+}
+
+// 第 i 格的屏幕矩形（绘制与命中共用）。
+export function stashSlotRect(i) {
+  const { x, y, cols, cell, gap } = STASH_BOX;
+  return {
+    x: x + 16 + (i % cols) * (cell + gap),
+    y: y + 30 + Math.floor(i / cols) * (cell + gap),
+    w: cell, h: cell,
+  };
+}
+
+// 命中测试：返回格子下标或 -1。
+export function stashSlotAt(sx, sy) {
+  if (!G.stashPanel) return -1;
+  const n = (G.stash || []).length;
+  for (let i = 0; i < n; i++) {
+    const r = stashSlotRect(i);
+    if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return i;
+  }
+  return -1;
+}
+
+export function drawStash() {
+  if (!G.stashPanel) return;
+  const B = stashRect();
+  ctx.fillStyle = "rgba(16,12,8,0.96)"; ctx.fillRect(B.x, B.y, B.w, B.h);
+  ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(B.x + 1, B.y + 1, B.w - 2, B.h - 2); ctx.lineWidth = 1;
+  ctx.fillStyle = "#f0d060"; ctx.font = "bold 13px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.fillText("共享仓库", B.x + 14, B.y + 20);
+  const slots = G.stash || [];
+  const filled = slots.filter(Boolean).length;
+  ctx.fillStyle = "#8a8070"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.fillText(filled + " / " + slots.length, B.x + B.w - 60, B.y + 20);
+  ctx.fillStyle = "#6a6050"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.fillText("背包右键 → 存入　仓库左键 → 取出", B.x + 14, B.y + B.h - 8);
+  for (let i = 0; i < slots.length; i++) {
+    const r = stashSlotRect(i);
+    drawItemSlot(slots[i], r.x, r.y, r.w, r.h);
+  }
+}
+
 export function drawSavePanel() {
   if (!G.savePanel) return;
   const R = uiRect("save.panel") || { x: (VW - 460) / 2, y: 40, w: 460, h: 340 };

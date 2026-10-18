@@ -13,7 +13,8 @@ import { hasGoods, openShop, closeShop, sellCursor } from "../systems/shop.js";
 import { advanceDialog, startScript, openSay } from "../script/vm.js";
 import { slotAt, insideShop, insideShopClose, insideDialog, settingsHit, menuHit, fnButtonAt, SETTINGS_BAR } from "../core/layout.js";
 import { handleSlotClick } from "./slots.js";
-import { waypointAt, WP_BOX } from "../render/panels.js";
+import { waypointAt, WP_BOX, stashSlotAt, stashRect, STASH_BOX } from "../render/panels.js";
+import { storeFromPack, takeToPack, toggleStashPanel, stashOf } from "../systems/stash.js";
 import { togglePanel, travelTo } from "../systems/waypoint.js";
 import { saveBtnAt, saveSlot, loadSlot } from "../systems/save.js";
 import { applyVolumes, playSound, saveSettings } from "../systems/audio.js";
@@ -201,6 +202,14 @@ export function addInput() {
       return;
     }
     if (G.gameOver) return;
+    // 仓库面板：左键取出到背包。面板在背包左侧，先判定避免穿透到下面。
+    if (G.stashPanel) {
+      stashOf(getRuntime());                       // 确保 G.stash 已载入（首帧可能还没渲染过）
+      const si = stashSlotAt(sp.x, sp.y);
+      if (si >= 0) { if (e.button === 0) takeToPack(getRuntime(), si); return; }
+      const B = stashRect();
+      if (sp.x >= B.x && sp.x <= B.x + B.w && sp.y >= B.y && sp.y <= B.y + B.h) return;   // 点在面板空白处：吞掉
+    }
     const slot = slotAt(sp.x, sp.y);
     if (slot) { handleSlotClick(slot, e.button, e.shiftKey); return; }
     if (G.shop && insideShopClose(sp.x, sp.y)) { closeShop(getRuntime()); G.hold = null; return; }   // 底部“关闭”按钮
@@ -257,6 +266,7 @@ export function addInput() {
   function escapeKey() {
     if (G.settingsPanel) { G.settingsPanel = false; saveSettings(G); return; }
     if (G.waypointPanel) { togglePanel(getRuntime(), false); return; }
+    if (G.stashPanel) { toggleStashPanel(getRuntime(), false); return; }
     if (G.shop) { closeShop(getRuntime()); return; }
     if (G.savePanel) { G.savePanel = false; return; }
     if (G.packOpen) { G.packOpen = false; G.cursor = null; return; }
@@ -294,6 +304,7 @@ export function addInput() {
     if (e.key === "F10") { openSettings(); e.preventDefault(); return; }
     if (e.key === "Tab") { G.packOpen = !G.packOpen; if (G.packOpen && !G.pack.length) G.pack = new Array(25).fill(null); e.preventDefault(); return; }
     if (e.key === "m" || e.key === "M") { togglePanel(getRuntime()); e.preventDefault(); return; }
+    if (e.key === "b" || e.key === "B") { toggleStashPanel(getRuntime()); e.preventDefault(); return; }
     if (e.key === "F4") { setPanel("mission"); return; }
     if (e.key === "F1") { setPanel("note"); return; }
     if (e.key === "q" || e.key === "Q") cycleSkill(-1);

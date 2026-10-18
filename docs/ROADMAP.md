@@ -128,7 +128,24 @@ D2 的 build 多样性全部建立在这套正交体系上。
         编辑器改名进补丁
       - **注意**：E2E 里传送会真的换图，必须传回原图，否则后续编辑器用例
         的 `currentMap` 断言全部错位
-- [ ] **箱子 / 共享仓库**（16 格背包无处沉淀物品经济）
+- [x] **箱子 / 共享仓库**
+      - `engine/stash.js`（纯逻辑）：`normalizeStash` / `freeCount` / `isFull` /
+        `addToStash` / `takeFromStash` / `removeFromStash` / `countInStash` / `canFit`
+      - 仓库是**账号级**的（单独一个浏览器存储 key），不在存档里——
+        否则就退化成"更大的背包"，失去跨周目沉淀的意义
+      - 堆叠规则：同名词缀实例**不叠**（count 恒 1），普通物品先叠进已有格再占新格
+      - `canFit` 按格模拟而不是只比空格数：满格但能叠进已有格时仍然放得下
+      - `systems/stash.js`：`stashOf`（懒加载 + 内存缓存）/ `storeFromPack` /
+        `takeToPack` / `toggleStashPanel`；整格转移，不做部分拆分（避免半个物品的歧义态）
+      - `render/panels.js`：`drawStash` / `stashRect` / `stashSlotRect` / `stashSlotAt`
+        （绘制与命中共用同一套矩形）
+      - 输入：游戏内 **B** 开关；仓库面板打开时**右键背包物品 = 存入**，
+        左键仓库格 = 取出。仓库关闭时右键仍是原来的"使用/装备"，不改手感
+      - `config.stash.size`（默认 100）+ 编辑器「升级数值」加旋钮
+      - 切图时关闭面板但**不清数据**（数据在 G.stash / 持久化里，不属场景瞬时状态）
+      - 单测 `test/stash.test.mjs` 15 例；E2E 钉住存/取双向 + 清内存缓存后仍能读回
+      - 注：`engine/` 里不能出现 `localStorage` 字样（架构检查用正则扫全文，
+        注释也算），所以纯逻辑层的注释改为"浏览器持久化"
 - [ ] **赌博 / 鉴定 / 修理**（装备循环闭环缺三环）
 - [ ] **套装 / 暗金物品**（有稀有度，缺独特命名层级）
 - [ ] **难度分级**（依赖 P2 的 monsterLevel）

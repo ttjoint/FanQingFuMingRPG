@@ -1,5 +1,6 @@
 // 物品栏 / 装备栏 / 背包 / 商店格子的点击处理。
 import { G } from "../core/state.js";
+import { storeFromPack } from "../systems/stash.js";
 import { getRuntime } from "../runtime/context.js";
 import { itemByName } from "../core/registry.js";
 import { setSlot, reindex, applyBonus, equipSlotFor, useEntry, socketInto, unsocketFrom, enhanceEntry } from "../systems/inventory.js";
@@ -20,6 +21,9 @@ export function handleSlotClick(slot, button, shift) {
   const entry = entryOf(slot);
   if (button === 2) {
     if (!entry) return;
+    // 仓库打开时，右键背包物品 = 存入仓库（这时的语境就是整理）。
+    // 否则右键仍是"使用/装备"，不改既有手感。
+    if (G.stashPanel && slot.kind === "pack") { storeFromPack(rt, Number(slot.key)); return; }
     // 装备格：Shift+右键 = 强化；普通右键 = 卸下（沿用原行为）。
     if (slot.kind === "equip" && shift) { enhanceEntry(G, entry); return; }
     useEntry(G, entry, slot.kind, slot.key); return;
