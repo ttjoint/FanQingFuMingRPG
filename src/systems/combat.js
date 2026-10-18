@@ -3,7 +3,7 @@ import { dirFromVec, worldToCell } from "../core/utils.js";
 import { skillByName } from "../core/registry.js";
 import { setAnim, moveEntity, actionDuration, updateMove, canRun, walkSpeed, runSpeed } from "./motion.js";
 import { findPathPoints } from "../world/pathfinding.js";
-import { addExp } from "./inventory.js";
+import { addExp, wearEquip } from "./inventory.js";
 import { dropGround } from "../systems/ground.js";
 import { startScript } from "../script/vm.js";
 import { canAttack } from "../engine/faction.js";
@@ -370,6 +370,17 @@ export function applyDamage(ctx, victim, amount, source) {
   }
   if (victim.isPlayer || victim === g.player) {
     g.stats.hp -= amount;
+    // 装备耐久：受击时磨损（config.items.durabilityLossOnHit）。
+    //
+    // 以前这条链是断的：engine 有 wearDurability / isBroken，
+    // systems/inventory.js 有 wearEquip，config 有旋钮，编辑器也把它
+    // 摆给了策划，铁匠甚至有「修理」——但**没有任何地方调 wearEquip**，
+    // 所以耐久永远不掉，那 4 件带 maxDurability 的装备（逆龙剑/冷泉剑/
+    // 诛仙剑/霸王战袍）的耐久字段是死的，铁匠修理也永远提示“无需修理”。
+    //
+    // 只扣装备栏（G.equip），不扣背包——背包里的东西没在“用”。
+    const loss = (ctx.config && ctx.config.items && ctx.config.items.durabilityLossOnHit) || 0;
+    if (loss > 0) for (const k in (g.equip || {})) wearEquip(g, k, loss);
     if (g.stats.hp <= 0) {
       g.stats.hp = 0; victim.dead = true;
       // 玩家死亡同样立即打断挥砍

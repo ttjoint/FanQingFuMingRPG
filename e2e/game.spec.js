@@ -254,6 +254,44 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
       && iText === "免疫";
   })).toBe(true);
 
+  // 装备耐久：受击时应磨损，且归零后装备加成失效。
+  // 这条链以前是断的：engine 有 wearDurability，systems 有 wearEquip，
+  // config 有 durabilityLossOnHit，铁匠有修理——但战斗里没人调 wearEquip，
+  // 所以那 4 件带 maxDurability 的装备耐久永远不掉，修理也永远“无需修理”。
+  expect(await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const { newInstance } = await import("/src/engine/item.js");
+    const c = await import("/src/systems/combat.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    const p = G.player;
+    // 找一件真的带最大耐久的装备模板（不硬编码名字）。
+    const def = (rt.assets.items || []).find(x => (x.maxDurability || 0) > 0);
+    if (!def) return false;
+    const savedEquip = G.equip;
+    const savedCfg = rt.config.items.durabilityLossOnHit;
+    const inst = newInstance(def, {});
+    inst.durability = def.maxDurability;
+    G.equip = { ...(G.equip || {}), weapon: { name: def.name, inst } };
+    rt.config.items.durabilityLossOnHit = 5;
+
+    const before = inst.durability;
+    const enemy = makeNPC({ id: -3, name: "耐久测试怪", model: "npc001.pmg", hp: 1e6, attack: 1, level: 1 }, 1, 1, null, rt);
+    // 直接对一个“已到手”的伤害做结算（玩家当受害者）
+    c.applyDamage(rt, p, 10, enemy);
+    const afterOne = inst.durability;
+    for (let i = 0; i < 200; i++) c.applyDamage(rt, p, 1, enemy);
+    const afterMany = inst.durability;
+
+    rt.config.items.durabilityLossOnHit = savedCfg;
+    G.equip = savedEquip;
+    G.stats.hp = Math.max(G.stats.hp, 1); p.dead = false;
+
+    return before === def.maxDurability
+      && afterOne === before - 5          // 确实磨损了
+      && afterMany === 0;                 // 磨穿了（不低于 0）
+  })).toBe(true);
+
   // 攻击动画重新起手：上一刀的最后一击没播完就换目标时，新的一刀必须从首帧开始。
   // 用户报的 bug：上一刀动画没播完就打另一个敌人，新动画不会从头播。
   // 根因是 setAnim 只在**动作名变化**时重置帧，而“再砍一刀”用的还是 "fight"。

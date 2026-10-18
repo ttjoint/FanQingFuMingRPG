@@ -405,6 +405,62 @@ D2 的 build 多样性全建立在这套正交体系上。
       - **NPC 侧无此 bug**：`aiActions.js` 每次新攻击都显式
         `n.action="fight"; n.frame=0; n.ft=0`，不依赖 `setAnim`。
 
+- [x] **装备耐久断链修复**（全项目扫描“已实现但无人调用”时拓出来的）：
+      铁匠的「修理」注释里写着“耐久已经会掉”，但实际上**从不会掉**。
+      - 链条：模板 `maxDurability`（只有 4 件有：逆龙剑/冷泉剑/诛仙剑/
+        霸王战袍）→ 实例 `inst.durability` → `wearDurability` 扣除 →
+        `isBroken` 归零 → `applyBonus` 在 `sign>0` 时直接 return（加成失效）
+        → 铁匠 `repairAll` 修回来。
+      - 断点：**`systems/inventory.js` 的 `wearEquip` 全仓库无任何调用点**。
+        函数、配置旋钮（`config.items.durabilityLossOnHit`）、编辑器字段、
+        铁匠 UI —— 全都在，就差战斗里那一行。
+      - 后果：4 件带耐久的装备耐久永远停在上限，铁匠修理永远提示
+        “没有需要修理的装备”，策划在编辑器里调的“受击耐久损耗”是空转的。
+      - 修法：在 `applyDamage` 的玩家受击分支里按
+        `config.items.durabilityLossOnHit` 对 `G.equip` 逐件调 `wearEquip`。
+        只扣装备栏不扣背包（背包里的东西没在“用”）。
+      - E2E 走真实 `applyDamage` 验证“打一下掉 5、打 200 下磨到 0”。
+        反向验证：去掉调用 → E2E 失败。
+
+## 待办（全项目扫描结果）
+
+用户问“还有哪些需要改进”，以下都是本轮**实测扫描**得出、尚未动手的：
+
+- [ ] **编辑器致命：没用的配置项遍地**。编辑器把一堆旋钮摆给了策划，
+      但运行时**根本没有读取方**。已确认的：
+      - `config.items.socketFailChance`：全仓库除 config/编辑器外 **0 引用**。
+        策划改它，什么也不会发生。
+      - `unsocketFrom`：镶嵌能镶（`input/slots.js` 接了 `socketInto`），
+        但**不能拆**——`unsocketFrom` 只出现在 import 语句里，调用点 0。
+        玩家镶错了宝石只能把装备扔掉。
+      - 这类问题的危害比其他 bug 都大：它不报错、不崩溃，只是**默默不生效**，
+        而且在编辑器里“看起来已经做好了”。
+
+- [ ] **脏数据：21 个 NPC 的 level/defence/exp = 4294967295**。
+      是原版数据里的 `-1` 被当无符号数读出。目前**无实际影响**
+      （这 21 个都是 `attack=0` 的对话/场景 NPC，包括校尉/明兵/明卒，
+      等级不参与伤害公式），但一旦在编辑器里给它们配上攻击就会爆炸。
+      应在 `npcFields.js` 或 `schema.js` 归一化时把 4294967295 当作 -1/缺省。
+
+- [ ] **工程遗留：`editor/index.js` 还有 1345 行**（ROADMAP 里那条 `[~]`）。
+      可继续拆的有 `tabConfig` ~200 行、`tabGame` 133 行、`tabAssets` 164 行。
+
+- [ ] **无引用的导出**（实测扫出，`find`+`grep` 确认零调用点）：
+      `isInstanceEntry`、`entryStackable`、`hasInstance`、`isEquippable`、
+      `clearFx`、`countIn`、`conditionNames`、`actionNames`、
+      `ceilingFromBottom`、`effectSortKey`、`astarSmooth`、`shopGoodsFor`、
+      `isDone`、`repairSlot`、`identifySlot`（后两个是铁匠批量版的单件备用 API）。
+      核实后：这些大多是**无害的便捷封装**，不是功能缺口——
+      如 `astarSmooth` = `astar` + `smoothPath` 的合成入口（调用方直接用了两者），
+      `shopGoodsFor` = `hasGoods` + `goodsList` 的合成入口。
+      不紧急，但建议删掉以减少误读（让人以为有平滑寻路/货源逻辑在跑）。
+
+- [ ] **无自动化测试的模块**：`systems/aiActions.js`（499 行）、
+      `render/panels.js`（448 行）、`input/input.js`（389 行）、
+      `render/hud.js` 等视图/输入层全靠 E2E 单向覆盖。
+      视图层不要求单测，但 `aiActions.js` 里全是行为策略，值得抽纯函数。
+
+
 ---
 
 ## 已完成（归档）
