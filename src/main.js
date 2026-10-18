@@ -79,7 +79,7 @@ const DATA_FILES = [
   "atlas.json", "chars.json", "anchors.json", "npcs.json", "items.json", "skills.json",
   "scripts.json", "factions.json", "ais.json", "buffs.json", "config.json", "game.json",
   "effects.json", "affixes.json", "transitions.json", "maps_index.json", "maps_manifest.json",
-  "ui.json", "waypoints.json",
+  "ui.json", "waypoints.json", "uniques.json", "sets.json",
 ];
 
 // 从指定版本文件夹读取数据文件：先取原版，再（若存在）用版本自身 assets/ 覆盖。
@@ -129,6 +129,8 @@ export async function boot() {
     // 界面布局（可选）：不存在时用 defaultUi()（= 改造前的硬编码布局）。
     ui: data["ui.json"] || null,
     waypoints: data["waypoints.json"] || [],
+    uniques: data["uniques.json"] || [],
+    sets: data["sets.json"] || [],
     config: data["config.json"] || DEFAULT_CONFIG,
     game: data["game.json"] || {},
     transitions: data["transitions.json"] || {},

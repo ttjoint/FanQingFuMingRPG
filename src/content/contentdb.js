@@ -3,6 +3,7 @@
 import { CONTENT_VERSION, normalizeNpc, normalizeItem, normalizeSkill, normalizeConfig, normalizeMapDoc, normalizeDecorTemplates, normalizeFactions, normalizeAis, normalizeBuffList, normalizeEffectList, normalizeAffixList } from "./schema.js";
 import { normalizeUi } from "./ui.js";
 import { normalizeWaypoints } from "../engine/waypoint.js";
+import { normalizeUniques, normalizeSets } from "../engine/uniqueItem.js";
 import { defaultUi } from "./uiDefault.js";
 
 const deep = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
@@ -33,6 +34,8 @@ export function buildContentDB(assets, mapDocs) {
     ui: normalizeUi(assets.ui || defaultUi()),
     // 传送点表（P4）：踩点解锁 + 图间传送。缺省为空 = 退回纯脚本跳图。
     waypoints: normalizeWaypoints(assets.waypoints),
+    uniques: normalizeUniques(assets.uniques),        // 暗金物品（P4）：按物品名绑定的固定词缀
+    sets: normalizeSets(assets.sets),                 // 套装（P4）：按件数阶梯加成
   };
 }
 
@@ -52,6 +55,8 @@ export function contentToLegacy(content) {
     transitions: content.transitions, mapsIndex: content.mapsIndex, mapsManifest: content.mapsManifest,
     decorTemplates: content.decorTemplates || {},
     waypoints: content.waypoints || [],
+    uniques: content.uniques || [],
+    sets: content.sets || [],
   };
 }
 
@@ -82,6 +87,8 @@ export function diffContent(base, next) {
   if (!eq(base.ui, next.ui)) patch.content.ui = deep(next.ui);
   // 传送点表（P4）：同样是数组（顺序即面板里的显示顺序），整表替换。
   if (!eq(base.waypoints, next.waypoints)) patch.content.waypoints = deep(next.waypoints);
+  if (!eq(base.uniques, next.uniques)) patch.content.uniques = deep(next.uniques);   // 暗金表（整表替换）
+  if (!eq(base.sets, next.sets)) patch.content.sets = deep(next.sets);               // 套装表（整表替换）
   // 装饰物模板（按贴图键）：只存非空且变化的条目
   {
     const b = base.decorTemplates || {}, n = next.decorTemplates || {};
@@ -120,6 +127,8 @@ export function applyPatch(base, patch) {
   if (c.affixes !== undefined) out.affixes = normalizeAffixList(c.affixes);
   if (c.ui !== undefined) out.ui = normalizeUi(c.ui);
   if (c.waypoints !== undefined) out.waypoints = normalizeWaypoints(c.waypoints);
+  if (c.uniques !== undefined) out.uniques = normalizeUniques(c.uniques);
+  if (c.sets !== undefined) out.sets = normalizeSets(c.sets);
   {
     if (!out.decorTemplates) out.decorTemplates = {};
     const mod = c.decorTemplates || {};

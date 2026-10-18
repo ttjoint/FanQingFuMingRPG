@@ -75,6 +75,8 @@ export function createRuntime() {
       A.affixes = legacy.affixes || [];                                    // 词缀表（物品实例随机词缀来源）
       A.decorTemplates = legacy.decorTemplates || {};   // 跨地图共享的装饰物模板（手画地基线/单一深度）
       A.waypoints = legacy.waypoints || [];             // 传送点表（P4，踩点解锁/图间传送）
+      A.uniques = legacy.uniques || [];                 // 暗金物品表（P4）
+      A.sets = legacy.sets || [];                       // 套装表（P4）
 
       A.mapsManifest = content.mapsManifest;
       A.rawMaps = {};

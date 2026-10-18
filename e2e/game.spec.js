@@ -1138,6 +1138,52 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   expect(mc.dismissed).toBe(true);
   expect(mc.mercGone).toBe(true);
 
+  // ---- 暗金 / 套装（P4）----
+  // 稀有度此前只体现在"词缀条数"上，所以"暗金"和"三条稀有词缀的金装"
+  // 在玩家眼里没有区别。这里补的是**独特命名层级**：有名字、属性固定、可收集。
+  const uq = await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const { makeDropInstance } = await import("/src/engine/lootTable.js");
+    const I = await import("/src/systems/inventory.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    const out = {};
+    out.nUnique = (rt.content.uniques || []).length;
+    out.nSets = (rt.content.sets || []).length;
+    const defs = {};
+    for (const it of (rt.assets.items || rt.content.items || [])) defs[it.name] = it;
+    const U = (n) => makeDropInstance(defs[n], {}, null, rt.assets.affixes, null, rt.content.uniques, rt.content.sets);
+    // 暗金：固定词缀**替换**随机词缀
+    const uqInst = U("凌锋剑");
+    out.uniqueName = uqInst.unique && uqInst.unique.uname;
+    out.uniqueAffix = uqInst.affixes && uqInst.affixes.length;   // 恰好 1 条（固定组），不是随机 3 条
+    out.uniqueSet = uqInst.setId;
+    // 普通物品不受影响
+    out.plainHasUnique = !!U("乌木剑").unique;
+    // 套装阶梯：一件无档，两件触发 2 件档
+    const set = rt.content.sets.find(s => s.id === "set_langyan");
+    out.pieces = set.pieces.slice();
+    G.equip = { Wu: null, Jia: null, Shi1: null, Shi2: null };
+    G.setBonusApplied = {};
+    I.equipFrom(G, { name: "凌锋剑", count: 1, inst: U("凌锋剑") }, "pack", 0);
+    const atk1 = G.stats.attack;
+    I.equipFrom(G, { name: set.pieces[1], count: 1, inst: U(set.pieces[1]) }, "pack", 1);
+    out.setAtkDelta = G.stats.attack - atk1;          // 正好是 2 件档的攻击加成
+    out.bonusKey = G.setBonusApplied && G.setBonusApplied.atk;   // 记录已应用，便于去重
+    // 脱掉一件：加成要退回
+    I.equipFrom(G, { name: "铁布衫", count: 1 }, "pack", 1);
+    out.afterUnequip = G.stats.attack - atk1;
+    return out;
+  });
+  expect(uq.nUnique).toBeGreaterThan(0);
+  expect(uq.nSets).toBeGreaterThan(0);
+  expect(uq.uniqueName).toBeTruthy();               // 有独特名
+  expect(uq.uniqueAffix).toBe(1);                   // 固定词缀替换了随机词缀
+  expect(uq.uniqueSet).toBe("set_langyan");         // 同时打上套装标记
+  expect(uq.plainHasUnique).toBe(false);            // 普通物品不受影响
+  expect(uq.pieces.length).toBeGreaterThanOrEqual(2);
+  expect(uq.setAtkDelta).toBe(10);                  // 2 件档 +10 攻击
+  expect(uq.afterUnequip).toBe(0);                  // 拆散套装后加成退回
+
   // ---- 编辑器 ----
   await page.evaluate(() => { window.prompt = () => "PW版本"; window.confirm = () => true; });
   await page.evaluate(async () => { const m = await import("/src/editor/index.js"); await m.openEditor(); });

@@ -5,6 +5,8 @@
 //   - inst 存在：单件实例（count 恒为 1），带独立词缀/强化/耐久，不与其他条目堆叠。
 // name 始终是「模板」主键（itemByName 可解析）。
 import { itemByName } from "../core/registry.js";
+import { setBonusTotal } from "../engine/uniqueItem.js";
+import { getRuntime } from "../runtime/context.js";
 import { CFG } from "../core/config.js";
 import { syncMissions } from "./missions.js";
 import { instanceStats, equipSlotOf, canStack as canStackEntries, normalizeInstance,
@@ -151,6 +153,37 @@ export function applyBonus(g, it, sign, entry) {
   g.stats.attackSpeed = (g.stats.attackSpeed || 0) + sign * (st.hit || 0);
 }
 
+// 套装加成（P4）：按已穿件数算阶梯加成，把差额补进 stats。
+// 用"减旧值 + 加新值"而不是全量重算 stats ——
+// stats 里还混着升级/药水/任务给的永久值，全量重算会把它们抹掉。
+// 记录上次加成在 G.setBonusApplied，只动差额。
+export function applySetBonus(g, A) {
+  // A 可选：调用方没传时自己取运行时（equipFrom 的签名被 input/slots 各处复用，
+  // 逐个改签名不如在这里兜一层）。
+  if (!A) { try { A = getRuntime(); } catch (e) { A = null; } }
+  // 运行时把内容表挂在 content 上（rt.content.sets），不是 rt.sets。
+  const sets = (A && (A.sets || (A.content && A.content.sets))) || [];
+  if (!sets.length) return;
+  const worn = [];
+  for (const k in (g.equip || {})) { const e = g.equip[k]; if (e && e.name) worn.push(e.name); }
+  const total = setBonusTotal(sets, worn).mods;
+  const prev = g.setBonusApplied || {};
+  // mods 的键名与 stats 的字段名**不一致**：mods 用 atk/def，stats 用
+  // attack/defence。直接 stats[key] 会写出 stats.atk 这种没人读的字段
+  // （加成"生效了"但面板和战斗都不变）。
+  const MAP = { atk: "attack", def: "defence", hp: "hp", mp: "mp" };
+  const put = (key) => {
+    const d = (total[key] || 0) - (prev[key] || 0);
+    const st = MAP[key];
+    if (d && st) g.stats[st] = (g.stats[st] || 0) + d;
+  };
+  put("atk"); put("def"); put("hp"); put("mp");
+  // 与 applyBonus 保持一致：hit（命中）与 spd（攻速）都转投人物攻速。
+  const spdD = ((total.hit || 0) - (prev.hit || 0)) + ((total.spd || 0) - (prev.spd || 0));
+  if (spdD) g.stats.attackSpeed = (g.stats.attackSpeed || 0) + spdD;
+  g.setBonusApplied = { ...total };
+}
+
 // 装备槽位：模板的 equipSlot 优先（weapon/armor/trinket），映射到装备栏的 Wu/Jia/Shi1/Shi2。
 export function equipSlotFor(g, it) {
   const slot = equipSlotOf(it);
@@ -170,7 +203,7 @@ export function equipFrom(g, entry, kind, key) {
   const old = g.equip[target];
   if (old) { const f = freeSlot(g); if (f) setSlot(g, f.kind, f.i, old); }
   g.equip[target] = moved;
-  applyBonus(g, it, +1, moved); reindex(g);
+  applyBonus(g, it, +1, moved); applySetBonus(g); reindex(g);
   g.tip = "装备 " + entry.name; g.tipT = 2;
 }
 
@@ -190,7 +223,7 @@ export function useEntry(g, entry, kind, key) {
     g.tip = "使用 " + entry.name; g.tipT = 2;
   } else if (kindTag === "weapon" || kindTag === "armor" || kindTag === "trinket") {
     if (kind === "equip") {
-      applyBonus(g, it, -1, entry); setSlot(g, kind, key, null);
+      applyBonus(g, it, -1, entry); setSlot(g, kind, key, null); applySetBonus(g);
       const f = freeSlot(g); if (f) setSlot(g, f.kind, f.i, entry);
       reindex(g); g.tip = "卸下 " + entry.name; g.tipT = 2;
     } else equipFrom(g, entry, kind, key);
@@ -221,6 +254,7 @@ function withStatRefresh(g, entry, mutate) {
   if (key && it) applyBonus(g, it, -1, entry);   // 减掉旧值
   const r = mutate();
   if (key && it) applyBonus(g, it, +1, entry);   // 加回新值
+  if (key && it) applySetBonus(g);
   reindex(g);
   return r;
 }

@@ -166,7 +166,34 @@ D2 的 build 多样性全部建立在这套正交体系上。
         那会导致钱扣了但一件都没修。单测 `moneyInfinityMeansNoMoney` 钉住。
       - 单测 `test/smith.test.mjs` 12 例；E2E 钉住"钱扣了就必须真修好"、
         鉴定清标记、赌博只扣一次钱、没钱不能赌
-- [ ] **套装 / 暗金物品**（有稀有度，缺独特命名层级）
+- [x] **套装 / 暗金物品**
+      - 现状问题是"有稀有度、缺独特命名层级"：稀有度只体现在**词缀条数**上，
+        所以"暗金"和"三条稀有词缀的金装"在玩家眼里没有区别。
+      - `engine/uniqueItem.js`（纯逻辑）：`normalizeMods` / `normalizeUnique` /
+        `normalizeUniques` / `uniqueFor` / `normalizeSet` / `normalizeSets` /
+        `setCounts` / `activeBonuses` / `setBonusTotal` / `tagInstance` / `setOfInstance`
+      - **暗金用固定词缀替换随机词缀**，不是叠加。暗金的价值在于"确定的强"，
+        叠随机词缀会让强度不可预期，也失去"这件就是那件"的辨识度。
+      - 套装加成**逐档累加**（3 件 = 2 件档 + 3 件档），这是玩家对套装的既有预期
+      - `rollDrop`/`rollDrops`/`makeDropInstance` 加**可选** `uniques`/`sets` 参数，
+        不传时行为与改动前完全一致（向后兼容是硬约束，356 个旧测试全绿）
+      - 暗金/套装物品**必须走实例**（`needsInstance` 里加了 `isSpecial`），
+        否则标记会丢，还会被合并成堆叠条目
+      - 套装加成用"减旧值 + 加新值"的**差额**方式并入 stats，不做全量重算：
+        stats 里混着升级/药水/任务的永久值，重算会把它们抹掉
+      - ⚠️ **踩过的坑**：`mods` 的键名是 `atk`/`def`，而 `stats` 的字段名是
+        `attack`/`defence`。直接把 `stats[key]` 写进去会得到 `stats.atk`
+        ——一个没人读的字段，表现为"加成计算对了、但面板和战斗都没变"。
+        必须显式映射（`MAP = { atk:"attack", def:"defence" }`），E2E 钉住 68→78。
+      - ⚠️ **踩过的坑**：内容表在运行时挂在 `rt.content.sets`，不是 `rt.sets`
+      - ⚠️ **踩过的坑**：暗金/套装引用的"物品模板名"必须真实存在于 items.json
+        （曾把 `牛革甲` 写成 `牛皮甲`，该暗金永远掉不出来，且**不报错**）
+      - 编辑器新增「暗金」「套装」两个标签页
+        （`listTab` 加 `opts.sync`：表单编辑的是摊平后的视图，每次改动同步回真实数据）
+      - 真内容：5 件暗金（破军·凌锋 / 诛仙·弑神 / 铁壁·牛革 / 霸王·不归 / 圣者·遗志）、
+        2 套套装（狼烟旧部 4 件 / 清风剑意 2 件）
+      - 单测 `test/uniqueItem.test.mjs` 13 例；E2E 钉住独特名、词缀替换、
+        2 件档 +10、拆散后退回 0、普通物品不受影响
 - [x] **难度分级**
       - `engine/difficulty.js`（纯逻辑）：`DIFFICULTIES`（普通/噩梦/地狱）/
         `normalizeDifficulty` / `normalizeDifficulties` / `difficultyById` /

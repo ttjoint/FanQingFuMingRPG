@@ -366,7 +366,7 @@ export function killNPC(ctx, n) {
   };
   // 掉率为 0 时直接跳过 roll（省掉无意义的随机与实例构造）。
   if (scale.dropRate > 0) {
-    for (const e of rollDrops(n.drops || [], defs, null, A.affixes || [], scale)) dropGround(G, e, n.x, n.y);
+    for (const e of rollDrops(n.drops || [], defs, null, A.affixes || [], scale, A.uniques || [], A.sets || [])) dropGround(G, e, n.x, n.y);
   }
   for (const k in G.missions) { const m = G.missions[k];
     if (m.type === 1 && m.target === n.name && m.state === 4) { m.got++; if (m.got >= m.need) m.state = 1; } }

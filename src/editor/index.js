@@ -156,14 +156,14 @@ function toast(msg) {
 }
 
 // ---------- 外壳 ----------
-const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["ais", "AI"], ["buffs", "Buff"], ["items", "物品"], ["skills", "技能"], ["effects", "特效"], ["affixes", "词缀"], ["config", "升级数值"], ["game", "标题结局"], ["pmg", "行走图"], ["assets", "图片素材"], ["audio", "音频"], ["ui", "界面"], ["waypoints", "传送点"]];
+const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["ais", "AI"], ["buffs", "Buff"], ["items", "物品"], ["skills", "技能"], ["effects", "特效"], ["affixes", "词缀"], ["config", "升级数值"], ["game", "标题结局"], ["pmg", "行走图"], ["assets", "图片素材"], ["audio", "音频"], ["ui", "界面"], ["waypoints", "传送点"], ["uniques", "暗金"], ["sets", "套装"]];
 let navEl;
 
 // 标签页图标（纯文本，无需图标字体）。
 const TAB_ICONS = {
   maps: "🗺", decor: "🌳", scripts: "📜", npcs: "👤", ais: "🧠", buffs: "✨",
   items: "⚔", skills: "⚡", effects: "💥", affixes: "🔧", config: "📈",
-  game: "🎬", pmg: "🚶", assets: "🖼", audio: "🎵", ui: "🖥", waypoints: "🧭",
+  game: "🎬", pmg: "🚶", assets: "🖼", audio: "🎵", ui: "🖥", waypoints: "🧭", uniques: "🏆", sets: "🎽",
 };
 
 // 窄屏(<900px)判定：导航/属性栏变抽屉。用 matchMedia 便于监听变化。
@@ -684,8 +684,10 @@ function listTab(title, arr, schema, columns, makeNew, opts) {
     ? (it => (it && it.icon ? assetSrc2(it.icon, o.icon) : null))
     : null);
   renderListEditor(host, {
-    list: arr, schema, columns, makeNew, onChange: () => mark(),
-    onStructural: () => mark(), sel: 0,
+    // o.sync：表单改的是"展示视图"，需要在每次改动后同步回真实数据
+    // （暗金把 mods 摊平成字段、套装把加成拆成 2 件/3 件两档）。
+    list: arr, schema, columns, makeNew, onChange: () => { o.sync && o.sync(); mark(); },
+    onStructural: () => { o.sync && o.sync(); mark(); }, sel: 0,
     thumb, splitKey: o.key || "list",
   });
 }
@@ -942,6 +944,90 @@ function tabWaypoints() {
     [{ k: "id", label: "id" }, { k: "name", label: "显示名" }, { k: "map", label: "地图" },
      { k: "act", label: "章节" }, { k: "row", label: "行" }, { k: "col", label: "列" }],
     () => ({ id: "wp_" + (list.length + 1), name: "新传送点", map: (ED.content.mapsIndex && Object.values(ED.content.mapsIndex)[0]) || "", row: 1, col: 1, act: 1, desc: "" }));
+}
+
+// 暗金物品：绑定到一个物品模板名，掉落时用**固定词缀替换**随机词缀。
+const UNIQUE_SCHEMA = [
+  { group: "基本" },
+  { k: "id", label: "id", hint: "稳定标识；改名会让已有实例失去绑定" },
+  { k: "name", label: "物品模板名", hint: "必须是物品页里已有的名字，否则永远掉不出来" },
+  { k: "uname", label: "暗金名", hint: "玩家看到的独特名（如「破军·凌锋」）" },
+  { group: "固定属性" },
+  { k: "atk", label: "攻击", type: "number", hint: "会替换随机词缀，不是叠加" },
+  { k: "def", label: "防御", type: "number" },
+  { k: "hp", label: "气血", type: "number" },
+  { k: "mp", label: "内力", type: "number" },
+  { k: "spd", label: "攻速", type: "number" },
+  { group: "说明" },
+  { k: "desc", label: "描述", type: "textarea", rows: 2 },
+];
+
+// 把扁平的 atk/def/... 字段收成 mods 对象（engine 里存的是 mods）。
+function flattenMods(o) {
+  const mods = {};
+  for (const k of ["atk", "def", "hp", "mp", "spd", "hit"]) if (o[k]) mods[k] = Number(o[k]);
+  return mods;
+}
+
+function tabUniques() {
+  const list = ED.content.uniques || (ED.content.uniques = []);
+  mainEl.append(h("div", { class: "ed-hint" },
+    "暗金物品 = 有名字、属性固定的独特装备。掉落时用它替换随机词缀，所以强度可预期。" +
+    "「物品模板名」要对得上物品页里的名字，否则这件暗金永远不会掉。"));
+  // 把 mods 摊平到表单字段上编辑，保存时再收回去。
+  const view = list.map(u => ({ ...u, ...(u.mods || {}) }));
+  const syncBack = () => { list.forEach((u, i) => { u.mods = flattenMods(view[i]); }); };
+  listTab("暗金（" + list.length + "）", view, UNIQUE_SCHEMA,
+    [{ k: "id", label: "id" }, { k: "uname", label: "暗金名" }, { k: "name", label: "物品模板" }],
+    () => ({ id: "u_" + (list.length + 1), name: "", uname: "新暗金", mods: {} }), { sync: syncBack });
+}
+
+function tabSets() {
+  const list = ED.content.sets || (ED.content.sets = []);
+  mainEl.append(h("div", { class: "ed-hint" },
+    "套装按「穿了几件」给阶梯加成，多档累加（3 件 = 2 件档 + 3 件档）。" +
+    "部件填物品模板名，逗号分隔；加成按件数升序生效。"));
+  const schema = [
+    { group: "基本" },
+    { k: "id", label: "id" }, { k: "name", label: "套装名" },
+    { k: "piecesText", label: "部件", type: "textarea", rows: 3, hint: "物品模板名，逗号/换行分隔" },
+    { group: "说明" },
+    { k: "desc", label: "描述", type: "textarea", rows: 2 },
+    { group: "加成（按件数）" },
+    { k: "b2", label: "2 件 攻击", type: "number" },
+    { k: "b2d", label: "2 件 防御", type: "number" },
+    { k: "b2h", label: "2 件 气血", type: "number" },
+    { k: "b3", label: "3 件 攻击", type: "number" },
+    { k: "b3d", label: "3 件 防御", type: "number" },
+    { k: "b3h", label: "3 件 气血", type: "number" },
+  ];
+  const tier = (b) => ({ pieces: b.pieces, mods: b.mods });
+  const view = list.map(s => {
+    const t2 = (s.bonuses || []).find(b => b.pieces === 2) || { mods: {} };
+    const t3 = (s.bonuses || []).find(b => b.pieces === 3) || { mods: {} };
+    return {
+      id: s.id, name: s.name, desc: s.desc || "",
+      piecesText: (s.pieces || []).join("，"),
+      b2: t2.mods.atk || 0, b2d: t2.mods.def || 0, b2h: t2.mods.hp || 0,
+      b3: t3.mods.atk || 0, b3d: t3.mods.def || 0, b3h: t3.mods.hp || 0,
+    };
+  });
+  const syncBack = () => {
+    list.forEach((s, i) => {
+      const v = view[i];
+      s.id = v.id; s.name = v.name; s.desc = v.desc || "";
+      s.pieces = String(v.piecesText || "").split(/[，,\s]+/).map(x => x.trim()).filter(Boolean);
+      const mk = (n, a, d, hp) => {
+        const mods = {};
+        if (+a) mods.atk = +a; if (+d) mods.def = +d; if (+hp) mods.hp = +hp;
+        return Object.keys(mods).length ? { pieces: n, mods } : null;
+      };
+      s.bonuses = [mk(2, v.b2, v.b2d, v.b2h), mk(3, v.b3, v.b3d, v.b3h)].filter(Boolean);
+    });
+  };
+  listTab("套装（" + list.length + "）", view, schema,
+    [{ k: "id", label: "id" }, { k: "name", label: "套装名" }, { k: "piecesText", label: "部件" }],
+    () => ({ id: "set_" + (list.length + 1), name: "新套装", piecesText: "", desc: "", b2: 0, b2d: 0, b2h: 0, b3: 0, b3d: 0, b3h: 0 }), { sync: syncBack });
 }
 
 function tabBuffs() {

@@ -10,6 +10,7 @@
 
 import { newInstance, newInstanceId, rollAffixes } from "./item.js";
 import { normalizeScale, rollScaled, rollRarity } from "./lootScale.js";
+import { tagInstance } from "./uniqueItem.js";
 
 function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : (d == null ? 0 : d); }
 
@@ -30,7 +31,7 @@ export function normalizeDrop(d) {
 //
 // scale（可选）= { monsterLevel, dropRate, players }，见 engine/lootScale.js。
 // 传了就按等级/倍率/人数缩放；不传则是旧的"原样判定"，行为与之前完全一致。
-export function rollDrop(d, def, rng, affixPool, scale) {
+export function rollDrop(d, def, rng, affixPool, scale, uniques, sets) {
   const r = typeof rng === "function" ? rng : Math.random;
   const drop = normalizeDrop(d);
   if (!drop.name) return [];
@@ -43,17 +44,19 @@ export function rollDrop(d, def, rng, affixPool, scale) {
   if (count <= 0) return [];
   // 可堆叠且无实例差异 → 单个堆叠条目。
   const stackable = !def || def.stackable !== false;
-  const needsInstance = !!(def && def.stackable === false) || !!drop.rarity || !!(drop.affixes && drop.affixes.length) || (def && def.socketCount > 0);
+  // 暗金/套装必须是独立实例（否则标记会丢，也会被合并成堆叠条目）。
+  const isSpecial = (uniques && uniques.some(u => u.name === drop.name)) || (sets && sets.some(t => (t.pieces || []).includes(drop.name)));
+  const needsInstance = !!(def && def.stackable === false) || !!drop.rarity || !!(drop.affixes && drop.affixes.length) || (def && def.socketCount > 0) || !!isSpecial;
   if (!needsInstance) return [{ name: drop.name, count }];
   // 需要实例：装备类不可堆叠，逐件生成实例。
   const out = [];
   for (let i = 0; i < count; i++) {
-    out.push({ name: drop.name, count: 1, inst: makeDropInstance(def, drop, r, affixPool, scale) });
+    out.push({ name: drop.name, count: 1, inst: makeDropInstance(def, drop, r, affixPool, scale, uniques, sets) });
   }
   return out;
 }
 
-export function makeDropInstance(def, drop, rng, affixPool, scale) {
+export function makeDropInstance(def, drop, rng, affixPool, scale, uniques, sets) {
   const r = typeof rng === "function" ? rng : Math.random;
   const inst = newInstance(def, { rand: r, id: newInstanceId(r) });
   // 词缀：显式指定的优先；否则按稀有度从词缀表随机（需传入 affixPool）。
@@ -66,15 +69,18 @@ export function makeDropInstance(def, drop, rng, affixPool, scale) {
     const got = rollAffixes(affixPool, rarity, r, { slot: def && def.equipSlot });
     if (got.length) inst.affixes = got;
   }
+  // 暗金/套装标记（P4）。暗金会用**固定词缀替换**上面的随机词缀，
+  // 所以必须放在词缀 roll 之后。
+  if ((uniques && uniques.length) || (sets && sets.length)) tagInstance(inst, uniques, sets, def && def.name);
   return inst;
 }
 
 // 整表 roll：defs 为 { name -> 模板 } 查询表（可为 null）。affixPool 为词缀定义数组（可选）。
-export function rollDrops(drops, defs, rng, affixPool, scale) {
+export function rollDrops(drops, defs, rng, affixPool, scale, uniques, sets) {
   const out = [];
   for (const d of drops || []) {
     const def = defs && defs[d && (d.name || d.id)];
-    const got = rollDrop(d, def, rng, affixPool, scale);
+    const got = rollDrop(d, def, rng, affixPool, scale, uniques, sets);
     for (const e of got) mergeOrPush(out, e);
   }
   return out;
