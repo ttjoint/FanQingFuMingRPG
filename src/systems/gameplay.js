@@ -3,7 +3,7 @@
 import { VW, VH } from "../core/constants.js";
 import { worldToCell, walkable } from "../core/utils.js";
 import { nearestWalkable, findPathPoints } from "../world/pathfinding.js";
-import { setAnim, updateMove, updateAnim, unitAhead, canRun, walkSpeed, setPlayerRun } from "./motion.js";
+import { setAnim, restartAnim, updateMove, updateAnim, unitAhead, canRun, walkSpeed, setPlayerRun } from "./motion.js";
 import { tickMp } from "../engine/stamina.js";
 import { playerAttackTarget } from "./combat.js";
 import { npcAI } from "../world/npc.js";
@@ -29,7 +29,7 @@ export function playerSystem(ctx, dt) {
   if (!p.target && p.atkT <= 0) p.atkT = 0;   // 不在挥砍时才清计时（挥砍“提交”后必须播完）
   if (!p.target && p.attackCD > 0) p.attackCD = Math.max(0, p.attackCD - dt);
   if (p.dead) {   // 血量归零立即倒地，打断未完成的挥砍
-    if (p.pendingDie) { p.pendingDie = false; p.action = "die"; p.frame = 0; p.ft = 0; p.animSpeed = 1; }
+    if (p.pendingDie) { p.pendingDie = false; restartAnim(p, "die"); p.animSpeed = 1; }
     updateAnim(p, dt, ctx.assets.chars);
     return;
   }
@@ -101,7 +101,7 @@ export function npcSystem(ctx, dt) {
     if (n.dead) {
       // 一旦血量归零就**立即**进入死亡：不再等当前挥砍帧播完。
       // （旧行为“攻击帧做完了才倒地”会让玩家看到尸体还在挥刀）
-      if (n.pendingDie) { n.pendingDie = false; n.action = "die"; n.frame = 0; n.ft = 0; n.animSpeed = 1; }
+      if (n.pendingDie) { n.pendingDie = false; restartAnim(n, "die"); n.animSpeed = 1; }
       updateAnim(n, dt, chars); continue;
     }
     npcAI(ctx, n, dt); updateAnim(n, dt, chars);

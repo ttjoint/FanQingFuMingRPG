@@ -8,6 +8,7 @@ import { screenToWorld } from "./core/utils.js";
 import { buildContentDB, applyPatch } from "./content/contentdb.js";
 import { buildMapData, loadMap, setPlayer } from "./world/map.js";
 import { castSkill } from "./systems/combat.js";
+import { restartAnim } from "./systems/motion.js";
 import { spawnProjectile } from "./systems/projectiles.js";
 import { fromLegacyMap } from "./content/mapDoc.js";
 import { loadPack, defaultPack, loadIndex, ensureVersionNames } from "./content/store.js";
@@ -50,7 +51,8 @@ globalThis.__GAME__ = {
     G.scene = "game"; G.savePanel = false; G.dialog = null; G.script = null;
     loadMap(runtime, name);
     setPlayer(runtime, row ?? 1, col ?? 1, dir);
-    if (G.player) G.player.action = "stand";
+    // 切图后从头站立（只改 action 不会重置帧，会从旧帧位置接着播）。
+    if (G.player) { restartAnim(G.player, "stand"); G.player.animSpeed = 1; G.player.atkT = 0; }
   },
 };
 

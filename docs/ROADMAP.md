@@ -380,6 +380,31 @@ D2 的 build 多样性全建立在这套正交体系上。
          - **诚实备注**：去掉后前两次仍能过，所以它是“大幅降低概率”而不是
            “绝对消除”；高负载/连跑时仍建议先 `tools/kill-chrome.sh` 清残留。
 
+- [x] **动画重新起手（用户报的 bug）**：上一刀的最后一击还没播完就打另一个
+      敌人时，新的一刀不会从头播，而是接着旧帧往后续播。
+      - 根因：`setAnim` 的设计是「**只在动作名变化时**才重置帧」——这是它能
+        被每帧安全调用的前提。而“再砍一刀”用的还是同一个动作名 `fight`，
+        名字没变，于是 `setAnim` 什么也不做。
+      - 触发路径：`combat.js` 里有三段复制粘贴的「保持面朝」分支
+        （冷却中 / 技能冷却 / 无充能），它们只设 `atkT = 0.08` 而不动帧。
+      - 修法：新增 `restartAnim(e, a)`（强制从头播），把三段重复逻辑收成
+        `holdFightPose(p, stillSwing)`。`stillSwing` 为真时不重置——那是
+        “这一刀还没播完”，本来就该播到结束（挥砍提交机制，不能破坏）。
+      - 同类问题一并修：`save.js` / `waypoint.js` / `main.js` 的 `gotoMap`
+        原本只写 `action = "stand"`，不重置帧——读档/传送/切图后会从旧帧位置
+        接着播站立动画。改用 `restartAnim`，并顺手清掉出手计时。
+      - **原语下沉**：`setAnim`/`restartAnim`/`animFps`/`tickFrame` 搬到
+        `engine/anim.js`。之前它们在 `systems/motion.js`，经 `core/utils.js`
+        间接依赖 `core/constants.js`（模块顶层取画布元素），在 Node 里 import
+        不了——所以动画 bug 只能靠肉眼看。下沉后终于能写断言。
+      - 单测 `test/anim.test.mjs` 12 例；E2E 走真实 `playerAttackTarget` 验证
+        “非零帧被打回 0”。
+      - 反向验证：把 `restartAnim` 退化成 `setAnim` 语义 → 单测
+        `restartAnimForcesFirstFrame` 失败；把 `holdFightPose` 的重置去掉 →
+        E2E `Expected true / Received false`。
+      - **NPC 侧无此 bug**：`aiActions.js` 每次新攻击都显式
+        `n.action="fight"; n.frame=0; n.ft=0`，不依赖 `setAnim`。
+
 ---
 
 ## 已完成（归档）

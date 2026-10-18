@@ -1,7 +1,12 @@
 // 实体移动与逐帧动画推进。
 import { worldToCell, walkable, dirFromVec, overlappingUnit, unitRadii, eachUnit } from "../core/utils.js";
+import { setAnim as _setAnim, restartAnim as _restartAnim, animFps, tickFrame } from "../engine/anim.js";
 
-export function setAnim(e, a) { if (e.action !== a) { e.action = a; e.frame = 0; e.ft = 0; } }
+// 动画原语的真实实现已下沉到 engine/anim.js（纯逻辑、可单测，不依赖 DOM）。
+// 这里只做转出，保留原有调用点不变。
+export const setAnim = _setAnim;
+export const restartAnim = _restartAnim;
+export { animFps };
 
 // ---- 精力（奔跑）门控 ----
 // 纯逻辑在 engine/stamina.js（可在 Node 测试，无 DOM 依赖），这里再导出并接入运行时状态。
@@ -111,18 +116,9 @@ export function updateAnim(e, dt, chars) {
   const ch = chars && chars[e.model]; if (!ch) return;
   const blocks = ch[e.action] || ch.stand || ch.walk; if (!blocks) return;
   const block = blocks[e.dir % blocks.length] || blocks[0]; if (!block || !block.length) return;
-  e.ft += dt * (e.animSpeed || 1);   // e.animSpeed：动画配合攻击间隔的加减速
-  const fps = animFps(e.action);
-  if (e.ft > 1 / fps) {
-    e.ft = 0;
-    if (e.action === "die") e.frame = Math.min(e.frame + 1, block.length - 1);
-    else e.frame = (e.frame + 1) % block.length;
-  }
+  tickFrame(e, dt, block.length);
 }
 
-export function animFps(action) {
-  return action === "walk" ? 9 : action === "run" ? 14 : action === "fight" ? 12 : action === "die" ? 12 : 5;
-}
 
 // 某动作当前方向整段动画的播放时长（秒），用于“攻击提交”时长。
 export function actionDuration(e, action, chars) {

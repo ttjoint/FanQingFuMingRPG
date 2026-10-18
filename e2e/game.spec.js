@@ -254,6 +254,60 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
       && iText === "免疫";
   })).toBe(true);
 
+  // 攻击动画重新起手：上一刀的最后一击没播完就换目标时，新的一刀必须从首帧开始。
+  // 用户报的 bug：上一刀动画没播完就打另一个敌人，新动画不会从头播。
+  // 根因是 setAnim 只在**动作名变化**时重置帧，而“再砍一刀”用的还是 "fight"。
+  expect(await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const { makeNPC } = await import("/src/world/npc.js");
+    const c = await import("/src/systems/combat.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    const p = G.player;
+    const mk = () => {
+      const n = makeNPC({ id: -9, name: "动画测试怪", model: "npc001.pmg", hp: 1e6, attack: 1, level: 1 }, 1, 1, null, rt);
+      n.hp = 1e6; n.x = p.x; n.y = p.y + 8; n.floats = [];
+      return n;
+    };
+    const saved = { atk: G.stats.attack, cd: p.attackCD };
+    G.stats.attack = 0;
+
+    // 第一刀：打完（推进到挥砍中途，模拟“最后一刀没播完”）。
+    // 注意：playerAttackTarget 只算挥砍计时，不推进逐帧动画（那是 updateAnim 的事），
+    // 所以这里手动把 frame 设成非 0，直接模拟“动画已经播到中段”。
+    const a = mk();
+    p.target = a; p.attackCD = 0; p.atkT = 0; p.frame = 0; p.ft = 0; p.action = "stand";
+    c.playerAttackTarget(rt, 1 / 60);      // 起手
+    for (let i = 0; i < 5; i++) c.playerAttackTarget(rt, 1 / 60);  // 挥砍计时推进
+    const wasFight = p.action === "fight" && p.atkT > 0;
+    p.frame = 4; p.ft = 0.5;               // 模拟动画已播到第 5 帧
+    const midFrame = p.frame;
+
+    // 中途目标死亡（不把它播完），立刻换另一个目标
+    a.dead = true;
+    const b = mk();
+    p.target = b; p.attackCD = 0;
+
+    // 走冷却分支（这正是旧实现不会重置帧的那条路径）。
+    // 必须先让上一刀的挥砍计时归零（atkT<=0），否则会先进入“挥砍提交”分支
+    // 继续播旧刀——那是对的（挥砍提交机制），不是本用例要测的路径。
+    p.atkT = 0;
+    p.attackCD = 5;
+    c.playerAttackTarget(rt, 1 / 60);
+    const restartFrame = p.frame;
+    const restartFt = p.ft;
+    p.attackCD = 0;
+
+    // 真正出手一刀，确认从首帧开始
+    c.playerAttackTarget(rt, 1 / 60);
+    const newFrame = p.frame;
+
+    p.attackCD = saved.cd; G.stats.attack = saved.atk;
+    p.atkT = 0; p.target = null; p.swingTarget = null; p.hitPending = false; p.animSpeed = 1;
+    return wasFight && midFrame > 0
+      && restartFrame === 0 && restartFt === 0
+      && newFrame === 0;
+  })).toBe(true);
+
   // 阵营系统：按 faction 判定敌对（不靠 attack 有无），且实例阵营可动态改。
   expect(await page.evaluate(async () => {
     const { getRuntime } = await import("/src/runtime/context.js");

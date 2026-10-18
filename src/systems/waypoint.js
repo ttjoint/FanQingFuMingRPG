@@ -10,6 +10,7 @@
 import { touchWaypoint, travelTargets, waypointTable, canTravel } from "../engine/waypoint.js";
 import { loadMap, setPlayer } from "../world/map.js";
 import { worldToCell } from "../engine/iso.js";
+import { restartAnim } from "./motion.js";
 
 // 取当前玩家所在格的传送点定义列表（ctx.assets.waypoints）。
 function listOf(ctx) {
@@ -61,7 +62,12 @@ export function travelTo(ctx, id) {
   G._wpCell = null;         // 传送到与当前相同的格时也能重新判定（如原地刷新）
   loadMap(ctx, w.map);
   setPlayer(ctx, w.row, w.col, 4);
-  if (G.player) G.player.action = "stand";
+  // 传送后从新位置重新站立：必须从头播（只设 action 不会重置帧与出手计时）。
+  if (G.player) {
+    restartAnim(G.player, "stand");
+    G.player.animSpeed = 1; G.player.atkT = 0; G.player.swingT = 0;
+    G.player.hitPending = false; G.player.swingTarget = null;
+  }
   G.tip = "传送至：" + w.name; G.tipT = 2;
   return true;
 }

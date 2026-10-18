@@ -86,6 +86,24 @@ function applyPlayerHit(ctx, p) {
   resolveHit(ctx, p, t, sk, { atk: G.stats.attack });
 }
 
+// “保持面朝”：这一帧不发起新挥砍，只把手臂留在攻击姿势上。
+//
+// 以前这里是三段复制粘贴的 `p.atkT = 0.08; ...`，没有重置动画帧，
+// 导致一个很明显的 bug：上一刀的最后一击如果没播完（目标先死了 /
+// 冷却没走完 / 技能没就绪），马上切去砍另一个敌人时，新的一刀会接着
+// 旧帧往后续播，**不会从首帧开始**——视觉上就是“抬手抬到一半就又砍下去”。
+//
+// 原因在 setAnim：它只在 action 名字变化时才重置帧。而这里新旧都是
+// "fight"，名字没变，于是 setAnim 什么都不做。
+//
+// 这里显式把帧推回 0。stillSwing 为真时不动：那是“这一刀还没播完”，
+// 本来就应该继续播到结束（挥砍提交机制）。
+function holdFightPose(p, stillSwing) {
+  p.atkT = 0.08; p.swingTotal = 0.08; p.swingT = 0;
+  p.hitPending = false; p.animSpeed = 1;
+  if (!stillSwing) { p.action = "fight"; p.frame = 0; p.ft = 0; }
+}
+
 export function playerAttackTarget(ctx, dt) {
   dt = dt || 1 / 60;
   const G = ctx.state, CFG = ctx.config;
@@ -134,17 +152,18 @@ export function playerAttackTarget(ctx, dt) {
   p.path = null;                       // 进入射程：停步攻击
 
   p.moveGoal = null; setAnim(p, "fight"); faceTarget(p, t);
-  if (p.attackCD > 0) { p.atkT = 0.08; p.swingTotal = 0.08; p.swingT = 0; p.hitPending = false; p.animSpeed = 1; return; }   // 冷却中：保持面朝并继续播放攻击帧
+  // 冷却中：保持面朝。此时上一刀已经在 atkT<=0 时播完了，下一次出手必须从首帧开始。
+  if (p.attackCD > 0) { holdFightPose(p, false); return; }
 
   const sk = skillByName(ctx, G.skill) || { power: 0, mp: 0 };
   // 技能级冷却（阶段 D）：冷却中不发起新攻击（保持面朝）。
   if (sk.name && !isReady(p, sk)) {
-    p.atkT = 0.08; p.swingTotal = 0.08; p.swingT = 0; p.hitPending = false; p.animSpeed = 1;
+    holdFightPose(p, false);
     return;
   }
   // 充能型技能：没有充能时不发起攻击（与冷却中同样"保持面朝"）。
   if (sk.name && !hasCharge(p, sk)) {
-    p.atkT = 0.08; p.swingTotal = 0.08; p.swingT = 0; p.hitPending = false; p.animSpeed = 1;
+    holdFightPose(p, false);
     return;
   }
   // 资源消耗：支持 mp/hp/none（旧逻辑只认 mp）。

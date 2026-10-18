@@ -10,6 +10,7 @@ import { closeShop } from "./shop.js";
 import { playSound } from "./audio.js";
 import { normalizeSave, SAVE_VERSION } from "../content/saveSchema.js";
 import { CFG } from "../core/config.js";
+import { restartAnim } from "./motion.js";
 import { diffNpcAgainst, npcFieldsFromSave, configureSerializer } from "../engine/npcSerialize.js";
 import { NPC_SCHEMA } from "../content/npcFields.js";
 import { attachAll } from "../engine/ecs.js";
@@ -102,7 +103,11 @@ export function deserializeGame(ctx, d) {
   }
   if (d.player && G.player) {
     G.player.x = d.player.x; G.player.y = d.player.y; G.player.dir = d.player.dir || 0;
-    G.player.path = null; G.player.target = null; G.player.pickup = null; G.player.action = "stand"; G.player.dead = false;
+    G.player.path = null; G.player.target = null; G.player.pickup = null; G.player.dead = false;
+    // 读档是“从新开始”，必须从头播站立（只设 action 不会重置帧）。
+    restartAnim(G.player, "stand");
+    G.player.animSpeed = 1; G.player.atkT = 0; G.player.swingT = 0;
+    G.player.hitPending = false; G.player.swingTarget = null;
   }
   // 读档后若玩家与某个 NPC 重叠，把 NPC 挤开（兼容旧存档）
   for (const n of G.npcs) if (!n.dead) placeFree(n);
