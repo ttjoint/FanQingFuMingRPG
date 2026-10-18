@@ -156,14 +156,14 @@ function toast(msg) {
 }
 
 // ---------- 外壳 ----------
-const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["ais", "AI"], ["buffs", "Buff"], ["items", "物品"], ["skills", "技能"], ["effects", "特效"], ["affixes", "词缀"], ["config", "升级数值"], ["game", "标题结局"], ["pmg", "行走图"], ["assets", "图片素材"], ["audio", "音频"], ["ui", "界面"]];
+const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["ais", "AI"], ["buffs", "Buff"], ["items", "物品"], ["skills", "技能"], ["effects", "特效"], ["affixes", "词缀"], ["config", "升级数值"], ["game", "标题结局"], ["pmg", "行走图"], ["assets", "图片素材"], ["audio", "音频"], ["ui", "界面"], ["waypoints", "传送点"]];
 let navEl;
 
 // 标签页图标（纯文本，无需图标字体）。
 const TAB_ICONS = {
   maps: "🗺", decor: "🌳", scripts: "📜", npcs: "👤", ais: "🧠", buffs: "✨",
   items: "⚔", skills: "⚡", effects: "💥", affixes: "🔧", config: "📈",
-  game: "🎬", pmg: "🚶", assets: "🖼", audio: "🎵", ui: "🖥",
+  game: "🎬", pmg: "🚶", assets: "🖼", audio: "🎵", ui: "🖥", waypoints: "🧭",
 };
 
 // 窄屏(<900px)判定：导航/属性栏变抽屉。用 matchMedia 便于监听变化。
@@ -327,7 +327,7 @@ function selectTab(k) {
   // 用显式引用而非 querySelectorAll 下标（页内 split 也会产生 .ed-resizer，
   // 按下标取会错位）。
   if (sideRszEl) sideRszEl.style.display = (needSide && !isNarrow()) ? "" : "none";
-  ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, ais: tabAis, buffs: tabBuffs, items: tabItems, skills: tabSkills, effects: tabEffects, affixes: tabAffixes, config: tabConfig, game: tabGame, pmg: tabPmg, assets: tabAssets, audio: tabAudio, ui: tabUi })[k]();
+  ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, ais: tabAis, buffs: tabBuffs, items: tabItems, skills: tabSkills, effects: tabEffects, affixes: tabAffixes, config: tabConfig, game: tabGame, pmg: tabPmg, assets: tabAssets, audio: tabAudio, ui: tabUi, waypoints: tabWaypoints })[k]();
 }
 
 // ---------- 地图 ----------
@@ -917,6 +917,31 @@ function tabAffixes() {
   listTab("词缀（" + list.length + "）", list, AFFIX_SCHEMA,
     [{ k: "name", label: "名称" }, { k: "rarity", label: "稀有度" }, { k: "weight", label: "权重" }, { k: "mods.atk", label: "攻击" }, { k: "mods.def", label: "防御" }],
     () => ({ id: "af_" + (list.length + 1), name: "新词缀", prefix: "新的", rarity: "magic", weight: 10, slots: [], mods: { atk: 1 } }));
+}
+
+// 传送点（P4）：踩到该格即解锁，解锁后可在地点之间往返传送。
+// map 必须与「地图」页的地图名完全一致，否则运行时会找不到图。
+const WAYPOINT_SCHEMA = [
+  { group: "基本" },
+  { k: "id", label: "id", hint: "稳定标识，存档记录解锁用它；改名会丢解锁进度" },
+  { k: "name", label: "显示名", type: "text" },
+  { k: "map", label: "所在地图", type: "text", hint: "必须与地图页的地图名一致" },
+  { group: "位置" },
+  { k: "row", label: "行", type: "number" }, { k: "col", label: "列", type: "number" },
+  { k: "act", label: "章节", type: "number", hint: "面板按章节分组，数字小的排前面" },
+  { group: "说明" },
+  { k: "desc", label: "描述", type: "textarea", rows: 2 },
+];
+
+function tabWaypoints() {
+  const list = ED.content.waypoints || (ED.content.waypoints = []);
+  mainEl.append(h("div", { class: "ed-hint" },
+    "玩家走到「所在地图 + 行列」这一格就会解锁该传送点；解锁后可在地点之间往返（游戏内 M 键）。" +
+    "删除传送点后，玩家存档里对应的解锁标记会失效但无害。"));
+  listTab("传送点（" + list.length + "）", list, WAYPOINT_SCHEMA,
+    [{ k: "id", label: "id" }, { k: "name", label: "显示名" }, { k: "map", label: "地图" },
+     { k: "act", label: "章节" }, { k: "row", label: "行" }, { k: "col", label: "列" }],
+    () => ({ id: "wp_" + (list.length + 1), name: "新传送点", map: (ED.content.mapsIndex && Object.values(ED.content.mapsIndex)[0]) || "", row: 1, col: 1, act: 1, desc: "" }));
 }
 
 function tabBuffs() {

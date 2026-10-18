@@ -15,6 +15,7 @@ import { checkTriggers } from "../world/triggers.js";
 import { separateUnits } from "./separation.js";
 import { projectileSystem } from "./projectiles.js";
 import { buffSystem } from "./buffs.js";
+import { waypointSystem } from "./waypoint.js";
 
 // 精力充足才能奔跑：精力降到 0 时强制走路（左右键都只能是走路），直到靠药水/NPC 回复精力。
 // 门控本体在 motion.js（避免 gameplay↔combat 循环 import），这里再导出保持既有引用不变。
@@ -135,4 +136,6 @@ export function cameraSystem(ctx, dt) {
 export function separationSystem(ctx, dt) { separateUnits(ctx.state, dt); }
 
 // 每帧玩法系统的顺序。
-export const gameplaySystems = [playerSystem, npcSystem, separationSystem, triggerSystem, projectileSystem, buffSystem, fxSystem, groundSystem, indicatorSystem, effectSystem, cameraSystem];
+// waypointSystem 紧跟 playerSystem：玩家的落点由 playerSystem 更新，
+// 踩点判定必须看到本帧的最新坐标（否则切图后要等一帧才解锁）。
+export const gameplaySystems = [playerSystem, waypointSystem, npcSystem, separationSystem, triggerSystem, projectileSystem, buffSystem, fxSystem, groundSystem, indicatorSystem, effectSystem, cameraSystem];

@@ -7,6 +7,7 @@ import { drawItemSlot } from "./hud.js";
 import { SETTINGS_BOX, SETTINGS_BAR, SETTINGS_BTN, uiRect, uiSlotRect } from "../core/layout.js";
 import { PACK_BOX } from "../core/layout.js";
 import { SAVE_SLOTS, saveSlotInfo } from "../systems/save.js";
+import { getRuntime } from "../runtime/context.js";
 
 export function drawTip() {
   if (G.tipT <= 0 || !G.tip) return;
@@ -100,6 +101,66 @@ export function drawSavePanel() {
     btn(x + 300, "存", "#8fbf6a"); btn(x + 356, "读", "#6a9fbf");
   }
   ctx.fillStyle = "#888"; ctx.font = "11px sans-serif"; ctx.fillText("Esc / F5 关闭", x + w - 110, y + h - 12);
+}
+
+// 传送点面板（P4）：按章节列出已解锁的传送点，点击即传送。
+// 未解锁的点不显示——列表长了会稀释"我还能去哪儿"的清晰度，只在总数上提示。
+export const WP_BOX = { x: 150, y: 50, w: 340, h: 320 };
+const WP_ROW_H = 34;
+
+export function drawWaypointPanel() {
+  if (!G.waypointPanel) return;
+  const { w, h, x, y } = WP_BOX;
+  ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(0, 0, VW, VH);
+  ctx.fillStyle = "rgba(18,14,10,0.97)"; ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2); ctx.lineWidth = 1;
+  ctx.fillStyle = "#f0d060"; ctx.font = "bold 16px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.fillText("传送点", x + 16, y + 28);
+  ctx.fillStyle = "#aaa"; ctx.font = "11px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.fillText("点击地名传送　Esc / M 关闭", x + 120, y + 28);
+
+  const targets = waypointRows();
+  if (!targets.length) {
+    ctx.fillStyle = "#888"; ctx.font = "13px sans-serif";
+    ctx.fillText("尚未发现任何传送点。走到传送点所在格即可解锁。", x + 20, y + 70);
+  }
+  ctx.font = "13px 'Microsoft YaHei',SimHei,sans-serif";
+  targets.forEach((t, i) => {
+    const ry = y + 48 + i * WP_ROW_H;
+    if (ry + WP_ROW_H > y + h - 12) return;   // 超出面板就截断，避免画到面板外
+    const here = G.currentMap === t.map;
+    ctx.fillStyle = here ? "rgba(90,120,70,0.55)" : "rgba(0,0,0,0.32)";
+    ctx.fillRect(x + 12, ry, w - 24, WP_ROW_H - 6);
+    ctx.fillStyle = here ? "#bfe08a" : "#ffd75e";
+    ctx.fillText(t.name, x + 22, ry + 20);
+    ctx.fillStyle = "#9a9080"; ctx.font = "11px sans-serif";
+    ctx.fillText(here ? "（当前所在）" : t.map, x + 130, ry + 19);
+    ctx.font = "13px 'Microsoft YaHei',SimHei,sans-serif";
+  });
+}
+
+// 面板命中：返回被点击的传送点（无则 null）。
+export function waypointAt(sx, sy) {
+  if (!G.waypointPanel) return null;
+  const { w, x, y, h } = WP_BOX;
+  if (sx < x || sx > x + w || sy < y || sy > y + h) return null;
+  const targets = waypointRows();
+  for (let i = 0; i < targets.length; i++) {
+    const ry = y + 48 + i * WP_ROW_H;
+    if (ry + WP_ROW_H > y + h - 12) break;
+    if (sy >= ry && sy <= ry + WP_ROW_H - 6) return targets[i];
+  }
+  return null;
+}
+
+// 已解锁目标（绘制与命中共用同一份顺序，避免两处漂移）。
+// 从运行时内容读取；拿不到时返回空（面板显示"尚未发现"）。
+function waypointRows() {
+  // 与 hud.js 同一取值路径：运行时内容里已规整过的传送点表。
+  const rt = getRuntime();
+  const list = (rt && ((rt.content && rt.content.waypoints) || (rt.assets && rt.assets.waypoints))) || [];
+  const un = G.waypoints || {};
+  return list.filter(w => un[w.id]);
 }
 
 // 系统设置面板：音量 + 系统菜单按钮（回到游戏 / 读档存档 / 退出游戏）。

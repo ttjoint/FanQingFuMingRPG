@@ -61,6 +61,9 @@ export function resetNewGame(ctx) {
   G.player = null;   // 丢弃旧主角对象，避免上一次阵亡的 dead/动画状态被带进新游戏
   G.tip = null; G.panel = null; G.dialog = null; G.script = null; G.triggerCD = 0; G.lastCell = null;
   G.deathT = 0;
+  // 传送点解锁进度（P4）：属于"永久进度"，随存档走；新游戏从空开始。
+  // 起始地图的传送点会在玩家踩上去时自动解锁（见 systems/waypoint.js）。
+  G.waypoints = {};
 }
 
 // 开始新游戏：真正启动 main.gsp（其第一条就是 LoadInitialMap）。

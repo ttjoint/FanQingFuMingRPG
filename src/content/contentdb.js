@@ -2,6 +2,7 @@
 // 也可由打包补丁（patch）覆盖。构建脚本、运行时、编辑器共用这一份结构。
 import { CONTENT_VERSION, normalizeNpc, normalizeItem, normalizeSkill, normalizeConfig, normalizeMapDoc, normalizeDecorTemplates, normalizeFactions, normalizeAis, normalizeBuffList, normalizeEffectList, normalizeAffixList } from "./schema.js";
 import { normalizeUi } from "./ui.js";
+import { normalizeWaypoints } from "../engine/waypoint.js";
 import { defaultUi } from "./uiDefault.js";
 
 const deep = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
@@ -30,6 +31,8 @@ export function buildContentDB(assets, mapDocs) {
     decorTemplates: normalizeDecorTemplates(assets.decorTemplates || {}),   // 跨地图共享的装饰物模板
     // 界面布局：可编辑的 UI 元件表。缺省 = 改造前的硬编码布局（逐像素一致）。
     ui: normalizeUi(assets.ui || defaultUi()),
+    // 传送点表（P4）：踩点解锁 + 图间传送。缺省为空 = 退回纯脚本跳图。
+    waypoints: normalizeWaypoints(assets.waypoints),
   };
 }
 
@@ -48,6 +51,7 @@ export function contentToLegacy(content) {
     affixes: content.affixes || [],
     transitions: content.transitions, mapsIndex: content.mapsIndex, mapsManifest: content.mapsManifest,
     decorTemplates: content.decorTemplates || {},
+    waypoints: content.waypoints || [],
   };
 }
 
@@ -76,6 +80,8 @@ export function diffContent(base, next) {
   if (!eq(base.affixes, next.affixes)) patch.content.affixes = deep(next.affixes);   // 词缀表（整表替换）
   // 界面布局：元件是**有序数组**（z 序/同层绘制顺序有意义），增删移动都属于整表差异。
   if (!eq(base.ui, next.ui)) patch.content.ui = deep(next.ui);
+  // 传送点表（P4）：同样是数组（顺序即面板里的显示顺序），整表替换。
+  if (!eq(base.waypoints, next.waypoints)) patch.content.waypoints = deep(next.waypoints);
   // 装饰物模板（按贴图键）：只存非空且变化的条目
   {
     const b = base.decorTemplates || {}, n = next.decorTemplates || {};
@@ -113,6 +119,7 @@ export function applyPatch(base, patch) {
   if (c.effects !== undefined) out.effects = normalizeEffectList(c.effects);
   if (c.affixes !== undefined) out.affixes = normalizeAffixList(c.affixes);
   if (c.ui !== undefined) out.ui = normalizeUi(c.ui);
+  if (c.waypoints !== undefined) out.waypoints = normalizeWaypoints(c.waypoints);
   {
     if (!out.decorTemplates) out.decorTemplates = {};
     const mod = c.decorTemplates || {};

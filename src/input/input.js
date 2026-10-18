@@ -13,6 +13,8 @@ import { hasGoods, openShop, closeShop, sellCursor } from "../systems/shop.js";
 import { advanceDialog, startScript, openSay } from "../script/vm.js";
 import { slotAt, insideShop, insideShopClose, insideDialog, settingsHit, menuHit, fnButtonAt, SETTINGS_BAR } from "../core/layout.js";
 import { handleSlotClick } from "./slots.js";
+import { waypointAt, WP_BOX } from "../render/panels.js";
+import { togglePanel, travelTo } from "../systems/waypoint.js";
 import { saveBtnAt, saveSlot, loadSlot } from "../systems/save.js";
 import { applyVolumes, playSound, saveSettings } from "../systems/audio.js";
 import { enterMenu, startGame, flashPics } from "../systems/scene.js";
@@ -183,6 +185,13 @@ export function addInput() {
       const fn = fnButtonAt(sp.x, sp.y);
       if (fn) { setPanel(fn); return; }
     }
+    // 传送面板是模态的：点列表项传送，点面板外关闭。
+    if (G.waypointPanel) {
+      const wp = waypointAt(sp.x, sp.y);
+      if (wp) { travelTo(getRuntime(), wp.id); return; }
+      if (sp.x < WP_BOX.x || sp.x > WP_BOX.x + WP_BOX.w || sp.y < WP_BOX.y || sp.y > WP_BOX.y + WP_BOX.h) togglePanel(getRuntime(), false);
+      return;
+    }
     if (G.savePanel) { if (G.scene === "menu") G.savePanel = false; return; }
     if (G.scene !== "game") { handleSceneClick(sp.x, sp.y); return; }
     if (G.dialog) {
@@ -247,6 +256,7 @@ export function addInput() {
   // 这样 Esc 既能关掉当前窗口，也能在游戏里唤出设置，不再需要单独记 F10。
   function escapeKey() {
     if (G.settingsPanel) { G.settingsPanel = false; saveSettings(G); return; }
+    if (G.waypointPanel) { togglePanel(getRuntime(), false); return; }
     if (G.shop) { closeShop(getRuntime()); return; }
     if (G.savePanel) { G.savePanel = false; return; }
     if (G.packOpen) { G.packOpen = false; G.cursor = null; return; }
@@ -283,6 +293,7 @@ export function addInput() {
     // 设置面板：Esc 开关（F10 保留为兼容快捷键）。
     if (e.key === "F10") { openSettings(); e.preventDefault(); return; }
     if (e.key === "Tab") { G.packOpen = !G.packOpen; if (G.packOpen && !G.pack.length) G.pack = new Array(25).fill(null); e.preventDefault(); return; }
+    if (e.key === "m" || e.key === "M") { togglePanel(getRuntime()); e.preventDefault(); return; }
     if (e.key === "F4") { setPanel("mission"); return; }
     if (e.key === "F1") { setPanel("note"); return; }
     if (e.key === "q" || e.key === "Q") cycleSkill(-1);

@@ -107,7 +107,27 @@ D2 的 build 多样性全部建立在这套正交体系上。
 
 按“对刷图循环的价值”排序：
 
-- [ ] **传送点 / 小站**（没有它 9 张图只能靠脚本硬跳，做不出刷图循环）
+- [x] **传送点 / 小站**（做出来了刷图循环才成立）
+      - `engine/waypoint.js`（纯逻辑）：`normalizeWaypoints` / `waypointTable` /
+        `isUnlocked` / `unlock` / `groupByAct` / `travelTargets` / `canTravel` /
+        `waypointAtCell` / `touchWaypoint`
+      - 归一化会丢弃缺 id/缺地图的项，并**按 id 去重**——重复 id 会让解锁状态串台
+        （解锁一个等于解锁两个）
+      - `systems/waypoint.js`：`waypointSystem`（每帧踩点判定）/ `availableTargets` /
+        `travelTo`（复用 loadMap+setPlayer，与 GSP 的 gotoMap 同一条路径）/ `togglePanel`
+      - 管道位置紧跟 `playerSystem`：踩点必须看到本帧最新坐标，否则切图后要等一帧
+      - `render/panels.js`：`drawWaypointPanel` / `waypointAt`（绘制与命中共用
+        `waypointRows()`，避免两处顺序漂移）
+      - 输入：游戏内 **M** 开面板、Esc 关、点击地名传送（模态，点面板外也关闭）
+      - `assets/waypoints.json`：7 个传送点（第 1 章 4 个 / 第 2 章 3 个），
+        坐标都取在各图**实际可走格**上（从地图 JSON 里查的），不是拍脑袋写的
+      - `G.waypoints = {id:true}` 随存档走；`resetNewGame` 清空
+      - 编辑器新增「传送点」标签页（id/显示名/地图/行列/章节/描述，可增删）
+      - `diffContent`/`applyPatch` 支持整表 `waypoints`
+      - 单测 `test/waypoint.test.mjs` 10 例；E2E 钉住解锁、未解锁拦截、真换图、
+        编辑器改名进补丁
+      - **注意**：E2E 里传送会真的换图，必须传回原图，否则后续编辑器用例
+        的 `currentMap` 断言全部错位
 - [ ] **箱子 / 共享仓库**（16 格背包无处沉淀物品经济）
 - [ ] **赌博 / 鉴定 / 修理**（装备循环闭环缺三环）
 - [ ] **套装 / 暗金物品**（有稀有度，缺独特命名层级）

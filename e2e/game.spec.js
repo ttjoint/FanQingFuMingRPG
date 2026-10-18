@@ -889,6 +889,51 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   expect(p3.synTwo).toBe(120);        // +20%
   expect(p3.synCap).toBe(140);        // 封顶 +40%
 
+  // ---- 传送点（P4）----
+  // 此前 9 张图之间只能靠 GSP 脚本写死 gotoMap，玩家无法在去过的地点间往返，
+  // "回城再刷"这个循环根本不成立。这里钉住：踩点解锁、未解锁不可传、传送真换图。
+  const wp = await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const W = await import("/src/systems/waypoint.js");
+    const M = await import("/src/world/map.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    const out = { total: (rt.assets.waypoints || []).length };
+    // 前面的用例调用过 resetNewGame（模拟回到标题），它会把 waypoints 清空；
+    // 这里显式建空表，模拟"新开局"，避免依赖前序用例的副作用。
+    G.waypoints = {};
+    out.unlockedInit = Object.keys(G.waypoints || {}).length;
+    // 走到第一个传送点所在格 → 应解锁并提示
+    const w0 = rt.assets.waypoints[0];
+    M.setPlayer(rt, w0.row, w0.col, 4);
+    G._wpCell = null;
+    W.waypointSystem(rt);
+    out.unlockedIds = Object.keys(G.waypoints || {});
+    out.tipIsDiscover = /发现传送点/.test(G.tip || "");
+    // 未解锁的传送点不能传
+    const locked = (rt.assets.waypoints || []).find(x => !G.waypoints[x.id]);
+    out.lockedBlocked = locked ? W.travelTo(rt, locked.id) === false : "none";
+    // 传送真的换图并落点
+    const w1 = rt.assets.waypoints[1];
+    G.waypoints[w1.id] = true; G._wpCell = null;
+    out.travelOk = W.travelTo(rt, w1.id);
+    out.map = G.currentMap;
+    out.wantMap = w1.map;
+    out.panelClosed = !G.waypointPanel;
+    // 传送会真的换图。后续编辑器用例依赖"当前地图 = 进入时那张"，
+    // 所以这里必须传回原图原位置，别把这个副作用留给后面的断言。
+    W.travelTo(rt, "sunjiacun");
+    out.restoredMap = G.currentMap;
+    return out;
+  });
+  expect(wp.total).toBeGreaterThanOrEqual(7);
+  expect(wp.unlockedInit).toBe(0);                       // 新开局从零开始
+  expect(wp.unlockedIds.length).toBe(1);                 // 踩一格只解锁一个
+  expect(wp.tipIsDiscover).toBe(true);
+  expect(wp.lockedBlocked === true || wp.lockedBlocked === "none").toBe(true);
+  expect(wp.travelOk).toBe(true);
+  expect(wp.map).toBe(wp.wantMap);                       // 真的切到了目标图
+  expect(wp.panelClosed).toBe(true);
+
   // ---- 编辑器 ----
   await page.evaluate(() => { window.prompt = () => "PW版本"; window.confirm = () => true; });
   await page.evaluate(async () => { const m = await import("/src/editor/index.js"); await m.openEditor(); });
@@ -896,6 +941,28 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   await page.waitForTimeout(400);
 
   // 界面 tab：HUD/背包/商店元件可增删改，且改动能进补丁（用户明确要求的能力）。
+  // ---- 传送点编辑（P4）----
+  await page.locator('.ed-nav button:has-text("传送点")').click();
+  await page.waitForTimeout(500);
+  const wpRows = page.locator("tbody tr:not(.ed-grouprow)");
+  await expect(wpRows).toHaveCount(7);                  // 默认内容 7 个传送点
+  const wpName = page.locator('.ed-grid label:has-text("显示名") + input');
+  await expect(wpName).toHaveValue("孙家庄");
+  await wpName.fill("孙家庄集");
+  await page.waitForTimeout(300);
+  await savePack(page);
+  const wpPack = await page.evaluate(async () => {
+    const s = await import("/src/content/store.js");
+    const p = await s.loadPack(s.activeId());
+    const w = (p && p.patch && p.patch.content && p.patch.content.waypoints) || null;
+    return w ? { n: w.length, first: w[0].name, map: w[0].map, row: w[0].row } : null;
+  });
+  expect(wpPack).not.toBeNull();                        // 补丁里确实带了 waypoints
+  expect(wpPack.n).toBe(7);                             // 整表替换
+  expect(wpPack.first).toBe("孙家庄集");                // 改名生效
+  expect(wpPack.map).toBe("孙家庄");                    // 其它字段没被误改
+  expect(typeof wpPack.row).toBe("number");
+
   await page.locator('.ed-nav button:has-text("界面")').click();
   await page.waitForTimeout(500);
   // 默认 17 个元件（与 defaultUiComponents 一致），列表与画布都要在
