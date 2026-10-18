@@ -829,6 +829,66 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   expect(lootScale.half).toBeLessThan(lootScale.base);  // 减半 → 明显变少
   expect(lootScale.quad).toBeGreaterThan(lootScale.base); // 组队 → 变多
 
+  // ---- 技能资源 / 冷却 / 充能 / 协同（P3）----
+  const p3 = await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const C = await import("/src/systems/combat.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    const out = {};
+    // 治疗类自身技能原先**完全没接冷却**，可以无限连放。这里钉住修复。
+    const heal = { name: "_测试疗伤", type: 0, power: 50, mp: 1, cooldown: 3, resource: "mp" };
+    rt.assets.skills.push(heal);
+    G.skills = (G.skills || []).concat([heal.name]);
+    G.skill = heal.name;
+    G.stats.hp = 10; G.stats.hpMax = 1000; G.stats.mp = 100;
+    G.player.skillCDs = {};
+    C.castSelf(rt);
+    out.hp1 = G.stats.hp;                       // 第一次：+50
+    out.cd = (G.player.skillCDs || {})[heal.name] || 0;
+    C.castSelf(rt);
+    out.hp2 = G.stats.hp;                       // 第二次：被冷却挡住，不变
+    out.mp = G.stats.mp;                        // 只扣了一次精力
+
+    // 充能：3 发用完 → 无充能，1.5 秒后回 1 发
+    const { hasCharge, spendCharge, chargesOf, tickCharges } = await import("/src/engine/targeting.js");
+    const dash = { name: "_测试冲刺", maxCharges: 3, recharge: 1 };
+    const u = {};
+    for (let i = 0; i < 3; i++) spendCharge(u, dash);
+    out.chargesSpent = chargesOf(u, dash).cur;
+    out.chargeBlocked = !hasCharge(u, dash);
+    tickCharges(u, 1.5, { [dash.name]: dash });
+    out.chargesBack = chargesOf(u, dash).cur;
+
+    // 资源类型：hp 型技能不能把自己扣死
+    const blood = { name: "_测试血祭", mp: 20, resource: "hp" };
+    G.stats.hp = 100;
+    C.payResource(blood, G); out.hpPaid = G.stats.hp;
+    G.stats.hp = 5;
+    out.shortCost = C.resourceCost(blood, G);
+    C.payResource(blood, G); out.hpFloor = G.stats.hp;
+
+    // 协同：受等级加成且封顶
+    const S = await import("/src/engine/skill.js");
+    const fb = { name: "_火球", power: 100, synergy: [{ skill: "内功", per: 0.1, max: 0.4, stat: "power" }] };
+    out.synBase = S.applySynergy(fb, {}).power;
+    out.synTwo = S.applySynergy(fb, { 内功: 2 }).power;
+    out.synCap = S.applySynergy(fb, { 内功: 99 }).power;
+    return out;
+  });
+  expect(p3.hp1).toBe(60);            // 10 + 50
+  expect(p3.hp2).toBe(60);            // 冷却中，第二次无效（旧代码会变成 110）
+  expect(p3.cd).toBeGreaterThan(0);
+  expect(p3.mp).toBe(99);             // 只扣一次
+  expect(p3.chargesSpent).toBe(0);
+  expect(p3.chargeBlocked).toBe(true);
+  expect(p3.chargesBack).toBe(1);
+  expect(p3.hpPaid).toBe(80);         // 100 - 20
+  expect(p3.shortCost).toBe(15);      // 需要 20，只有 5
+  expect(p3.hpFloor).toBe(1);         // 不能扣死
+  expect(p3.synBase).toBe(100);       // 没学协同 → 原值
+  expect(p3.synTwo).toBe(120);        // +20%
+  expect(p3.synCap).toBe(140);        // 封顶 +40%
+
   // ---- 编辑器 ----
   await page.evaluate(() => { window.prompt = () => "PW版本"; window.confirm = () => true; });
   await page.evaluate(async () => { const m = await import("/src/editor/index.js"); await m.openEditor(); });

@@ -120,6 +120,72 @@ export function tickCooldowns(unit, dt) {
   }
 }
 
+// ---- 充能（charges）----
+// 充能型技能（冲刺、闪避、连击）：有 N 发可用，每 recharge 秒回 1 发。
+//
+// 单位上维护 skillCharges = { [skillName]: { cur, t } }：
+//   cur = 当前可用充能数，t = 距离下一点充能已积累的秒数。
+//
+// 与 cooldown 的关系：非充能技能（maxCharges=0）完全走上面的 skillCDs；
+// 充能技能用这里的两个「槽」，两者不会互相干扰。
+export function maxCharges(sk) {
+  const n = sk && sk.maxCharges;
+  return Math.max(0, Math.floor(Number(n) || 0));
+}
+
+// 充能技能的恢复间隔（秒）。缺省回落到 cooldown，再缺省为 0（即瞬回）。
+export function rechargeTime(sk) {
+  if (!sk) return 0;
+  const rc = Number(sk.recharge);
+  if (isFinite(rc) && rc > 0) return rc;
+  return normalizeCooldown(sk);
+}
+
+// 取某技能的充能状态（缺省视为满充能）。
+export function chargesOf(unit, sk) {
+  const max = maxCharges(sk);
+  if (!max || !unit || !sk) return { cur: max, max, t: 0 };
+  const m = unit.skillCharges;
+  const st = m && m[sk.name];
+  if (!st) return { cur: max, max, t: 0 };
+  return { cur: Math.max(0, Math.min(max, st.cur | 0)), max, t: Math.max(0, Number(st.t) || 0) };
+}
+
+// 是否可用：非充能技能恒 true（冷却由 isReady 判断）；充能技能要求 cur>0。
+export function hasCharge(unit, sk) {
+  const max = maxCharges(sk);
+  if (!max) return true;
+  return chargesOf(unit, sk).cur > 0;
+}
+
+// 消耗一发充能。返回是否成功。
+export function spendCharge(unit, sk) {
+  const max = maxCharges(sk);
+  if (!max || !unit || !sk) return false;
+  if (!unit.skillCharges) unit.skillCharges = {};
+  const st = chargesOf(unit, sk);
+  if (st.cur <= 0) return false;
+  unit.skillCharges[sk.name] = { cur: st.cur - 1, t: st.t };
+  return true;
+}
+
+// 推进充能恢复。dt 秒后按 recharge 累加，满充能时清零计时避免溢出。
+// 传入 skills 表（name -> def）以便知道每个技能的 recharge；缺省用已有记录里的间隔。
+export function tickCharges(unit, dt, skills) {
+  if (!unit || !unit.skillCharges) return;
+  const m = unit.skillCharges;
+  for (const name in m) {
+    const sk = skills ? skills[name] : null;
+    const max = maxCharges(sk) || 1;
+    const rc = rechargeTime(sk) || 1;
+    const st = m[name];
+    if (!st || st.cur >= max) { if (st) st.t = 0; continue; }
+    st.t += dt;
+    while (st.t >= rc && st.cur < max) { st.t -= rc; st.cur++; }
+    if (st.cur >= max) st.t = 0;
+  }
+}
+
 // ---- 击退 / 位移（knockback）----
 // 计算把目标朝「远离施法者」方向推开 dist 像素后的落点。
 export function knockbackTarget(self, target, dist) {

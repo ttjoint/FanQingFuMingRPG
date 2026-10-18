@@ -81,9 +81,27 @@ D2 的 build 多样性全部建立在这套正交体系上。
 
 现状：`engine/skill.js` 只有 `mp` 与 `mode(melee/ranged)`，更像“攻击方式表”。
 
-- [ ] `cooldown` / `charges` / `passive` 字段
-- [ ] 技能协同（synergy：某技能为另一技能加成）
-- [ ] 编辑器技能表单扩展
+- [x] `cooldown`（沿用已有 `engine/targeting.js` 技能级冷却）
+      - **修 bug**：`castSelf`（治疗/自身技能）原先完全没接冷却，带冷却的自愈技
+        可以无限连放；攻击路径有 `isReady`，自身施法这条漏了。
+- [x] `resource` 字段：`mp` / `hp` / `none`（血祭类技能用 hp，且不能把自己扣死，
+      最低保留 1 点）。旧数据缺省即 `mp`，行为不变。
+- [x] `charges` / `maxCharges` / `recharge`：充能型技能（连击/冲刺）
+      - `engine/targeting.js` 新增 `chargesOf` / `hasCharge` / `spendCharge` / `tickCharges`
+      - 与普通冷却用两套槽（`skillCDs` vs `skillCharges`），互不干扰
+      - `recharge` 缺省回落 `cooldown`，避免"充能永远不回"
+      - 施放失败（资源不足/冷却中）不扣充能，只在真正出手时消耗
+- [x] `passive` 字段：被动技能不主动施放、不进技能栏，只通过协同加成
+- [x] 技能协同（synergy）：`engine/skill.js` 的 `synergyBonus` / `applySynergy`
+      - 形如 `[{skill, per, max, stat}]`：指定技能每 1 级给 +per 加成，累加封顶 max
+      - 单项与总和双封顶，避免多个协同叠满突破上限
+      - 只按"已学等级"算，被动加成常驻
+- [x] 编辑器技能表单扩展：被动勾选 / 消耗资源下拉 / 冷却 / 充能数 / 每发回复 /
+      协同列表（技能下拉 + 每级加成 + 上限 + 作用数值，可增删）
+- [x] 单测 `test/skillResources.test.mjs` 14 例；E2E 钉住治疗冷却修复、充能回复、
+      hp 资源下限、协同封顶
+- [x] 真内容接入：御心术补 12 秒冷却（原本无冷却却能无限自愈）、
+      烈焰斩←龙家剑法协同、龙家剑法←长剑协同、清军剑法改 3 充能每 6 秒回一发
 
 ## P4 · 子系统补齐（广度）
 

@@ -735,6 +735,7 @@ function npcSchema() {
     if (f.k === "drops") o.items = ED.items.map(x => x.name);
     if (f.k === "inventory") o.items = ED.items.map(x => x.name);
     if (f.k === "skills") { o.options = ED.skills.map(x => x.name); o.addLabel = "＋ 添加技能"; }
+    if (f.k === "synergy") o.skills = ED.skills.map(x => x.name);
     return o;
   });
 }
@@ -777,10 +778,20 @@ const SKILL_SCHEMA = [
   { k: "name", label: "名称", type: "text" },
   { k: "type", label: "类型", type: "select", numeric: true, options: [[0, "治疗(自身)"], [1, "攻击"]] },
   { k: "mode", label: "攻击方式", type: "select", options: [["melee", "近战（瞬间命中）"], ["ranged", "远程（预留弹道）"]] },
+  { k: "passive", label: "被动技能", type: "checkbox",
+    hint: "被动技能不能主动施放、不进技能栏，只通过「协同」给其它技能加成。" },
   { group: "数值" },
-  { k: "range", label: "射程", type: "number" }, { k: "mp", label: "耗精力", type: "number" },
+  { k: "range", label: "射程", type: "number" },
+  { k: "resource", label: "消耗资源", type: "select", options: [["mp", "精力"], ["hp", "生命"], ["none", "无"]] },
+  { k: "mp", label: "消耗量", type: "number" },
   { k: "power", label: "威力", type: "number" }, { k: "reqLevel", label: "需求等级", type: "number" },
   { k: "damageType", label: "伤害类型", type: "select", options: DMG_TYPE_OPTIONS },
+  { group: "冷却与充能", hint: "充能技能（冲刺/闪避）：有 N 发可用，每 N 秒回 1 发；不填则走普通冷却。" },
+  { k: "cooldown", label: "冷却(秒)", type: "number", step: 0.1 },
+  { k: "maxCharges", label: "充能数", type: "number", hint: "0 = 不是充能技能" },
+  { k: "recharge", label: "每发回复(秒)", type: "number", step: 0.1, hint: "留 0 则沿用冷却时间" },
+  { group: "协同", hint: "「技能」每 1 级给本技能 +per 的加成，最多 max。作用于「作用数值」。" },
+  { k: "synergy", label: "协同加成", type: "synergy" },
   { group: "表现" },
   { k: "icon", label: "图标", type: "image", dir: "skill_icons" },
   { k: "frames", label: "特效帧", type: "frames", dir: "skill" },

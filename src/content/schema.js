@@ -174,6 +174,27 @@ export function normalizeSkill(sk) {
   // 阶段 D：目标类型 / AOE / 技能级冷却。
   o.targeting = normalizeTargeting(o.targeting);
   o.cooldown = Math.max(0, num(o.cooldown, 0));
+  // 资源与充能（P3）：
+  // - resource    ：消耗哪种资源（"mp" | "hp" | "none"）。缺省 mp，兼容旧数据。
+  // - charges/maxCharges：充能型技能（如冲刺/闪避）。charges=0 表示不是充能技能。
+  //   recharge 为每恢复 1 点充能所需秒数（缺省等于 cooldown）。
+  // - passive     ：被动技能，不主动施放、不进技能栏，只提供加成（见 synergy）。
+  o.resource = ["mp", "hp", "none"].includes(str(o.resource, "")) ? str(o.resource, "mp") : "mp";
+  o.maxCharges = Math.max(0, Math.floor(num(o.maxCharges, 0)));
+  o.recharge = Math.max(0, num(o.recharge, o.cooldown));
+  o.passive = !!o.passive;
+  // 协同（synergy）：本技能受哪些技能加成。
+  // 形如 [{ skill: "内功", per: 0.08, max: 0.4 }]：对方每 1 级 +per 加成，上限 max。
+  // 计算在 engine/skill.js 的 synergyBonus()，这里只做结构规整。
+  o.synergy = arr(o.synergy).map(x => {
+    const q = x && typeof x === "object" ? x : {};
+    return {
+      skill: str(q.skill, ""),
+      per: num(q.per, 0),
+      max: num(q.max, 0),
+      stat: str(q.stat, "power"),   // 加成作用于哪个数值：power / range / duration
+    };
+  }).filter(x => x.skill && x.per);
   // 阶段 C/D：命中时施加的 buff（列表，元素为 buff id；支持 {id,stacks,chance} 形式）。
   // 特效：fx 可为字符串（命中特效 id）或对象 { cast, hit, target, ground }（各为特效 id）。
   o.fx = normalizeFxRef(o.fx);

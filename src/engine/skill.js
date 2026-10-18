@@ -75,3 +75,51 @@ export function damage(atk, power, def, variance, randomFn) {
   if (max <= min) return min;
   return min + Math.floor(rnd() * (max - min + 1));
 }
+
+// ---- 技能协同（synergy）----
+//
+// 形如 [{ skill: "内功", per: 0.08, max: 0.4 }]：指定技能每 1 级给本技能
+// +per 的加成（作用于 stat 指定的数值），最多累加到 max。
+//
+// 设计要点：
+//  - 只按「已学等级」算，不看是否在装备/当前选中技能——被动加成应当是常驻的。
+//  - 单项与总和都夹到 max，避免多个协同叠加突破上限。
+//  - levels 为 { 技能名: 等级 }；缺失视为 0 级（未学）。
+//
+// 返回加成**比例**（0.24 表示 +24%），由调用方乘到原始数值上。
+export function synergyBonus(sk, levels, stat) {
+  const list = sk && Array.isArray(sk.synergy) ? sk.synergy : null;
+  if (!list || !list.length) return 0;
+  const lv = levels || {};
+  const want = stat || "power";
+  let total = 0;
+  for (const s of list) {
+    if (!s || !s.skill) continue;
+    if ((s.stat || "power") !== want) continue;
+    const rank = Math.max(0, Number(lv[s.skill]) || 0);
+    if (!rank) continue;
+    let add = rank * (Number(s.per) || 0);
+    const cap = Number(s.max) || 0;
+    if (cap > 0 && add > cap) add = cap;
+    total += add;
+  }
+  // 多个协同叠加时，最终也不超过各自 max 中的最大值（保守：避免叠满)
+  const caps = list.filter(s => s && (s.stat || "power") === want && Number(s.max) > 0).map(s => Number(s.max));
+  if (caps.length) {
+    const hardCap = Math.max(...caps);
+    if (total > hardCap) total = hardCap;
+  }
+  return total;
+}
+
+// 应用协同后的技能数值。返回 { power, range }（不修改原对象）。
+// 协同只作用于 power/range；其它字段原样返回由调用方自取。
+export function applySynergy(sk, levels) {
+  const base = { power: Number(sk && sk.power) || 0, range: Number(sk && sk.range) || 0 };
+  const pMul = 1 + synergyBonus(sk, levels, "power");
+  const rMul = 1 + synergyBonus(sk, levels, "range");
+  return {
+    power: Math.round(base.power * pMul),
+    range: Math.round(base.range * rMul),
+  };
+}

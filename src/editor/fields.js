@@ -126,6 +126,46 @@ export function renderDrops(host, obj, f, onChange) {
 // 无货物 = 非商人（不展开交易）。与 NPC 名称/模型无关，纯数据驱动。
 const INV_AUTO_OPTS = [["", "（不自动）"], ["potion", "药/水类自动"], ["weapon", "武器类自动"], ["armor", "防具类自动"], ["accessory", "饰品类自动"]];
 
+// 技能协同（synergy）编辑器：obj[f.k] = [{ skill, per, max, stat }]
+// 「技能」每 1 级给本技能 +per 的加成（作用于 stat 指定的数值），最多累加到 max。
+const SYNERGY_STATS = [["power", "威力"], ["range", "射程"], ["duration", "持续时间"]];
+
+export function renderSynergy(host, obj, f, onChange) {
+  const arr = Array.isArray(obj[f.k]) ? obj[f.k] : (obj[f.k] = []);
+  const redraw = () => {
+    clear(host);
+    if (!arr.length) host.append(h("div", { class: "ed-ghint" }, "（无协同加成）"));
+    arr.forEach((sy, i) => {
+      const sel = h("select", { style: "flex:1;min-width:80px" });
+      for (const nm of (f.skills || [])) sel.append(h("option", { value: nm }, nm));
+      if (sy.skill && !(f.skills || []).includes(sy.skill)) sel.append(h("option", { value: sy.skill }, sy.skill + "（无此技能）"));
+      sel.value = sy.skill || (f.skills && f.skills[0]) || "";
+      sel.onchange = () => { sy.skill = sel.value; onChange && onChange(f); };
+
+      const per = h("input", { type: "number", value: sy.per == null ? 0.1 : sy.per, step: 0.01, title: "每级加成比例（0.1 = +10%/级）", style: "width:62px" });
+      per.oninput = () => { sy.per = Number(per.value) || 0; onChange && onChange(f); };
+      const max = h("input", { type: "number", value: sy.max == null ? 0.4 : sy.max, step: 0.05, title: "加成上限（0 = 不限）", style: "width:62px" });
+      max.oninput = () => { sy.max = Number(max.value) || 0; onChange && onChange(f); };
+
+      const stat = h("select", { style: "width:78px" });
+      for (const [v, lab] of SYNERGY_STATS) stat.append(h("option", { value: v }, lab));
+      stat.value = sy.stat || "power";
+      stat.onchange = () => { sy.stat = stat.value; onChange && onChange(f); };
+
+      host.append(h("div", { class: "ed-row" }, sel, per, max, stat,
+        h("button", { class: "ed-btn danger", onclick: () => { arr.splice(i, 1); onChange && onChange(f); redraw(); } }, "删")));
+    });
+    host.append(h("button", {
+      class: "ed-btn",
+      onclick: () => {
+        arr.push({ skill: (f.skills && f.skills[0]) || "", per: 0.1, max: 0.4, stat: "power" });
+        onChange && onChange(f); redraw();
+      },
+    }, "＋ 添加协同"));
+  };
+  redraw();
+}
+
 export function renderInventory(host, obj, f, onChange) {
   const items = f.items || [];
   const redraw = () => {
@@ -246,6 +286,12 @@ export function renderForm(host, schema, obj, onChange) {
     if (f.type === "strlist") {
       const box = h("div", { class: "ed-drops" });
       renderStrList(box, obj, f, onChange);
+      groupHost.append(h("div", { class: "ed-field wide" }, lab, box));
+      continue;
+    }
+    if (f.type === "synergy") {
+      const box = h("div", { class: "ed-drops" });
+      renderSynergy(box, obj, f, onChange);
       groupHost.append(h("div", { class: "ed-field wide" }, lab, box));
       continue;
     }

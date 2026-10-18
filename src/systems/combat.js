@@ -9,7 +9,8 @@ import { startScript } from "../script/vm.js";
 import { canAttack } from "../engine/faction.js";
 import { rollDrops } from "../engine/lootTable.js";
 import { skillRange as skRange, rollAttackHit, damage as dmgFormula } from "../engine/skill.js";
-import { normalizeTargeting, selectTargets, needsPrimary, isSelfOnly, tickCooldowns, isReady, startCooldown, knockbackTarget } from "../engine/targeting.js";
+import { normalizeTargeting, selectTargets, needsPrimary, isSelfOnly, tickCooldowns, isReady, startCooldown, knockbackTarget, hasCharge, spendCharge } from "../engine/targeting.js";
+import { applySynergy } from "../engine/skill.js";
 import { spawnProjectile } from "./projectiles.js";
 import { spawnFx } from "./effects.js";
 import { playBuffFx } from "./buffs.js";
@@ -139,8 +140,16 @@ export function playerAttackTarget(ctx, dt) {
     p.atkT = 0.08; p.swingTotal = 0.08; p.swingT = 0; p.hitPending = false; p.animSpeed = 1;
     return;
   }
-  if (sk.mp && G.stats.mp < sk.mp) { p.target = null; G.tip = "精力不足"; G.tipT = 2; return; }
-  if (sk.mp) G.stats.mp -= sk.mp;
+  // 充能型技能：没有充能时不发起攻击（与冷却中同样"保持面朝"）。
+  if (sk.name && !hasCharge(p, sk)) {
+    p.atkT = 0.08; p.swingTotal = 0.08; p.swingT = 0; p.hitPending = false; p.animSpeed = 1;
+    return;
+  }
+  // 资源消耗：支持 mp/hp/none（旧逻辑只认 mp）。
+  if (resourceCost(sk, G) > 0) { p.target = null; G.tip = "精力不足"; G.tipT = 2; return; }
+  payResource(sk, G);
+  // 攻击时才扣充能：施放被打断（目标丢失等）不该白白消耗。
+  if (sk.name) spendCharge(p, sk);
   const dur = actionDuration(p, "fight", ctx.assets.chars);
   // 攻击间隔 = 基础冷却 × 攻速系数。
   // attackSpeed 是百分比（100 = 基准）；越高越快，故用 100/(100+as) 收敛，
@@ -275,6 +284,17 @@ export function castSkill(ctx, attacker, target, sk, opts) {
   return hits;
 }
 
+// 技能名 -> 定义表（供 tickCharges 查每个技能的 recharge）。
+// 按 ctx 缓存：同一帧里对多个单位复用，避免每个单位都重建一遍。
+export function skillMap(ctx) {
+  const list = (ctx.assets && ctx.assets.skills) || [];
+  if (ctx._skillMapSrc === list) return ctx._skillMap;
+  const m = {};
+  for (const s of list) if (s && s.name) m[s.name] = s;
+  ctx._skillMapSrc = list; ctx._skillMap = m;
+  return m;
+}
+
 // 收集场上所有可被选中的单位（含玩家，排除施法者由 selectTargets 处理）。
 function collectAllUnits(ctx) {
   const g = ctx.state, out = [];
@@ -352,9 +372,59 @@ export function castSelf(ctx) {
   const G = ctx.state;
   const p = G.player; if (!p) return;
   const sk = skillByName(G.skill); if (!sk) return;
-  if (sk.mp && G.stats.mp < sk.mp) { G.tip = "精力不足"; G.tipT = 2; return; }
-  if (sk.mp) G.stats.mp -= sk.mp;
+  // 被动技能不能主动施放（它只通过 synergy 给别的技能加成）。
+  if (sk.passive) return;
+  // 技能级冷却：原先这条路径完全没接冷却，导致带 cooldown 的治疗/自身技能
+  // 可以无限连放（攻击路径有 isReady，自身施法漏了）。
+  if (!isReady(p, sk)) { G.tip = "冷却中"; G.tipT = 1.2; return; }
+  // 充能型技能：没有充能就不能放。
+  if (!hasCharge(p, sk)) { G.tip = "充能未就绪"; G.tipT = 1.2; return; }
+  const cost = resourceCost(sk, G);
+  if (cost > 0) { G.tip = "精力不足"; G.tipT = 2; return; }
+  payResource(sk, G);
   spawnEffect(ctx, sk, p.x, p.y);
-  if (sk.type === 0) { G.stats.hp = Math.min(G.stats.hpMax, G.stats.hp + Math.max(40, sk.power || 0)); G.tip = "疗伤"; G.tipT = 2; }
+  if (sk.type === 0) {
+    // 协同加成也作用于治疗量，保持"加成的都是技能主数值"这一直觉。
+    const lv = skillLevels(G);
+    const power = applySynergy(sk, lv).power || sk.power || 0;
+    G.stats.hp = Math.min(G.stats.hpMax, G.stats.hp + Math.max(40, power));
+    G.tip = "疗伤"; G.tipT = 2;
+  }
+  // 施放成功才进冷却 / 扣充能（失败不该惩罚玩家）。
+  startCooldown(p, sk);
+  spendCharge(p, sk);
   p.action = "fight"; p.frame = 0; p.ft = 0; p.attackCD = 0.9;
+}
+
+// ---- 资源消耗（P3）----
+// 旧逻辑只认 mp 且写死"精力不足"，现在支持 resource = mp/hp/none。
+// 返回还需要补多少资源（0 = 够用）。
+export function resourceCost(sk, G) {
+  if (!sk) return 0;
+  const res = sk.resource || "mp";
+  if (res === "none") return 0;
+  const need = sk.mp || 0;
+  if (res === "hp") return Math.max(0, need - G.stats.hp);
+  return Math.max(0, need - G.stats.mp);
+}
+
+// 扣资源。hp 型技能不会把自己扣死（至少留 1 点）。
+export function payResource(sk, G) {
+  if (!sk) return;
+  const res = sk.resource || "mp";
+  const need = sk.mp || 0;
+  if (res === "none" || need <= 0) return;
+  if (res === "hp") G.stats.hp = Math.max(1, G.stats.hp - need);
+  else G.stats.mp = Math.max(0, G.stats.mp - need);
+}
+
+// 已学技能等级表（供 synergy 计算）。技能等级沿用 setSkill 的记录，
+// 没有等级记录的技能视为已学 1 级。
+export function skillLevels(G) {
+  const out = {};
+  for (const name of (G.skills || [])) {
+    const lv = (G.skillLevels && G.skillLevels[name]) || 1;
+    out[name] = Math.max(0, lv | 0);
+  }
+  return out;
 }

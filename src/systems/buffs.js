@@ -5,7 +5,8 @@
 //
 // 与 combat.js 解耦：本模块只调用 applyDamage；技能命中时施加 buff 的逻辑在 combat.resolveHit。
 import { tickBuffs, dotPerSecond, hotPerSecond } from "../engine/buff.js";
-import { tickCooldowns } from "../engine/targeting.js";
+import { tickCooldowns, tickCharges } from "../engine/targeting.js";
+import { skillMap } from "./combat.js";
 import { applyDamage } from "./combat.js";
 import { spawnFx } from "./effects.js";
 
@@ -77,6 +78,8 @@ export function buffSystem(ctx, dt) {
     if (!u) continue;
     // 技能冷却每帧推进（与 buff 无关，故放在 buff 早退之前）。
     tickCooldowns(u, dt);
+    // 充能型技能的回复同理：单位身上 skillCharges 里的槽按 recharge 累加。
+    if (u.skillCharges) tickCharges(u, dt, skillMap(ctx));
     if (!u.dead && Array.isArray(u.buffs) && u.buffs.length) syncBuffAuras(ctx, u);
     if (!Array.isArray(u.buffs) || !u.buffs.length) continue;
     if (u.dead) { u.buffs = []; u._dotAcc = 0; u._hotAcc = 0; continue; }
