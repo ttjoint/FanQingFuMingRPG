@@ -25,6 +25,8 @@ import { buildAssetIndexAsync, searchAssets, groupOf, fileName, assetIndex, audi
 import { decorThumb, decorPreview } from "./atlas-preview.js";
 import { setImagesWriter } from "./asset-picker.js";
 import { pmgGrid } from "./pmg-view.js";
+import { mountUiTab } from "./ui-tab.js";
+import { normalizeUi } from "../content/ui.js";
 
 let root = null, ED = null, dirty = false, curTab = "maps";
 let mainEl, sideEl, statusEl, mapEditor = null, sideRszEl = null;
@@ -154,14 +156,14 @@ function toast(msg) {
 }
 
 // ---------- 外壳 ----------
-const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["ais", "AI"], ["buffs", "Buff"], ["items", "物品"], ["skills", "技能"], ["effects", "特效"], ["affixes", "词缀"], ["config", "升级数值"], ["game", "标题结局"], ["pmg", "行走图"], ["assets", "图片素材"], ["audio", "音频"]];
+const TABS = [["maps", "地图"], ["decor", "装饰物"], ["scripts", "脚本"], ["npcs", "NPC"], ["ais", "AI"], ["buffs", "Buff"], ["items", "物品"], ["skills", "技能"], ["effects", "特效"], ["affixes", "词缀"], ["config", "升级数值"], ["game", "标题结局"], ["pmg", "行走图"], ["assets", "图片素材"], ["audio", "音频"], ["ui", "界面"]];
 let navEl;
 
 // 标签页图标（纯文本，无需图标字体）。
 const TAB_ICONS = {
   maps: "🗺", decor: "🌳", scripts: "📜", npcs: "👤", ais: "🧠", buffs: "✨",
   items: "⚔", skills: "⚡", effects: "💥", affixes: "🔧", config: "📈",
-  game: "🎬", pmg: "🚶", assets: "🖼", audio: "🎵",
+  game: "🎬", pmg: "🚶", assets: "🖼", audio: "🎵", ui: "🖥",
 };
 
 // 窄屏(<900px)判定：导航/属性栏变抽屉。用 matchMedia 便于监听变化。
@@ -314,6 +316,7 @@ function renderNav() {
 
 function selectTab(k) {
   if (mapEditor) { mapEditor.destroy(); mapEditor = null; }
+  if (uiTabCleanup) { uiTabCleanup(); uiTabCleanup = null; }
   curTab = k; renderNav();
   clear(mainEl); clear(sideEl);
   mainEl.className = "ed-main";
@@ -324,7 +327,7 @@ function selectTab(k) {
   // 用显式引用而非 querySelectorAll 下标（页内 split 也会产生 .ed-resizer，
   // 按下标取会错位）。
   if (sideRszEl) sideRszEl.style.display = (needSide && !isNarrow()) ? "" : "none";
-  ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, ais: tabAis, buffs: tabBuffs, items: tabItems, skills: tabSkills, effects: tabEffects, affixes: tabAffixes, config: tabConfig, game: tabGame, pmg: tabPmg, assets: tabAssets, audio: tabAudio })[k]();
+  ({ maps: tabMaps, decor: tabDecor, scripts: tabScripts, npcs: tabNpcs, ais: tabAis, buffs: tabBuffs, items: tabItems, skills: tabSkills, effects: tabEffects, affixes: tabAffixes, config: tabConfig, game: tabGame, pmg: tabPmg, assets: tabAssets, audio: tabAudio, ui: tabUi })[k]();
 }
 
 // ---------- 地图 ----------
@@ -885,6 +888,19 @@ const AFFIX_SCHEMA = [
   { k: "mods.hit", label: "攻速+", type: "number" },
   { k: "mods.spd", label: "速度+", type: "number" },
 ];
+// ---------- 界面（HUD / 背包 / 商店等元件的可视化布局） ----------
+let uiTabCleanup = null;
+function tabUi() {
+  mainEl.append(h("div", { class: "ed-hint" },
+    "这里的元件就是运行时的状态栏、快捷栏、背包、商店等界面。改动只写入内容包，"
+    + "多人游戏与默认版本不受影响。坐标是相对锚点的偏移，所以右下角元件用负值向左上。"));
+  // 直接在 ED.content.ui 上改（与其它域一样走 diffContent 生成补丁）
+  if (!ED.content.ui) ED.content.ui = normalizeUi(null);
+  const host = h("div", { style: "flex:1 1 auto;min-height:0;display:flex" });
+  mainEl.append(host);
+  uiTabCleanup = mountUiTab(host, ED.content.ui, { onChange: () => mark() });
+}
+
 function tabAffixes() {
   const list = ED.content.affixes || (ED.content.affixes = []);
   listTab("词缀（" + list.length + "）", list, AFFIX_SCHEMA,

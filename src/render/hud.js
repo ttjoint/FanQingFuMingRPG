@@ -10,6 +10,7 @@ import { getImg } from "../core/assets.js";
 import { itemByName, skillByName } from "../core/registry.js";
 import { resolvePos, slotRect } from "../content/ui.js";
 import { getRuntime } from "../runtime/context.js";
+import { installUiLayout } from "../core/layout.js";
 
 // 取当前 UI 配置。内容缺失时返回 null（不画任何元件），
 // 这比“退回一份硬编码”更容易发现装配问题。
@@ -45,6 +46,9 @@ function bindValue(bind, st) {
 
 export function drawHUD() {
   const ui = uiOf();
+  // 把同一份配置交给命中测试（core/layout.js 的 slotAt/insideShop），
+  // 保证“画在哪”和“点在哪”永远同源——否则改了布局就会出现点不中的格子。
+  installUiLayout(ui);
   const comps = sortedComps(ui);
   for (const c of comps) {
     const p = resolvePos(c, VW, VH);

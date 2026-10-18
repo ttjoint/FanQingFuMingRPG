@@ -3,12 +3,16 @@ import { G } from "../core/state.js";
 import { ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { itemByName } from "../core/registry.js";
-import { SHOP_BOX, SHOP_COLS, SHOP_ROWS, shopSlotPos, shopCloseBtn } from "../core/layout.js";
+import { SHOP_BOX, SHOP_COLS, SHOP_ROWS, shopSlotPos, shopCloseBtn, uiRect, uiSlotRect, uiComp } from "../core/layout.js";
 import { drawItemSlot } from "./hud.js";
 
 export function drawShop() {
   if (!G.shop) return;
-  const B = SHOP_BOX;
+  // 面板矩形优先取可编辑 UI 配置（在编辑器里挪动商店 → 这里跟着走）；缺失才回退旧常量。
+  const B = uiRect("shop.panel") || SHOP_BOX;
+  const gridC = uiComp("shop.grid");
+  const cols = gridC ? gridC.cols : SHOP_COLS;
+  const rows = gridC ? gridC.rows : SHOP_ROWS;
   const P = getImg("assets/ui/packpanel.png");
   if (P) ctx.drawImage(P, B.x, B.y, B.w, B.h);
   else {
@@ -22,9 +26,9 @@ export function drawShop() {
   ctx.textAlign = "right"; ctx.fillText("银两 " + G.stats.money, B.x + B.w - 12, B.y + 22); ctx.textAlign = "left";
 
   // 商品格（与 packpanel 画的格子对齐；图标走与背包同一个 drawItemSlot，保证尺寸/内边距一致）
-  const total = SHOP_COLS * SHOP_ROWS;
+  const total = cols * rows;
   for (let i = 0; i < total; i++) {
-    const p = shopSlotPos(i);
+    const p = uiSlotRect("shop.grid", i) || shopSlotPos(i);
     if (i >= G.shop.goods.length) continue;
     const name = G.shop.goods[i];
     const it = itemByName(name);
@@ -39,7 +43,7 @@ export function drawShop() {
   }
 
   // 底部正中牌匾 = 关闭按钮
-  const c = shopCloseBtn();
+  const c = uiRect("shop.close") || shopCloseBtn();
   const cb = getImg("assets/ui/closebtn.png");
   if (cb) ctx.drawImage(cb, c.x, c.y, c.w, c.h);
   else {

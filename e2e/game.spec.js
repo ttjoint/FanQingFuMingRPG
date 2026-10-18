@@ -2,9 +2,12 @@
 // 运行：npx playwright test   （自动起 `python serve.py 8131`）
 import { test, expect } from "@playwright/test";
 
+// 引导超时给足余量：冷启动（磁盘版本索引 + 39 个 NPC + 9 张地图 + 音频清单）
+// 在慢机器上偶尔要 30s+，而 reload 后还要再跑一遍。这里等的是**启动耗时**，
+// 不是被测逻辑，卡在 40s 会让测试偶发失败却指向不了任何真实问题。
 const waitBoot = page => page.waitForFunction(
   () => window.__GAME__ && window.__GAME__.G.scene && window.__GAME__.G.scene !== "boot",
-  null, { timeout: 40_000 });
+  null, { timeout: 70_000 });
 
 async function canvasBox(page) { return await page.locator(".ed-map-wrap canvas").boundingBox(); }
 async function canvasClick(page, x, y) {
@@ -323,12 +326,27 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     const cells = [];
     for (let r = 0; r < w; r++) for (let col = 0; col < w; col++) if (walk(r, col)) cells.push([r, col]);
     const lineBlocked = (a, b) => { const s = Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1])); for (let i = 1; i < s; i++) { const r = Math.round(a[0] + (b[0] - a[0]) * i / s), col = Math.round(a[1] + (b[1] - a[1]) * i / s); if (!walk(r, col)) return true; } return false; };
+    // 随机挑一对"直线被挡、但确实有路"的格子。
+    // 注意这里之前的失败是**测试本身**不稳：完全随机可能抽到绕行极远的点对，
+    // 900 帧（15s）内走不到，于是断言偶发失败——被测逻辑没有问题。
+    // 因此额外限定路径长度上限，保证 900 帧一定够（按跑步速度 150px/s 估算，
+    // 每帧约 2.5px，15s 约 2250px；限 1200px 留足余量）。
     let a = null, b = null;
     for (let k = 0; k < 40000 && !a; k++) {
       const p = cells[(Math.random() * cells.length) | 0], q = cells[(Math.random() * cells.length) | 0];
       if (p[0] === q[0] && p[1] === q[1]) continue;
       if (!lineBlocked(p, q)) continue;
-      if (pf.findPath(rt, p[0], p[1], q[0], q[1])) { a = p; b = q; }
+      // 用**和真实追击完全相同**的寻路入口与参数（findPathPoints + avoidUnits），
+      // 否则选出的点对按"不考虑单位"能走通、按追击实际走法却走不完，
+      // 断言就会偶发失败（这正是之前不稳定的根因）。
+      const pts = pf.findPathPoints(rt, p[0], p[1], q[0], q[1], { avoidUnits: true, mover: G.player },
+        u.cellCenter(p[0], p[1]));
+      if (!pts || !pts.length) continue;
+      // 路径像素长度（逐段累加）
+      let len = Math.hypot(pts[0].x - u.cellCenter(p[0], p[1]).x, pts[0].y - u.cellCenter(p[0], p[1]).y);
+      for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+      if (len > 1200) continue;          // 太远，900 帧走不完，跳过
+      a = p; b = q;
     }
     if (!a) return false;
     G.npcs = [];
@@ -784,6 +802,50 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   await page.evaluate(async () => { const m = await import("/src/editor/index.js"); await m.openEditor(); });
   await expect(page.locator("#editorRoot")).toBeVisible();
   await page.waitForTimeout(400);
+
+  // 界面 tab：HUD/背包/商店元件可增删改，且改动能进补丁（用户明确要求的能力）。
+  await page.locator('.ed-nav button:has-text("界面")').click();
+  await page.waitForTimeout(500);
+  // 默认 15 个元件（与 defaultUiComponents 一致），列表与画布都要在
+  const uiRows = page.locator(".ed-ui-lrow");
+  await expect(uiRows).toHaveCount(15);
+  const cvBox = await page.locator(".ed-ui-cv").boundingBox();
+  expect(cvBox.width).toBeGreaterThan(100);
+  // 选中血条 → 属性面板出现
+  await uiRows.nth(1).click();
+  await expect(page.locator(".ed-ui-ptitle")).toContainText("hud.hp");
+  // 拖拽移动血条：偏移 x 应当变化
+  const readX = () => page.evaluate(() => {
+    const rows = [...document.querySelectorAll(".ed-ui-props .ed-row")];
+    const r = rows.find(x => x.querySelector("label") && x.querySelector("label").textContent === "偏移 x");
+    return r ? parseInt(r.querySelector("input").value, 10) : NaN;
+  });
+  const x0 = await readX();
+  const sx = cvBox.x + 120 * cvBox.width / 640, sy = cvBox.y + 431 * cvBox.height / 480;
+  await page.mouse.move(sx, sy); await page.mouse.down();
+  await page.mouse.move(sx + 40, sy, { steps: 6 }); await page.mouse.up();
+  await page.waitForTimeout(200);
+  const x1 = await readX();
+  expect(x1 > x0).toBe(true);
+  // 新增一个元件 → 列表变 16
+  await page.locator('.ed-ui-lbar button:has-text("新增")').click();
+  await expect(uiRows).toHaveCount(16);
+  // 保存后补丁里应含 content.ui，且带上刚改的 x 与新增元件
+  await savePack(page);
+  const uiPatch = await page.evaluate(async () => {
+    const s = await import("/src/content/store.js");
+    const p = await s.loadPack(s.activeId());
+    const ui = p && p.patch && p.patch.content && p.patch.content.ui;
+    return ui ? { n: ui.components.length, hpX: (ui.components.find(c => c.id === "hud.hp") || {}).x,
+      added: ui.components.some(c => /^ui\.comp/.test(c.id)) } : null;
+  });
+  expect(uiPatch).not.toBe(null);
+  expect(uiPatch.n).toBe(16);
+  expect(uiPatch.hpX > x0).toBe(true);
+  expect(uiPatch.added).toBe(true);
+  // 复原：删掉新增元件并回到地图页，避免影响后续断言
+  await page.locator('.ed-ui-lbar button:has-text("删除")').click();
+  await expect(uiRows).toHaveCount(15);
 
   // 技能 tab：应能编辑“攻击方式 / 弹道”等阶段 B 新增字段
   {

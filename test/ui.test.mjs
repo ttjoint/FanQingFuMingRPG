@@ -2,6 +2,7 @@
 // 重点守一条：**默认配置的坐标必须与改造前的硬编码逐像素一致**，
 // 否则“把布局搬进数据”这一步就引入了视觉回归。
 import { strict as assert } from "assert";
+import fs from "fs";
 import {
   normalizeUi, normalizeUiComponent, uiComponent, resolvePos,
   hitComponent, hitTop, slotRect, UI_KINDS, UI_ANCHORS,
@@ -217,4 +218,40 @@ export function uiPatchRoundTrip() {
   // 未改动时不产生 ui 补丁（避免每次保存都重写整表）
   const noop = diffContent(base, JSON.parse(JSON.stringify(base)));
   assert.equal(noop.content && noop.content.ui, undefined);
+}
+
+// ---- 命中测试与绘制"同源"的不变量 ----
+// core/layout.js 不能 import content/（架构分层），它通过 installUiLayout 注入配置，
+// 并**自己复制了一份** compPos/compSlot 的几何计算。两份实现必须逐点一致，
+// 否则"画在哪"和"点在哪"会错位。这里直接对照 content/ui.js 的权威实现。
+//
+// 注意：这里不 import core/layout.js —— 它经由 core/constants.js 依赖 DOM canvas，
+// 在 Node 里无法加载。真正端到端的点选验证放在 e2e（浏览器里跑）。
+export function resolvePosIsStableAcrossAnchors() {
+  // content/ui.js 的 resolvePos 是权威实现；core/layout.js 里的 compPos 是它的镜像。
+  // 这条用例固化锚点语义，任何人改动都必须同步改两处（否则 e2e 会报错位）。
+  const c = { w: 200, h: 300, x: 8, y: 60 };
+  assert.deepEqual(resolvePos({ ...c, anchor: "topLeft" }, VW, VH), { x: 8, y: 60 });
+  assert.deepEqual(resolvePos({ ...c, anchor: "bottomLeft" }, VW, VH), { x: 8, y: 480 - 300 + 60 });
+  // slotgrid 格子：首格 = 面板左上 + (padX, padY)，之后按 pitch 平移
+  const g = normalizeUiComponent({
+    id: "g", kind: "slotgrid", anchor: "topLeft", x: 8, y: 60,
+    cols: 5, rows: 5, pitch: 40, padX: 8, padY: 28, slotW: 38, slotH: 38,
+  });
+  assert.deepEqual(slotRect(g, 0, VW, VH), { x: 16, y: 88, w: 38, h: 38 });
+  assert.deepEqual(slotRect(g, 1, VW, VH), { x: 56, y: 88, w: 38, h: 38 });
+  assert.deepEqual(slotRect(g, 5, VW, VH), { x: 16, y: 128, w: 38, h: 38 });
+}
+
+export function layoutConstantsMatchCoreLayout() {
+  // defaultUiComponents 里的数字来自 core/layout.js。这里通过**读源码文本**
+  // 校验关键常量没有单边漂移（不 import，避免 DOM 依赖）。
+  // 任何一边改了数字，这条测试立刻失败，提醒同步。
+  const src = fs.readFileSync(new URL("../src/core/layout.js", import.meta.url), "utf8");
+  const m = DEFAULT_UI_METRICS;
+  assert.ok(src.includes("HOTBAR_X0 = " + m.HOTBAR.x0), "快捷栏首格 x 与 core/layout.js 不一致");
+  assert.ok(src.includes("HOTBAR_DX = " + m.HOTBAR.dx), "快捷栏间距与 core/layout.js 不一致");
+  assert.ok(src.includes("HOTBAR_Y = " + m.HOTBAR.y), "快捷栏 y 与 core/layout.js 不一致");
+  assert.ok(src.includes("x: 220, y: 60, w: 200, h: 300"), "背包面板与 core/layout.js 不一致");
+  assert.ok(src.includes("x: 8, y: 60, w: 200, h: 300"), "商店面板与 core/layout.js 不一致");
 }

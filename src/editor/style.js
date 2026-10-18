@@ -224,6 +224,25 @@ textarea[data-grow]{max-height:420px;overflow:auto}
 
 /* ================= 其它 ================= */
 .ed-hint{color:#7f8792;font-size:11px;margin-top:6px;line-height:1.5}
+/* 界面页：左元件列表 | 中画布 | 右属性 */
+.ed-ui-wrap{display:flex;flex:1 1 auto;min-height:0;gap:8px;width:100%}
+.ed-ui-list{flex:0 0 200px;min-width:140px;display:flex;flex-direction:column;min-height:0;border:1px solid #2b323d;border-radius:6px;background:#12161d}
+.ed-ui-ltitle{font-size:11px;color:#9aa4b2;padding:7px 9px;border-bottom:1px solid #232a34}
+.ed-ui-lrow{display:flex;gap:6px;align-items:center;padding:5px 9px;cursor:pointer;font-size:11px;color:#c8d2e0;border-left:2px solid transparent}
+.ed-ui-lrow:hover{background:#1a1f28}
+.ed-ui-lrow.on{background:#1d3350;border-left-color:#4ea1ff;color:#eaf2ff}
+.ed-ui-lrow.off{opacity:.42}
+.ed-ui-lkind{flex:0 0 44px;color:#7f8792;font-size:10px}
+.ed-ui-lrow.on .ed-ui-lkind{color:#9ec8ff}
+.ed-ui-lid{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ed-ui-lbar{display:flex;gap:6px;padding:8px;border-top:1px solid #232a34;margin-top:auto}
+.ed-ui-canvas{flex:1 1 auto;min-width:0;min-height:0;overflow:hidden;position:relative;border:1px solid #2b323d;border-radius:6px;background:#0e1116;display:flex;flex-direction:column;align-items:center}
+.ed-ui-cv{display:block;cursor:crosshair;outline:none;margin-top:12px}
+.ed-ui-tip{font-size:10px;color:#6b7382;padding:6px 8px;text-align:center}
+.ed-ui-props{flex:0 0 300px;min-width:200px;overflow:auto;border:1px solid #2b323d;border-radius:6px;background:#12161d;padding:8px}
+.ed-ui-ptitle{font-size:11px;color:#9ec8ff;padding:2px 2px 8px;border-bottom:1px solid #232a34;margin-bottom:8px;word-break:break-all}
+@media (max-width:900px){.ed-ui-wrap{flex-direction:column}.ed-ui-list,.ed-ui-props{flex:0 0 auto;max-height:30%}}
+
 /* 布局分两层，与 NPC/物品/Buff 列表页保持一致：
    ① .ed-grid 是**分组卡片**的容器 → 卡片本身横向排布（宽了就自动换行）；
    ② .ed-group 卡片内部 → 字段纵向单行排列（label 在左、控件在右）。

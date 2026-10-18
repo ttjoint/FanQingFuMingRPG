@@ -34,22 +34,26 @@ D2 的 build 多样性全部建立在这套正交体系上。
 
 目标：把“界面由谁画、画在哪、显示什么”变成**内容数据**，可在编辑器里可视化拖拽。
 
-- [ ] `content/schema.js`：新增 `ui` 内容域（`normalizeUi` / 校验）
+- [x] `content/ui.js`：新增 `ui` 内容域（`normalizeUi` / `normalizeUiComponent` / 校验）
+      组件模型：`{ id, kind, anchor, x, y, w, h, img?, bind?, z, visible }`
       组件模型：`{ id, kind, anchor, x, y, w, h, img?, visibleWhen?, bind?, z }`
       - `kind`：`bar`(血/精/经) / `slotgrid`(快捷栏/背包/商店) / `button` / `label` / `panel` / `image`
       - `anchor`：`topLeft` / `bottomLeft` / `topRight` / `bottomRight` / `center`（决定随窗口锚定）
       - `bind`：绑定运行时数据（`stats.hp`、`inventory.pack`…）
-- [ ] `core/layout.js` 改为**消费 UI 配置**，保留硬编码值作为 `defaultUi()`
-      —— 这样“默认版”的行为与今天逐像素一致（回归可验证）
-- [ ] `render/hud.js`、`panels.js`、`shop-ui.js` 改为按配置遍历绘制
-- [ ] `input`：命中测试同样走配置（画与点共用同一份坐标，避免对不上）
-- [ ] 编辑器新增「界面」标签页：
+- [x] `content/uiDefault.js`：`defaultUi()` 逐像素复刻旧硬编码（15 个元件）
+      —— “默认版”的行为与改造前逐像素一致（单测逐项比对 core/layout.js 的常量）
+- [x] `render/hud.js`、`render/shop-ui.js` 改为按配置遍历绘制
+- [x] `input`：`core/layout.js` 的 `slotAt`/`insideShop`/`insideShopClose` 走注入的配置
+      （`installUiLayout`，由 `drawHUD` 每帧喂同一份），画与点同源
+- [ ] `render/panels.js`（装备/技能说明等次级面板）尚未收进配置
+- [x] 编辑器新增「界面」标签页（`editor/ui-tab.js`）：
       - 画布预览（复用 iso 地图编辑器的缩放/拖拽骨架）
       - 组件列表（增/删/重命名/显隐）
       - 属性面板（kind / anchor / 坐标 / 尺寸 / 图片 / 绑定 / z 序）
       - 拖拽移动 + 手柄缩放
-      - 撤销/重做接入 `editor/history.js`
-- [ ] 单测：`defaultUi()` 与原硬编码常量逐项相等；配置往返无损
+      - ⬜ 撤销/重做接入 `editor/history.js`（当前靠保存前的补丁 diff，尚未接快照栈）
+- [x] 单测：`defaultUi()` 与原硬编码常量逐项相等；配置往返无损（`test/ui.test.mjs` 18 例）
+- [x] E2E：HUD 像素回归 + 界面页拖拽/增删/保存进补丁（`e2e/game.spec.js`）
 
 ## P2 · 战利品经济旋钮
 

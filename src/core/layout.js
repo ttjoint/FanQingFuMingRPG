@@ -1,7 +1,47 @@
 // UI 布局常量与命中测试（纯几何 + 少量状态读取）。
 // input 与 render 都依赖这里，保证“画在哪”和“点在哪”使用同一套坐标。
+//
+// 布局来源有两条路：
+//   1) 可编辑 UI 配置（content/ui 的 ui 域）——通过 installUiLayout() 注入。
+//      命中测试优先使用它，于是“在编辑器里挪动背包面板”后点击区域会跟着走。
+//   2) 下面这些硬编码常量——仅作**兜底**（UI 未注入时，例如早期引导画面）。
+// 两份不能同时生效，否则画和点会错位；注入后以配置为准。
 import { G } from "./state.js";
 import { VW, VH } from "./constants.js";
+
+// ---- 可编辑 UI 布局注入 ----
+// 存的是 content/ui.js 已规整过的 { components: [...] }。
+let _ui = null;
+/** 注入 UI 配置（每帧从 render 侧读取，无需重新装配）。 */
+export function installUiLayout(ui) { _ui = ui || null; }
+/** 当前生效的 UI 配置（可能为 null）。 */
+export function currentUiLayout() { return _ui; }
+
+// 按 id 取元件（未注入则 null）。
+function comp(id) {
+  if (!_ui || !Array.isArray(_ui.components)) return null;
+  return _ui.components.find(c => c.id === id && c.visible !== false) || null;
+}
+
+// 元件左上角的屏幕坐标（锚点规则与 content/ui.js 的 resolvePos 一致）。
+// 这里重复实现一份（而不是 import）是因为 core/ 不能依赖 content/；
+// 一致性由 test/ui.test.mjs 里的对照用例保证。
+function compPos(c) {
+  const a = c.anchor || "topLeft";
+  let ox = 0, oy = 0;
+  if (a === "topRight") { ox = VW - c.w; oy = 0; }
+  else if (a === "bottomLeft") { ox = 0; oy = VH - c.h; }
+  else if (a === "bottomRight") { ox = VW - c.w; oy = VH - c.h; }
+  else if (a === "center") { ox = (VW - c.w) / 2; oy = (VH - c.h) / 2; }
+  return { x: Math.round(ox + c.x), y: Math.round(oy + c.y) };
+}
+
+// 元件第 i 格（slotgrid）的屏幕矩形。
+function compSlot(c, i) {
+  const p = compPos(c);
+  const col = i % c.cols, row = Math.floor(i / c.cols);
+  return { x: p.x + c.padX + col * c.pitch, y: p.y + c.padY + row * c.pitch, w: c.slotW, h: c.slotH };
+}
 
 // ---- 标题菜单 ----
 // 原版 mainmenu.ini 的按钮坐标（按钮图 80×18）。
@@ -50,12 +90,71 @@ export function fnButtonAt(sx, sy) {
   return null;
 }
 
-export function insideShop(x, y) { return x >= SHOP_BOX.x && x < SHOP_BOX.x + SHOP_BOX.w && y >= SHOP_BOX.y && y < SHOP_BOX.y + SHOP_BOX.h; }
-export function insideShopClose(x, y) { const b = shopCloseBtn(); return x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h; }
+// 公开给 render/ 使用的工具：取元件的屏幕矩形与格子矩形。
+// 返回 null 表示“配置里没有这个元件”（调用方自行回退）。
+export function uiRect(id) {
+  const c = comp(id);
+  if (!c) return null;
+  const p = compPos(c);
+  return { x: p.x, y: p.y, w: c.w, h: c.h };
+}
+export function uiSlotRect(id, i) {
+  const c = comp(id);
+  if (!c) return null;
+  const r = compSlot(c, i);
+  return r;
+}
+export function uiComp(id) { return comp(id); }
+
+// 商店面板矩形：优先取可编辑配置里的 shop.panel 元件。
+function shopRect() {
+  const c = comp("shop.panel");
+  if (c) { const p = compPos(c); return { x: p.x, y: p.y, w: c.w, h: c.h }; }
+  return SHOP_BOX;
+}
+export function insideShop(x, y) { const b = shopRect(); return x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h; }
+export function insideShopClose(x, y) {
+  const c = comp("shop.close");
+  const b = c ? (() => { const p = compPos(c); return { x: p.x, y: p.y, w: c.w, h: c.h }; })() : shopCloseBtn();
+  return x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h;
+}
 export function insideDialog(x, y) { return x >= 90 && x < 460 && y >= 15 && y < 365; }   // 头像 + dlgpanel
 
 // 返回鼠标下的格子（hotbar / equip / pack / shop），无则 null
+const EQUIP_KEYS = ["Shi1", "Wu", "Jia", "Shi2"];
+
+// 在某个 slotgrid 元件里命中第几格（越界/未命中返回 -1）。
+function hitGrid(c, sx, sy, count) {
+  const total = Math.min(count, c.cols * c.rows);
+  for (let i = 0; i < total; i++) {
+    const r = compSlot(c, i);
+    if (sx >= r.x && sx < r.x + r.w && sy >= r.y && sy < r.y + r.h) return i;
+  }
+  return -1;
+}
+
 export function slotAt(sx, sy) {
+  // ---- 优先：可编辑 UI 配置 ----
+  if (_ui) {
+    if (G.shop) {
+      const g = comp("shop.grid");
+      if (g && insideShop(sx, sy)) {
+        const i = hitGrid(g, sx, sy, G.shop.goods.length);
+        if (i >= 0) return { kind: "shop", key: i };
+      }
+    }
+    const hb = comp("hud.hotbar");
+    if (hb) { const i = hitGrid(hb, sx, sy, 9); if (i >= 0) return { kind: "hotbar", key: i }; }
+    const eq = comp("hud.equip");
+    if (eq) { const i = hitGrid(eq, sx, sy, EQUIP_KEYS.length); if (i >= 0) return { kind: "equip", key: EQUIP_KEYS[i] }; }
+    if (G.packOpen) {
+      const pk = comp("pack.grid");
+      if (pk) { const i = hitGrid(pk, sx, sy, G.pack.length); if (i >= 0) return { kind: "pack", key: i }; }
+    }
+    return null;
+  }
+
+  // ---- 兜底：硬编码（UI 未注入时）----
   const Y = VH - 100;
   if (G.shop) {
     const total = SHOP_COLS * SHOP_ROWS;
