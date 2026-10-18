@@ -62,9 +62,20 @@ D2 的 build 多样性全部建立在这套正交体系上。
 
 现状：`engine/lootTable.js` + 词缀 roll 已不错，但缺缩放。
 
-- [ ] `monsterLevel` / `dropRate` / `players`（人数加成）字段
-- [ ] `engine/lootTable.js`：掉落按等级重映射 + 品质权重曲线
-- [ ] 编辑器：NPC 掉落表 + 全局掉落旋钮
+- [x] `engine/lootScale.js`（新增）：`monsterLevel` / `dropRate` / `players` 归一化与缩放
+      - `scaleChance`：几率 × dropRate × √players，夹到 [0,100]
+      - `rarityWeights`：等级每 N 级把权重往上挪一档（总量守恒）
+      - `rollRarity` / `pickWeighted` / `rollScaled`
+- [x] `engine/lootTable.js`：`rollDrop/rollDrops/makeDropInstance` 接受可选 `scale`
+      - 不传 scale 时行为与改造前完全一致（向后兼容硬约束，有单测钉住）
+      - 稀有度优先级：掉落项 > 模板 > 按等级 roll > common
+- [x] `config.js` economy 加 `dropRate` / `players` / `rarityLevelStep` / `rarityStrength`
+- [x] `systems/combat.js` 击杀时按 NPC level + config.economy 组装 scale
+- [x] 编辑器：NPC 掉落表扩展（几率% / 数量区间 min~max / 品质下拉）
+- [x] 编辑器：「升级数值」页经济段加 4 个全局掉落旋钮（带说明）
+- [x] 真内容补齐：野猴/山贼/山贼头目 配了 drops（此前**没有任何 NPC 有 drops**，
+      整条掉落管线在正式内容里从未被触发过）
+- [x] 单测 `test/lootScale.test.mjs` 17 例；E2E 验证 dropRate/players/0 三个旋钮实际生效
 
 ## P3 · 技能资源与冷却建模
 

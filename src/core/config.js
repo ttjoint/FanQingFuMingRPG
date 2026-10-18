@@ -14,7 +14,13 @@ export const DEFAULT_CONFIG = {
             // 抗性上限（百分数）：超过此值的抗性不再生效，除非内容显式抬高。
             // 抗性 >=100 仍为完全免疫（优先级高于此上限，见 engine/damage.js）。
             maxResist: 75 },
-  economy: { sellRate: 0.5 },
+  // 经济与掉落旋钮。
+  // - sellRate：卖价系数。
+  // - dropRate：全局掉落率倍率（1=原样，0.5=减半，2=翻倍）。
+  // - players ：人数（暗黑2 风格），掉落几率 × sqrt(players)。
+  // - rarityLevelStep / rarityStrength：怪物等级每 N 级把稀有度权重往上挪一档，
+  //   每次挪「当前权重 × strength」。曲线见 engine/lootScale.js。
+  economy: { sellRate: 0.5, dropRate: 1, players: 1, rarityLevelStep: 5, rarityStrength: 0.5 },
   inventory: { packItem: "包裹", packSize: 25 },
   // 掉落物：存在时长 / 散布 / 拾取与保护 / 地面堆叠合并半径。
   items: { dropTtl: 0, dropScatter: 22, pickupRadius: 20, pickupDelay: 0, stackRadius: 18, maxEnhance: 10, enhancePriceBase: 50, enhancePriceMul: 1.6, socketFailChance: 0, durabilityLossOnHit: 0.5 },

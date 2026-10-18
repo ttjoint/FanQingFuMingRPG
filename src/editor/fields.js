@@ -58,22 +58,66 @@ function valOf(f, obj) {
 }
 
 // 掉落物品编辑器：数组 [{name,count}]，物品名下拉取自 f.items。
+// 稀有度选项：留空 = 跟随怪物等级曲线（engine/lootScale.js），
+// 显式指定则固定该品质（剧情/首领固定掉落用得上）。
+const DROP_RARITY_OPTS = [
+  ["", "跟随等级"],
+  ["common", "普通"],
+  ["magic", "魔法"],
+  ["rare", "稀有"],
+  ["unique", "暗金"],
+];
+
 export function renderDrops(host, obj, f, onChange) {
   const arr = Array.isArray(obj[f.k]) ? obj[f.k] : (obj[f.k] = []);
+  // 每条掉落一行：物品 | 几率% | 数量 min~max | 品质 | 删
+  // 数量用 min/max 表达（旧数据只有 count，读出来当 min=max 显示）。
+  // 几率默认 100，品质默认「跟随等级」——都是中性值，不改动既有掉落。
+  const numInput = (val, w, onChangeVal, min) => {
+    const inp = h("input", { type: "number", value: val, style: "width:" + w + "px", min: min == null ? 0 : min });
+    inp.oninput = () => { onChangeVal(Number(inp.value)); onChange && onChange(f); };
+    return inp;
+  };
   const redraw = () => {
     clear(host);
+    // 表头，便于对齐阅读
+    host.append(h("div", { class: "ed-row ed-drops-head" },
+      h("span", { style: "flex:1" }, "物品"),
+      h("span", { style: "width:56px" }, "几率%"),
+      h("span", { style: "width:56px" }, "最少"),
+      h("span", { style: "width:56px" }, "最多"),
+      h("span", { style: "width:78px" }, "品质"),
+      h("span", { style: "width:34px" }, ""),
+    ));
     arr.forEach((d, i) => {
       const sel = h("select", { onchange: () => { d.name = sel.value; onChange && onChange(f); } });
       const names = f.items || [];
       for (const nm of names) sel.append(h("option", { value: nm }, nm));
       if (d.name && !names.includes(d.name)) sel.append(h("option", { value: d.name }, d.name + "（无此物品）"));
       sel.value = d.name || names[0] || "";
-      const cnt = h("input", { type: "number", value: d.count || 1, style: "width:56px", min: 1 });
-      cnt.oninput = () => { d.count = Math.max(1, Number(cnt.value) || 1); onChange && onChange(f); };
-      host.append(h("div", { class: "ed-row" }, sel, cnt,
+      sel.style.flex = "1"; sel.style.minWidth = "80px";
+
+      const chance = numInput(d.chance == null ? 100 : d.chance, 52, v => { d.chance = v; });
+      // 数量区间：没有 min/max 时用 count 兜底
+      const minV = d.min != null ? d.min : (d.count != null ? d.count : 1);
+      const maxV = d.max != null ? d.max : minV;
+      const mn = numInput(minV, 52, v => { d.min = Math.max(1, v | 0); if (d.max == null) d.max = d.min; }, 1);
+      const mx = numInput(maxV, 52, v => { d.max = Math.max(d.min || 1, v | 0); }, 1);
+
+      const rar = h("select", { style: "width:74px", onchange: () => { d.rarity = rar.value || null; onChange && onChange(f); } });
+      for (const [v, lab] of DROP_RARITY_OPTS) rar.append(h("option", { value: v }, lab));
+      rar.value = d.rarity || "";
+
+      host.append(h("div", { class: "ed-row" }, sel, chance, mn, mx, rar,
         h("button", { class: "ed-btn danger", onclick: () => { arr.splice(i, 1); onChange && onChange(f); redraw(); } }, "删")));
     });
-    host.append(h("button", { class: "ed-btn", onclick: () => { arr.push({ name: (f.items && f.items[0]) || "", count: 1 }); onChange && onChange(f); redraw(); } }, "＋ 添加掉落"));
+    host.append(h("button", {
+      class: "ed-btn",
+      onclick: () => {
+        arr.push({ name: (f.items && f.items[0]) || "", chance: 100, min: 1, max: 1, count: 1 });
+        onChange && onChange(f); redraw();
+      },
+    }, "＋ 添加掉落"));
   };
   redraw();
 }

@@ -4,7 +4,7 @@
 export const VW = 640, VH = 480;
 
 // 版本标记：每次改动算法可改此串，用来确认浏览器是否真的加载到新代码（控制台会打印）。
-export const BUILD = "2026-10-20-ui-editor-undo";
+export const BUILD = "2026-10-21-loot-scale";
 
 export const cv = /** @type {HTMLCanvasElement} */ (document.getElementById("cv"));
 export const ctx = cv.getContext("2d");

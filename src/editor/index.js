@@ -990,8 +990,16 @@ function tabConfig() {
     { k: "walkSpeed", label: "走路速度(像素/秒)", type: "number" }, { k: "runSpeed", label: "奔跑速度(像素/秒)", type: "number" },
   ]);
 
-  sec("经济", "economy", [
+  sec("经济与掉落", "economy", [
     { k: "sellRate", label: "卖出回收比例", type: "number", step: 0.05 },
+    { k: "dropRate", label: "全局掉落率倍率", type: "number", step: 0.1,
+      hint: "1 = 原样；0 = 完全不掉；2 = 翻倍。作用于所有 NPC 掉落几率。" },
+    { k: "players", label: "人数加成", type: "number", step: 1,
+      hint: "掉落几率 × √人数：4 人 = 2 倍。组队有收益但不会线性通胀。" },
+    { k: "rarityLevelStep", label: "品质提升每 N 级", type: "number", step: 1,
+      hint: "怪物等级每高这么多级，稀有度权重往上挪一档（越高越容易掉好货）。" },
+    { k: "rarityStrength", label: "品质提升力度(0~1)", type: "number", step: 0.05,
+      hint: "每档挪动「当前权重 × 该比例」。0 = 等级不影响品质。" },
   ]);
 
   sec("背包", "inventory", [

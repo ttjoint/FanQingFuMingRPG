@@ -326,9 +326,21 @@ export function killNPC(ctx, n) {
   addExp(G, n.exp);
   G.stats.honor += 1;
   // 掉落由数据驱动（npcs.json 的 drops 字段）。经掉落表 roll，支持几率/数量区间/词缀。
+  // 缩放旋钮来自 config.economy（dropRate/players）+ NPC 自身 level，见 engine/lootScale.js。
   const defs = {};
   for (const it of (A.items || [])) defs[it.name] = it;
-  for (const e of rollDrops(n.drops || [], defs, null, A.affixes || [])) dropGround(G, e, n.x, n.y);
+  const eco = (ctx && ctx.config && ctx.config.economy) || {};
+  const scale = {
+    monsterLevel: n.level || 1,
+    dropRate: eco.dropRate == null ? 1 : eco.dropRate,
+    players: eco.players == null ? 1 : eco.players,
+    levelStep: eco.rarityLevelStep == null ? 5 : eco.rarityLevelStep,
+    strength: eco.rarityStrength == null ? 0.5 : eco.rarityStrength,
+  };
+  // 掉率为 0 时直接跳过 roll（省掉无意义的随机与实例构造）。
+  if (scale.dropRate > 0) {
+    for (const e of rollDrops(n.drops || [], defs, null, A.affixes || [], scale)) dropGround(G, e, n.x, n.y);
+  }
   for (const k in G.missions) { const m = G.missions[k];
     if (m.type === 1 && m.target === n.name && m.state === 4) { m.got++; if (m.got >= m.need) m.state = 1; } }
   const ds = n.name + "_死.gsp";

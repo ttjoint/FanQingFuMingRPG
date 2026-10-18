@@ -797,6 +797,38 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     return Array.isArray(a) && a.length > 0 && shop.shopGoods(g, plain) === null && !shop.hasGoods(plain);
   })).toBe(true);
 
+  // ---- 掉落缩放（P2）----
+  // 真内容里现在有带 drops 的怪（野猴/山贼/山贼头目），这里用首领的 drops
+  // 验证三个旋钮真的生效：dropRate 倍率、players 人数加成、dropRate=0 全关。
+  // 用固定种子的 LCG，保证各次调用消耗的随机序列一致、可比较。
+  const lootScale = await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const { rollDrops } = await import("/src/engine/lootTable.js");
+    const rt = getRuntime(), A = rt.assets;
+    const defs = {}; for (const it of (A.items || [])) defs[it.name] = it;
+    const boss = A.npcsData.find(n => n.drops && n.drops.length >= 3);
+    const lcg = () => { let seed = 1; return () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648); };
+    const run = (scale) => {
+      const rnd = lcg(); let items = 0;
+      for (let i = 0; i < 3000; i++) items += rollDrops(boss.drops, defs, rnd, A.affixes || [], scale).length;
+      return items;
+    };
+    const lv = boss.level;
+    return {
+      hasDrops: (A.npcsData || []).filter(n => n.drops && n.drops.length).length,
+      base: run({ monsterLevel: lv, dropRate: 1, players: 1 }),
+      half: run({ monsterLevel: lv, dropRate: 0.5, players: 1 }),
+      quad: run({ monsterLevel: lv, dropRate: 1, players: 4 }),
+      none: run({ monsterLevel: lv, dropRate: 0, players: 1 }),
+    };
+  });
+  // 内容里确实配了掉落（否则上面这些统计全是 0，测试等于没测）
+  expect(lootScale.hasDrops).toBeGreaterThanOrEqual(3);
+  expect(lootScale.base).toBeGreaterThan(0);
+  expect(lootScale.none).toBe(0);                       // 倍率 0 → 完全不掉
+  expect(lootScale.half).toBeLessThan(lootScale.base);  // 减半 → 明显变少
+  expect(lootScale.quad).toBeGreaterThan(lootScale.base); // 组队 → 变多
+
   // ---- 编辑器 ----
   await page.evaluate(() => { window.prompt = () => "PW版本"; window.confirm = () => true; });
   await page.evaluate(async () => { const m = await import("/src/editor/index.js"); await m.openEditor(); });
