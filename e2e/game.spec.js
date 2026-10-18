@@ -806,9 +806,9 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   // 界面 tab：HUD/背包/商店元件可增删改，且改动能进补丁（用户明确要求的能力）。
   await page.locator('.ed-nav button:has-text("界面")').click();
   await page.waitForTimeout(500);
-  // 默认 15 个元件（与 defaultUiComponents 一致），列表与画布都要在
+  // 默认 17 个元件（与 defaultUiComponents 一致），列表与画布都要在
   const uiRows = page.locator(".ed-ui-lrow");
-  await expect(uiRows).toHaveCount(15);
+  await expect(uiRows).toHaveCount(17);
   const cvBox = await page.locator(".ed-ui-cv").boundingBox();
   expect(cvBox.width).toBeGreaterThan(100);
   // 选中血条 → 属性面板出现
@@ -829,7 +829,34 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   expect(x1 > x0).toBe(true);
   // 新增一个元件 → 列表变 16
   await page.locator('.ed-ui-lbar button:has-text("新增")').click();
-  await expect(uiRows).toHaveCount(16);
+  await expect(uiRows).toHaveCount(18);
+  // 撤销 / 重做：新增两次 → 撤销两次回原数 → 重做一次；拖拽改动也能撤销回原值。
+  // 快照式历史按"一次操作一条"入栈（拖拽只在 mouseup 时记一条），
+  // 否则每个 mousemove 都推一条，撤销要点上百次。
+  const undoBtn = page.locator('.ed-ui-lbar button:has-text("撤销")');
+  const redoBtn = page.locator('.ed-ui-lbar button:has-text("重做")');
+  // 此时是 17（默认）+ 1（上面刚新增）= 18
+  await page.locator('.ed-ui-lbar button:has-text("新增")').click();
+  await page.locator('.ed-ui-lbar button:has-text("新增")').click();
+  await expect(uiRows).toHaveCount(20);
+  await undoBtn.click(); await expect(uiRows).toHaveCount(19);
+  await undoBtn.click(); await expect(uiRows).toHaveCount(18);
+  await redoBtn.click(); await expect(uiRows).toHaveCount(19);
+  // 拖拽 → 撤销回原值。
+  // 先按 id 显式选回 hud.hp：上面重做把新增元件也恢复了，它 z 更小、可能压在
+  // 血条上方，直接点画布会命中那个新元件。起点也要按**当前** x 算。
+  await page.locator('.ed-ui-lrow', { hasText: "hud.hp" }).click();
+  await expect(page.locator(".ed-ui-ptitle")).toContainText("hud.hp");
+  const beforeDrag = await readX();
+  const fromX = cvBox.x + (beforeDrag + 20) * cvBox.width / 640;
+  await page.mouse.move(fromX, sy); await page.mouse.down();
+  await page.mouse.move(fromX + 40, sy, { steps: 6 }); await page.mouse.up();
+  await page.waitForTimeout(200);
+  expect(await readX() > beforeDrag).toBe(true);
+  await undoBtn.click();
+  await page.waitForTimeout(200);
+  expect(await readX()).toBe(beforeDrag);
+
   // 保存后补丁里应含 content.ui，且带上刚改的 x 与新增元件
   await savePack(page);
   const uiPatch = await page.evaluate(async () => {
@@ -840,12 +867,35 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
       added: ui.components.some(c => /^ui\.comp/.test(c.id)) } : null;
   });
   expect(uiPatch).not.toBe(null);
-  expect(uiPatch.n).toBe(16);
+  expect(uiPatch.n).toBe(19);
   expect(uiPatch.hpX > x0).toBe(true);
   expect(uiPatch.added).toBe(true);
+  // 收敛进配置的居中弹窗：默认矩形必须与改造前逐像素一致（420×300@110,40 / 460×340@90,40），
+  // 且绘制真的用了配置（挪动后画到新位置而不是老位置）。
+  const panelGeo = await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const { installUiLayout, uiRect } = await import("/src/core/layout.js");
+    const { drawPanels } = await import("/src/render/panels.js");
+    const G = window.__GAME__.G, rt = getRuntime(), cv = document.getElementById("cv"), c = cv.getContext("2d");
+    installUiLayout(rt.content.ui);
+    const info = uiRect("info.panel"), save = uiRect("save.panel"), pack = uiRect("pack.panel");
+    // 打开属性面板并按配置绘制，取面板中心像素（洋红底 → 画到了就不是洋红）
+    G.panel = "attr";
+    c.fillStyle = "#ff00ff"; c.fillRect(0, 0, cv.width, cv.height); drawPanels();
+    const at = (x, y) => { const q = c.getImageData(x, y, 1, 1).data; return [q[0], q[1], q[2]]; };
+    const painted = at(info.x + info.w / 2, info.y + info.h / 2);
+    const magenta = (p) => p[0] === 255 && p[1] === 0 && p[2] === 255;
+    G.panel = null;
+    return { info, save, pack, paintedOk: !magenta(painted) };
+  });
+  expect(panelGeo.info).toEqual({ x: 110, y: 40, w: 420, h: 300 });
+  expect(panelGeo.save).toEqual({ x: 90, y: 40, w: 460, h: 340 });
+  expect(panelGeo.pack).toEqual({ x: 220, y: 60, w: 200, h: 300 });
+  expect(panelGeo.paintedOk).toBe(true);
+
   // 复原：删掉新增元件并回到地图页，避免影响后续断言
   await page.locator('.ed-ui-lbar button:has-text("删除")').click();
-  await expect(uiRows).toHaveCount(15);
+  await expect(uiRows).toHaveCount(18);
 
   // 技能 tab：应能编辑“攻击方式 / 弹道”等阶段 B 新增字段
   {

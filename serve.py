@@ -54,6 +54,14 @@ def _read_json(path):
         return json.load(f)
 
 
+def _invalidate_assets_cache(vid=None):
+    """素材清单缓存失效。vid 为 None 表示全清。"""
+    if vid is None:
+        _ASSETS_CACHE.clear()
+        return
+    _ASSETS_CACHE.pop(os.path.join(_version_dir(vid), "assets"), None)
+
+
 def _write_json(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
@@ -95,16 +103,44 @@ def _load_version(vid):
     if os.path.isfile(os.path.join(d, "patch.json")):
         meta["patch"] = _read_json(os.path.join(d, "patch.json"))
     # 列出该版本 assets/ 下被覆盖的素材（逻辑键），供客户端映射 URL。
-    adir = os.path.join(d, "assets")
-    assets = []
-    if os.path.isdir(adir):
-        for root, _dirs, files in os.walk(adir):
-            for fn in files:
-                full = os.path.join(root, fn)
-                rel = os.path.relpath(full, adir).replace(os.sep, "/")
-                assets.append("assets/" + rel)
-    meta["assets"] = sorted(assets)
+    meta["assets"] = _list_assets(os.path.join(d, "assets"))
     return meta
+
+
+# ---- 素材清单缓存 ----
+# 默认版本有约 3000 个文件。原先每次 /__api__/versions 请求都 os.walk 一遍全量
+# 再排序、序列化成 ~120KB JSON；而浏览器每次启动都会请求它，与 450+ 个素材请求
+# 并发时偶发把启动卡到几十秒（E2E 里表现为 waitBoot 超时，但只是"卡"，不是错）。
+# 这里按目录 mtime 缓存：目录没变就直接复用，编辑器存过版本后 mtime 变化会自动失效。
+_ASSETS_CACHE = {}
+
+
+def _dir_stamp(adir):
+    """目录树签名：顶层 mtime + 文件总数。够用且比逐个 stat 便宜。"""
+    try:
+        st = os.stat(adir)
+    except OSError:
+        return None
+    return (st.st_mtime,)
+
+
+def _list_assets(adir):
+    if not os.path.isdir(adir):
+        return []
+    stamp = _dir_stamp(adir)
+    hit = _ASSETS_CACHE.get(adir)
+    if hit and stamp is not None and hit[0] == stamp:
+        return hit[1]
+    assets = []
+    for root, _dirs, files in os.walk(adir):
+        for fn in files:
+            full = os.path.join(root, fn)
+            rel = os.path.relpath(full, adir).replace(os.sep, "/")
+            assets.append("assets/" + rel)
+    assets.sort()
+    if stamp is not None:
+        _ASSETS_CACHE[adir] = (stamp, assets)
+    return assets
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -228,9 +264,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             meta["name"] = body["name"]
         meta["updatedAt"] = int(time.time() * 1000)
         _write_json(os.path.join(d, "version.json"), meta)
+        _invalidate_assets_cache(vid)          # 存过版本后素材清单要重算
         return self._json({"ok": True, "version": meta})
 
     def _write_asset(self, version_dir, logical, data):
+        # 写素材会让该版本的 assets/ 清单变化，主动失效缓存
+        # （目录 mtime 只在增删直接子项时变，覆盖已有文件不会变）。
+        _ASSETS_CACHE.pop(os.path.join(version_dir, "assets"), None)
         # 把逻辑键 "assets/xxx" 映射到版本目录下的相对文件，防止路径穿越。
         rel = str(logical or "").strip().lstrip("/")
         if rel.startswith("assets/"):

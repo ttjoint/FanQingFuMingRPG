@@ -141,6 +141,21 @@ export function defaultUiComponents() {
     img: "assets/ui/closebtn.png",
   });
 
+  // ---- 居中弹窗：任务/记事/属性/荣辱 与 存档面板 ----
+  // 这两类面板原本把尺寸写死在 render/panels.js 里（420×300 / 460×340，居中
+  // 且 y=40）。收进配置后，用户在编辑器里就能移动/缩放它们，而绘制侧
+  // 用 uiRect() 读取，改动立刻生效。
+  comps.push({
+    id: "info.panel", kind: "panel", anchor: "center",
+    x: 0, y: 40 - (VH - 300) / 2, w: 420, h: 300, z: 300,
+    bg: "rgba(20,16,12,0.95)", color: "#b8a468",
+  });
+  comps.push({
+    id: "save.panel", kind: "panel", anchor: "center",
+    x: 0, y: 40 - (VH - 340) / 2, w: 460, h: 340, z: 300,
+    bg: "rgba(18,14,10,0.96)", color: "#b8a468",
+  });
+
   return comps;
 }
 

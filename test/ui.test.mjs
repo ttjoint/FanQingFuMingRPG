@@ -254,4 +254,24 @@ export function layoutConstantsMatchCoreLayout() {
   assert.ok(src.includes("HOTBAR_Y = " + m.HOTBAR.y), "快捷栏 y 与 core/layout.js 不一致");
   assert.ok(src.includes("x: 220, y: 60, w: 200, h: 300"), "背包面板与 core/layout.js 不一致");
   assert.ok(src.includes("x: 8, y: 60, w: 200, h: 300"), "商店面板与 core/layout.js 不一致");
+  // 居中弹窗：旧 render/panels.js 把 420x300 / 460x340 写死在 (VW-w)/2, y=40
+  assert.ok(src.includes("PACK_BOX = { x: 220, y: 60"), "包裹面板常量缺失");
+}
+
+export function centeredPanelsMatchOldHardcode() {
+  // info.panel / save.panel 用 center 锚点表达"水平居中、y=40"。
+  // 旧代码是 x=(VW-w)/2, y=40 —— 这里校验换算后逐像素一致，
+  // 防止锚点语义改动后弹窗悄悄偏位（单测抓不到绘制，只能靠这里的几何）。
+  const byId = Object.fromEntries(defaultUiComponents().map(c => [c.id, c]));
+  const info = byId["info.panel"], save = byId["save.panel"];
+  assert.ok(info && save, "缺少 info.panel / save.panel");
+  const ri = resolvePos(info, VW, VH), rs = resolvePos(save, VW, VH);
+  // resolvePos 只给位置，尺寸从元件上取（与绘制侧一致）
+  assert.deepEqual(ri, { x: (VW - 420) / 2, y: 40 });
+  assert.deepEqual(rs, { x: (VW - 460) / 2, y: 40 });
+  assert.equal(info.w, 420); assert.equal(info.h, 300);
+  assert.equal(save.w, 460); assert.equal(save.h, 340);
+  // 锚点必须是 center：换成 topLeft 会让它们贴到左上角（曾经踩过的坑）
+  assert.equal(info.anchor, "center");
+  assert.equal(save.anchor, "center");
 }

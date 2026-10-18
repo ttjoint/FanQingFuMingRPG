@@ -4,7 +4,7 @@ import { VW, VH, ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { wrapText } from "./text.js";
 import { drawItemSlot } from "./hud.js";
-import { SETTINGS_BOX, SETTINGS_BAR, SETTINGS_BTN } from "../core/layout.js";
+import { SETTINGS_BOX, SETTINGS_BAR, SETTINGS_BTN, uiRect, uiSlotRect } from "../core/layout.js";
 import { PACK_BOX } from "../core/layout.js";
 import { SAVE_SLOTS, saveSlotInfo } from "../systems/save.js";
 
@@ -19,7 +19,9 @@ export function drawTip() {
 
 export function drawPanels() {
   if (!G.panel) return;
-  const w = 420, h = 300, x = (VW - w) / 2, y = 40;
+  // 面板矩形取自可编辑 UI 配置（info.panel）；缺配置时回退旧硬编码。
+  const R = uiRect("info.panel") || { x: (VW - 420) / 2, y: 40, w: 420, h: 300 };
+  const { w, h, x, y } = R;
   ctx.fillStyle = "rgba(20,16,12,0.95)"; ctx.fillRect(x, y, w, h);
   ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2); ctx.lineWidth = 1;
   ctx.fillStyle = "#f0d060"; ctx.font = "bold 15px sans-serif";
@@ -59,21 +61,26 @@ export function drawPanels() {
 
 export function drawPack() {
   if (!G.packOpen) return;
-  const px = PACK_BOX.x, py = PACK_BOX.y;   // packpanel.png 200x300
+  // 包裹面板矩形取自可编辑 UI 配置（pack.panel）；缺配置时回退 PACK_BOX。
+  const PB = uiRect("pack.panel") || PACK_BOX;
+  const px = PB.x, py = PB.y;
   const P = getImg("assets/ui/packpanel.png");
-  if (P) ctx.drawImage(P, px, py, PACK_BOX.w, PACK_BOX.h);
-  else { ctx.fillStyle = "#d8c48c"; ctx.fillRect(px, py, PACK_BOX.w, PACK_BOX.h); ctx.strokeStyle = "#7a5a2a"; ctx.strokeRect(px + .5, py + .5, PACK_BOX.w - 1, PACK_BOX.h - 1); }
+  if (P) ctx.drawImage(P, px, py, PB.w, PB.h);
+  else { ctx.fillStyle = "#d8c48c"; ctx.fillRect(px, py, PB.w, PB.h); ctx.strokeStyle = "#7a5a2a"; ctx.strokeRect(px + .5, py + .5, PB.w - 1, PB.h - 1); }
   ctx.fillStyle = "#4a3410"; ctx.font = "bold 13px 'Microsoft YaHei',SimHei,sans-serif"; ctx.fillText("包裹", px + 12, py + 22);
   for (let i = 0; i < G.pack.length; i++) {
-    const gx = px + 8 + (i % 5) * 40, gy = py + 28 + Math.floor(i / 5) * 40;
-    drawItemSlot(G.pack[i], gx, gy, 38, 38);
+    const r = uiSlotRect("pack.grid", i);
+    const gx = r ? r.x : px + 8 + (i % 5) * 40;
+    const gy = r ? r.y : py + 28 + Math.floor(i / 5) * 40;
+    drawItemSlot(G.pack[i], gx, gy, r ? r.w : 38, r ? r.h : 38);
   }
   ctx.fillStyle = "#6a4a20"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif"; ctx.fillText("左键拿起 / 右键使用", px + 12, py + 292);
 }
 
 export function drawSavePanel() {
   if (!G.savePanel) return;
-  const w = 460, h = 340, x = (VW - w) / 2, y = 40;
+  const R = uiRect("save.panel") || { x: (VW - 460) / 2, y: 40, w: 460, h: 340 };
+  const { w, h, x, y } = R;
   ctx.fillStyle = "rgba(18,14,10,0.96)"; ctx.fillRect(x, y, w, h);
   ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2); ctx.lineWidth = 1;
   ctx.fillStyle = "#f0d060"; ctx.font = "bold 16px 'Microsoft YaHei',SimHei,sans-serif";

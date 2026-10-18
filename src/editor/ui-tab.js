@@ -8,6 +8,7 @@
 // 之所以不复用 listTab：界面元件需要“所见即所得”的画布交互，
 // 纯表格改数字体验太差（这本来就是用户提的诉求）。
 import { h, clear } from "./dom.js";
+import { createHistory } from "./history.js";
 import { renderForm } from "./fields.js";
 import { UI_KINDS, UI_ANCHORS, UI_BINDS, resolvePos, hitTop } from "../content/ui.js";
 import { getImg } from "../core/assets.js";
@@ -77,6 +78,53 @@ export function mountUiTab(host, ui, opts) {
   const onChange = () => { o.onChange && o.onChange(ui); };
   let sel = 0;                     // 当前选中元件的下标
   let drag = null;                 // { mode:"move"|"resize", sx, sy, c, ox, oy, ow, oh }
+
+  // ---- 撤销/重做 ----
+  // 与 map-editor 一样用快照式历史：一次"操作"（拖拽结束 / 改字段 / 增删）
+  // 存一份整表快照。界面元件表很小（十几项），快照成本可忽略，
+  // 但换来的是任何操作都能可靠回退，不必为每个动作写逆操作。
+  const history = createHistory(100);
+  let lastSnap = snap();           // 与 map-editor 同样的基线策略：进页面先记一份
+
+  function snap() { return JSON.stringify(ui.components); }
+  // 一次操作结束：把"操作前"的快照记为 before、"操作后"记为 after 入栈。
+  function commit(label) {
+    const after = snap();
+    if (after === lastSnap) return;            // 没实际变化（例如只点了一下）不入栈
+    history.push({ before: lastSnap, after, label: label || "编辑界面" });
+    lastSnap = after;
+    syncUndoBtns();
+  }
+  // 撤销后尽量保持"同一个元件"仍被选中：元件增删会让下标整体错位，
+  // 只钳制下标会让选中项漂到不相干的元件上（用户接着拖拽就会拖错东西）。
+  // 记住的是 id 链：当前选中不存在时，回退到最近一次仍存在的历史选中。
+  let recentIds = [];
+  function rememberSel() {
+    const c = ui.components[sel];
+    if (!c) return;
+    recentIds = [c.id].concat(recentIds.filter(x => x !== c.id)).slice(0, 30);
+  }
+  function restore(json) {
+    rememberSel();                       // 先记下"撤销前选的是谁"
+    ui.components = JSON.parse(json);
+    sel = Math.max(0, Math.min(sel, ui.components.length - 1));
+    // 从最近的 id 往回找，取第一个在新快照里仍存在的
+    for (const id of recentIds) {
+      const i = ui.components.findIndex(c => c.id === id);
+      if (i >= 0) { sel = i; break; }
+    }
+    dirty(); renderAll(); syncUndoBtns();
+  }
+  function undo() {
+    const e = history.undo();
+    if (!e) return;
+    lastSnap = e.before; restore(e.before);
+  }
+  function redo() {
+    const e = history.redo();
+    if (!e) return;
+    lastSnap = e.after; restore(e.after);
+  }
 
   // ---------- 布局：左列表 | 中画布 | 右属性 ----------
   const left = h("div", { class: "ed-ui-list" });
@@ -190,13 +238,18 @@ export function mountUiTab(host, ui, opts) {
   const barRatio = () => 0.62;
 
   // ---------- 左列表 ----------
+  let undoBtnEl = null, redoBtnEl = null;
+  function syncUndoBtns() {
+    if (undoBtnEl) undoBtnEl.disabled = !history.canUndo();
+    if (redoBtnEl) redoBtnEl.disabled = !history.canRedo();
+  }
   function renderLeft() {
     clear(left);
     left.append(h("div", { class: "ed-ui-ltitle" }, "界面元件（" + ui.components.length + "）"));
     ui.components.forEach((c, i) => {
       const row = h("div", {
         class: "ed-ui-lrow" + (i === sel ? " on" : "") + (c.visible === false ? " off" : ""),
-        onclick: () => { sel = i; renderAll(); },
+        onclick: () => { sel = i; rememberSel(); renderAll(); },
       },
         h("span", { class: "ed-ui-lkind" }, kindLabel(c.kind)),
         h("span", { class: "ed-ui-lid" }, c.id));
@@ -209,12 +262,17 @@ export function mountUiTab(host, ui, opts) {
       h("button", { class: "ed-btn danger", onclick: delComp }, "删除"),
     );
     left.append(bar);
+    // 撤销/重做（与 Ctrl+Z / Ctrl+Y 等价）
+    undoBtnEl = h("button", { class: "ed-btn", title: "撤销 (Ctrl+Z)", onclick: undo }, "撤销");
+    redoBtnEl = h("button", { class: "ed-btn", title: "重做 (Ctrl+Y)", onclick: redo }, "重做");
+    left.append(h("div", { class: "ed-ui-lbar" }, undoBtnEl, redoBtnEl));
+    syncUndoBtns();
   }
 
   function addComp() {
     ui.components.push(newComponent(ui));
     sel = ui.components.length - 1;
-    dirty(); renderAll();
+    dirty(); renderAll(); commit("新增元件");
   }
   function dupComp() {
     const src = ui.components[sel];
@@ -225,7 +283,7 @@ export function mountUiTab(host, ui, opts) {
     while (taken.has(id)) { k++; id = src.id + "_copy" + k; }
     copy.id = id; copy.x += 12; copy.y += 12;
     ui.components.splice(sel + 1, 0, copy);
-    sel++; dirty(); renderAll();
+    sel++; dirty(); renderAll(); commit("复制元件");
   }
   function delComp() {
     if (!ui.components[sel]) return;
@@ -233,7 +291,7 @@ export function mountUiTab(host, ui, opts) {
     if (!confirm("删除界面元件「" + name + "」？")) return;
     ui.components.splice(sel, 1);
     sel = Math.max(0, Math.min(sel, ui.components.length - 1));
-    dirty(); renderAll();
+    dirty(); renderAll(); commit("删除元件");
   }
   const dirty = () => { onChange(); };
 
@@ -253,10 +311,12 @@ export function mountUiTab(host, ui, opts) {
         let k = 2, id = c.id + "_" + k;
         while (ids.includes(id)) { k++; id = c.id + "_" + k; }
         c.id = id;
+        recentIds = [id].concat(recentIds.filter(x => x !== id)).slice(0, 30);
         renderAll();            // id 变了要重画左右两侧
-        dirty(); return;
+        dirty(); commit("改元件 id"); return;
       }
       dirty(); draw(); renderLeft();
+      commit("改元件属性");
     });
   }
 
@@ -272,7 +332,7 @@ export function mountUiTab(host, ui, opts) {
       const p = resolvePos(c, VW, VH);
       const s = 12 / scale;
       if (q.x >= p.x + c.w - s && q.x <= p.x + c.w + s && q.y >= p.y + c.h - s && q.y <= p.y + c.h + s) {
-        drag = { mode: "resize", sx: q.x, sy: q.y, c, ow: c.w, oh: c.h };
+        drag = { mode: "resize", sx: q.x, sy: q.y, c, ow: c.w, oh: c.h, base: snap() };
         ev.preventDefault();
         return;
       }
@@ -285,7 +345,7 @@ export function mountUiTab(host, ui, opts) {
     });
     if (hit) {
       sel = ui.components.indexOf(hit);
-      drag = { mode: "move", sx: q.x, sy: q.y, c: hit, ox: hit.x, oy: hit.y };
+      drag = { mode: "move", sx: q.x, sy: q.y, c: hit, ox: hit.x, oy: hit.y, base: snap() };
       renderAll();
       ev.preventDefault();
     }
@@ -304,7 +364,13 @@ export function mountUiTab(host, ui, opts) {
     renderRight(); draw(); dirty();
     ev.preventDefault();
   };
-  const onUp = () => { drag = null; };
+  const onUp = () => {
+    if (!drag) return;
+    const moved = drag.base !== snap();
+    drag = null;
+    // 一次拖拽只入一条历史（否则每个 mousemove 都会推一条，撤销要点上百次）
+    if (moved) { history.push({ before: lastSnap, after: snap(), label: "拖拽元件" }); lastSnap = snap(); syncUndoBtns(); }
+  };
 
   // 方向键微调（挂在画布上，避免抢全局快捷键）
   const onKey = ev => {
@@ -315,13 +381,32 @@ export function mountUiTab(host, ui, opts) {
     const d = map[ev.key];
     if (!d) return;
     c.x += d[0]; c.y += d[1];
-    ev.preventDefault(); renderRight(); draw(); dirty();
+    ev.preventDefault(); renderRight(); draw(); dirty(); commit("微调位置");
+  };
+
+  // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y：撤销重做。
+  // 挂在 document 上（而不是画布），因为用户改完属性框里也可能想直接撤销；
+  // 但在输入框里打字时让浏览器自己的撤销生效，不抢。
+  const onUndoKey = ev => {
+    const el = /** @type {any} */ (ev.target);
+    const tag = (el && el.tagName) || "";
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(tag) || !!(el && el.isContentEditable);
+    if (!(ev.ctrlKey || ev.metaKey)) return;
+    const k = ev.key.toLowerCase();
+    if (k === "z" && !ev.shiftKey) {
+      if (typing) return;                 // 输入框内交给浏览器
+      ev.preventDefault(); undo();
+    } else if ((k === "z" && ev.shiftKey) || k === "y") {
+      if (typing) return;
+      ev.preventDefault(); redo();
+    }
   };
 
   cv.addEventListener("mousedown", onDown);
   window.addEventListener("mousemove", onMove);
   window.addEventListener("mouseup", onUp);
   cv.addEventListener("keydown", onKey);
+  document.addEventListener("keydown", onUndoKey);
   cv.tabIndex = 0;                       // 可聚焦以接收方向键
   // 容器尺寸变化时重排（编辑器栏可拖拽缩放）
   const ro = ("ResizeObserver" in window) ? new ResizeObserver(() => { layoutCanvas(); draw(); }) : null;
@@ -335,6 +420,7 @@ export function mountUiTab(host, ui, opts) {
     window.removeEventListener("mousemove", onMove);
     window.removeEventListener("mouseup", onUp);
     cv.removeEventListener("keydown", onKey);
+    document.removeEventListener("keydown", onUndoKey);
     if (ro) ro.disconnect();
   };
 }

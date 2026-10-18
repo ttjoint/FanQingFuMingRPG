@@ -45,13 +45,16 @@ D2 的 build 多样性全部建立在这套正交体系上。
 - [x] `render/hud.js`、`render/shop-ui.js` 改为按配置遍历绘制
 - [x] `input`：`core/layout.js` 的 `slotAt`/`insideShop`/`insideShopClose` 走注入的配置
       （`installUiLayout`，由 `drawHUD` 每帧喂同一份），画与点同源
-- [ ] `render/panels.js`（装备/技能说明等次级面板）尚未收进配置
+- [x] `render/panels.js`：任务/记事/属性/荣辱（`info.panel`）与存档（`save.panel`）
+      收进配置，默认几何与旧硬编码逐像素一致（420×300@110,40 / 460×340@90,40）
 - [x] 编辑器新增「界面」标签页（`editor/ui-tab.js`）：
       - 画布预览（复用 iso 地图编辑器的缩放/拖拽骨架）
       - 组件列表（增/删/重命名/显隐）
       - 属性面板（kind / anchor / 坐标 / 尺寸 / 图片 / 绑定 / z 序）
       - 拖拽移动 + 手柄缩放
-      - ⬜ 撤销/重做接入 `editor/history.js`（当前靠保存前的补丁 diff，尚未接快照栈）
+      - [x] 撤销/重做接入 `editor/history.js`（快照栈：一次操作一条，拖拽只在 mouseup 记账）
+      - [x] Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y（输入框内不抢浏览器自带撤销）
+      - [x] 撤销后按 id 链找回原选中项（否则下标错位会拖到别的元件）
 - [x] 单测：`defaultUi()` 与原硬编码常量逐项相等；配置往返无损（`test/ui.test.mjs` 18 例）
 - [x] E2E：HUD 像素回归 + 界面页拖拽/增删/保存进补丁（`e2e/game.spec.js`）
 
