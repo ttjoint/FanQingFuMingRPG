@@ -24,7 +24,7 @@
 - `editor/index.js` 用 `Project`（ContentDB + MapDoc 视图）替代旧 `ED`；
   `diffContent` 生成补丁，`savePack` 存 v2 包；保存时做内容校验提示。
 - `editor/map-editor.js` 增加**撤销/重做**（文档快照 + 350ms 去抖，`Ctrl+Z / Ctrl+Y`，工具栏按钮）。
-- E2E：`tools/e2e.mjs` 覆盖「地图补丁保存 / 撤销 / 重做 / NPC 内容补丁 / 游戏可玩」。
+- E2E：`e2e/game.spec.js`（Playwright）覆盖「地图补丁保存 / 撤销 / 重做 / NPC 内容补丁 / 游戏可玩」。
 
 ## 🔄 阶段 3 —— 显式运行时上下文（进行中）
 
@@ -33,7 +33,7 @@
   新增单测 `context.test.mjs` 与架构检查 `tools/check-arch.mjs` 强制约束。
 - ✅ **逻辑层（`systems/` `world/` `script/`）已彻底去全局**：全部改为接收 `ctx`/`g`，
   无一再 `import core/state`；由架构检查新增的**规则 4** 强制（防止回退）。已迁移：
-  `motion/missions/gameplay/update/combat/audio/inventory/shop`、`world/ground/triggers/npc/map/pathfinding`、
+  `motion/missions/gameplay/update/combat/audio/inventory/shop`、`systems/ground`、`world/triggers/npc/map/pathfinding`、
   `script/vm`（含 `EXIT` 内聚、直接用引擎纯 `gsp`）。
 - ⏳ **仅剩 view 层**（`input/render/editor`、`content/versions-ui`）与入口 `main.js` 仍读 `core/state`
   的兼容再导出（可接受：视图需要读状态）。后续可按需逐步改为 `getRuntime().state`。
@@ -89,4 +89,4 @@
 
 - 原版 `versions/default/assets/` 永远只读；改动只进 `versions/<id>/` 版本（内容包）。
 - 数据结构变更需同步：`schema.js` + 迁移 + 单测。
-- 每阶段结束跑 `node test/run.mjs` 与 `node tools/e2e.mjs`。
+- 每阶段结束跑 `node test/run.mjs`、`node tools/check-arch.mjs`、`npx tsc --noEmit` 与 `npx playwright test`。

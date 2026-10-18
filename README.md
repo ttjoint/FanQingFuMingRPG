@@ -136,7 +136,7 @@ FanQingFuMingRPG/
    │  └─ text.js         富文本排版
 ├─ docs/                 架构 / 数据模型 / 重构计划文档
 ├─ test/                 单元测试（node test/run.mjs）
-└─ tools/e2e.mjs         端到端冒烟测试（CDP）
+└─ e2e/game.spec.js      端到端测试（Playwright）
 ```
 
 分层依赖方向（目标）：`engine ← content ← game/runtime ← editor`（箭头指向“被依赖”）；
@@ -154,7 +154,7 @@ npm run dev                  # 可选：Vite 开发服务器（生产仍用零�
 npm run test:e2e             # 可选：Playwright 端到端（自动起 python serve.py）
 node tools/check-arch.mjs    # 仅架构约束检查
 node test/run.mjs            # 仅单测（无依赖的 Node 运行器）
-# 旧版 CDP E2E（需自己启服务器与 Chrome）：node tools/e2e.mjs 9236 http://127.0.0.1:8131/index.html
+# E2E（Playwright，自动起服务器）：npx playwright test
 ```
 
 单测覆盖：引用解析、schema 规整、MapDoc 无损往返/旧视图、ContentDB 构建与补丁 diff/apply、

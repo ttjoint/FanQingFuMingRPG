@@ -4,7 +4,7 @@ import { loadMap, setPlayer } from "../world/map.js";
 import { spawnByName } from "../world/npc.js";
 import { addItem, removeItem, addExp, countItem } from "../systems/inventory.js";
 import { syncMissions } from "../systems/missions.js";
-import { playBGM } from "../systems/audio.js";
+import { playBGM, playSound } from "../systems/audio.js";
 import { applyBuff } from "../engine/buff.js";
 import { npcPickup, npcDrop, dropGround, groundAt } from "../systems/ground.js";
 
@@ -151,7 +151,7 @@ export function* execCall(ctx, name, args) {
     case "CmpMapName": setVar(args[1], G.currentMap === s(0).replace(/\.map$/, "") ? 1 : 0, G.vars); return;
     case "GameOver": G.gameOver = true; return;
     case "ShowEnding": G.pendingEnd = true; return;   // 剧本显式结束：切到结局场景（数据驱动，不靠文本关键字）
-    case "PlaySound": return;    // TODO: 音频
+    case "PlaySound": playSound(G, s(0)); return;   // 音效（失败静默：缺文件不打断剧情）
     case "PlayMusic": playBGM(G, s(0)); return;
     case "Rain": G.rain = !G.rain; return;
     case "GetRandomNum": setVar(args[0], Math.floor(Math.random() * (v(2) - v(1) + 1)) + v(1), G.vars); return;

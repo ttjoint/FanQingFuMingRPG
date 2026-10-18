@@ -103,7 +103,7 @@
 | 引擎 ECS 基元（组件/查询） | `engine/ecs.js` |
 | 运行时组件契约（默认值） | `runtime/components.js` |
 | 玩法系统（状态注入，拆分 update） | `systems/gameplay.js` |
-| 单元测试 / E2E | `test/` · `tools/e2e.mjs` |
+| 单元测试 / E2E | `test/` · `e2e/game.spec.js` |
 
 ## 规划（见 REFACTOR_PLAN.md）
 

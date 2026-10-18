@@ -27,7 +27,6 @@ _*.png
 _*.log
 _*.spec.js
 *.log
-test/
 
 # AI 生成产物（开发期临时输出，不入库）
 _aigen/
