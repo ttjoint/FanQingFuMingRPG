@@ -1190,6 +1190,69 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   await expect(page.locator("#editorRoot")).toBeVisible();
   await page.waitForTimeout(400);
 
+  // 地图撤销/重做（P5）：历史条目从“整图快照”改为“变更路径”，
+  // 撤销/重做共用同一份补丁数据。这里钉住的是**数组增删后的撤销/重做**——
+  // 这正是本次改造踩到的两个真 bug 所在：
+  //   1) 先展开逐项再记 tail → 重做时下标错位，删第一项却删掉了最后一项
+  //   2) tail 的旧值直接存引用 → 撤销后文档与补丁共享同一数组，互相污染
+  await page.evaluate(() => { document.querySelectorAll(".ed-nav button")[0].click(); });
+  await page.waitForTimeout(1200);
+  const hist = await page.evaluate(async () => {
+    const T = document.getElementById("editorRoot").__mapEditor.__test;
+    const raw = T.raw();
+    const out = {};
+    const snap = () => JSON.stringify({
+      cells: raw.cells.map(c => [c.sx, c.sy, c.flag, c.trigger, c.map, c.layer]),
+      spawns: raw.spawns.map(s => [s.npc, s.row, s.col]),
+    });
+    const s0 = snap();
+
+    // 改三格地面：撤销回 s0，重做回 s1，再来回一次
+    T.paint(2, 2, 111, 222); T.paint(2, 3, 333, 444); T.paint(3, 2, 555, 666);
+    out.flushed = T.flush();
+    const s1 = snap();
+    out.changed = s0 !== s1;
+    out.oneEntry = T.histSize() === 1;          // 连续编辑合并为一条
+    T.undo(); out.undoRestored = snap() === s0;
+    T.redo(); out.redoRestored = snap() === s1;
+    T.undo(); out.undoAgain = snap() === s0;
+    T.redo();
+
+    // 新增单位：撤销/重做
+    T.addSpawn(9, 5, 5); T.flush();
+    const s2 = snap();
+    T.undo(); out.spawnUndone = snap() === s1;
+    T.redo(); out.spawnRedone = snap() === s2;
+    T.undo(); out.spawnUndoAgain = snap() === s1;
+    T.redo();
+
+    // 删除第一项：撤销要完整还原，重做要删回**第一项**（不是最后一项）。
+    const first = raw.spawns[0];
+    const firstKey = [first.npc, first.row, first.col];
+    T.removeSpawn(0); T.flush();
+    const s3 = snap();
+    T.undo(); out.removeUndone = snap() === s2;
+    T.redo();
+    out.removeRedone = snap() === s3;
+    out.redoDroppedRightOne = !raw.spawns.some(s => s.npc === firstKey[0] && s.row === firstKey[1] && s.col === firstKey[2]);
+    T.undo();
+    out.finalOk = snap() === s2;
+    return out;
+  });
+  expect(hist.flushed).toBe(true);
+  expect(hist.changed).toBe(true);
+  expect(hist.oneEntry).toBe(true);
+  expect(hist.undoRestored).toBe(true);
+  expect(hist.redoRestored).toBe(true);
+  expect(hist.undoAgain).toBe(true);
+  expect(hist.spawnUndone).toBe(true);
+  expect(hist.spawnRedone).toBe(true);
+  expect(hist.spawnUndoAgain).toBe(true);
+  expect(hist.removeUndone).toBe(true);
+  expect(hist.removeRedone).toBe(true);
+  expect(hist.redoDroppedRightOne).toBe(true);
+  expect(hist.finalOk).toBe(true);
+
   // 界面 tab：HUD/背包/商店元件可增删改，且改动能进补丁（用户明确要求的能力）。
   // ---- 传送点编辑（P4）----
   await page.locator('.ed-nav button:has-text("传送点")').click();

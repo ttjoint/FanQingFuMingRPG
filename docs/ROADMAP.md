@@ -293,8 +293,24 @@ D2 的 build 多样性全部建立在这套正交体系上。
         已加单测 `gettersStayLive` 并反向验证（换回 `Object.assign` 该测试失败）。
       - 剩余：`tabConfig`(200 行)/`tabGame`(133)/`tabAssets`(164)/`map-editor` 依赖较多，
         继续拆需先处理 `npcSchema`/`listTab` 等交叉引用。
-- [ ] **快照式撤销 → Command 模式**：当前每次编辑深拷贝整份 MapDoc（100 条上限），
-      大地图内存与 GC 压力大。
+- [x] **快照式撤销 → 变更路径（patch）历史**
+      原先每条历史存 before/after 两份**整图深拷贝**。实测一张大地图约 280KB 文本，
+      100 条上限 ≈ 28MB 常驻内存；每次编辑还要两次 `JSON.stringify` 做全量比较。
+      - 新建 `src/editor/patch.js`（纯逻辑）：`diff/applyPatches/getPath/setPath/delPath/deepEqual`。
+        历史条目只存 `{ path, v }`（**旧值**），改一格只产生 1 条补丁。
+      - **撤销与重做共用同一份数据**：`swapApply` 在写回的同时把 `v` 换成
+        “刚被替换掉的值”，所以两个方向都是同一套 apply，不必存正反两份操作。
+      - `deepEqual` 替掉 `JSON.stringify` 比较（不产生临时字符串）。
+      - `test/patch.test.mjs` 16 例。**两个真 bug 都是它先拓出来的**：
+        1. **数组长度变化不能“逐项 + tail”双记**：逐项补丁的下标基于原长度，
+           重做时长度已变→下标错位；症状是“删第一项 → 撤销 → 重做”把**最后一项**删了。
+           改为长度一变就**只记一条 tail 整段替换**。
+        2. **tail 的旧值不能存引用**：直接存 `before` 会让“撤销后的文档”与
+           “补丁里的旧值”指向同一数组，互相默默污染（单测表现为“撤销后长度不对”，
+           但手动跑又正常——就是因为两边共享了对象）。一律 `cloneJson`。
+      - 另一个隐蔽点：`raw.spawns`/`raw.objects` 是 live view（Proxy + 不可写 getter），
+        **不能整体赋值**（`setPath` 会静默失败），只能原地 `splice` 对齐长度。
+      - E2E 钉住改格/增删单位后的撤销·重做·再来回，含“重做要删对位置”。
 - [ ] **测试运行器二选一**：`test/run.mjs` 与 Vitest 适配层跑同一批用例，长期维护两份。
 
 ---

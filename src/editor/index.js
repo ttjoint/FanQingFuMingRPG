@@ -365,6 +365,9 @@ function tabMaps() {
     decorTemplates: ED.content.decorTemplates,
     onChange: () => mark(),
   });
+  // 调试/E2E 钩子：暴露地图编辑器的测试面（仅用于自动化验证撤销栈，
+  // 生产路径不读它）。挂到编辑器根节点上，不污染全局变量。
+  if (root) root.__mapEditor = mapEditor;
 }
 
 // ---------- 装饰物模板（跨地图共享，按贴图源矩形）----------

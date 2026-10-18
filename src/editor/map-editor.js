@@ -16,6 +16,7 @@ import { createSelection } from "./selection.js";
 import { makeLineEditor, modeControl, decorState } from "./decor-line.js";
 import { decorSpriteKey } from "../content/schema.js";
 import { attachLegacyViews } from "../content/mapDoc.js";
+import { diff as diffPatches, getPath, setPath } from "./patch.js";
 import { musicFiles, audioSrc } from "./assets-index.js";
 
 const LAYERS = [
@@ -97,11 +98,24 @@ export function mountMapEditor(main, side, opts) {
     else if (layer === "unit") raw.spawns.forEach((s, i) => { const p = cellCenter(s.row, s.col); if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1) list.push({ type: "spawn", index: i }); });
     selection.setMany(list); syncSel();
   };
-  let histTimer = 0, lastSnap = null, pendingLabel = null;
+  // ---- 撤销/重做 ----
+  //
+  // P5 改造：原先每条历史存 before/after 两份**整图深拷贝**。
+  // 一张大地图约 280KB 文本，100 条上限 ≈ 28MB 常驻内存；而且每次编辑
+  // 还要两次 JSON.stringify 做全量比较——刷一片地面就是几 MB 的临时字符串。
+  //
+  // 现在：历史条目只存**变更路径**（{ path, v }，v 是旧值）。
+  // 撤销与重做共用同一条目：swapApply 在写回的同时把 v 换成刚被替换掉的值，
+  // 所以两个方向都是同一套 apply，不需要存两份快照。
+  // 基线仍是深拷贝，但只在载入地图 / 撤销重做后取一次，不再每条一次。
+  //
+  // 连续编辑（拖动、批量刷地）仍用 350ms 去抖合并为一条：
+  // 一个补丁 = 一次用户意图，撤销才不会退化成“一格一格往回退”。
+  let histTimer = 0, baseline = null, pendingLabel = null;
   // 基线快照：载入地图时就把“本次编辑前的状态”记下来。
   // 旧实现只在首次 scheduleHistory 时才取值，导致**第一次编辑永远入不了栈**
-  // （lastSnap 为 null → 直接跳过），于是“刷一下地面”后按撤销毫无反应。
-  function resetHistoryBaseline() { lastSnap = snapshot(); pendingLabel = null; clearTimeout(histTimer); }
+  // （baseline 为 null → 直接跳过），于是“刷一下地面”后按撤销毫无反应。
+  function resetHistoryBaseline() { baseline = snapshot(); pendingLabel = null; clearTimeout(histTimer); }
   const snapshot = () => (raw ? JSON.parse(JSON.stringify(raw)) : null);
   function scheduleHistory() {
     if (!raw) return;
@@ -109,30 +123,91 @@ export function mountMapEditor(main, side, opts) {
     histTimer = setTimeout(() => {
       const after = snapshot();
       if (!after) return;
-      if (lastSnap == null) { lastSnap = after; return; }   // 实在没有基线：用当前状态当基线
-      if (JSON.stringify(after) !== JSON.stringify(lastSnap)) {
-        history.push({ map: cur, before: lastSnap, after, label: pendingLabel || "编辑" });
+      if (baseline == null) { baseline = after; return; }   // 没有基线：拿当前状态当基线
+      const patches = diffPatches(baseline, after);
+      if (patches.length) {
+        history.push({ map: cur, patches, label: pendingLabel || "编辑" });
         pendingLabel = null;
-        lastSnap = after;
-        buildToolbar();
       }
+      // 无论有没有变化都把基线推进到当前状态：
+      // 否则“改了又改回去”会一直与旧基线比，反复产生空补丁却占着内存。
+      baseline = after;
+      buildToolbar();
     }, 350);
   }
+  // 单元格的 row/col/dx/dy 是派生字段（live view 里是只读 getter），
+  // 写回时必须跳过，否则会抛 TypeError。
+  const CELL_DERIVED = new Set(["row", "col", "dx", "dy"]);
+
+  function delPathAt(doc, path) {
+    const parent = getPath(doc, path.slice(0, -1));
+    if (parent == null) return;
+    const k = path[path.length - 1];
+    if (Array.isArray(parent)) parent.splice(k, 1);
+    else delete parent[k];
+  }
+
+  // 把补丁里的值写回文档，同时把 p.v 换成“刚被替换掉的值”。
+  // 这样同一个条目 apply 两次就在两个状态之间来回，撤销/重做共用一份数据。
+  function swapApply(doc, patches) {
+    // 先处理数组长度变化（tail）。
+    //
+    // 坑：doc.spawns / doc.objects 是 MapDoc 的 live view，它们的 setter 是
+    // 不可写的 getter，而且内部是 Proxy → **不能整体赋值**（setPath 会静默失败）。
+    // 只能原地 splice 对齐长度：proxy 暴露了 splice，写会落到 backing 数组里。
+    for (const p of patches) {
+      if (!p.tail) continue;
+      // live view（spawns/objects）的 getter 不可写，只能原地 splice；
+      // proxy 的 set 会把视图格式（row/col）转成存备格式（r/c）——所以
+      // 一律通过 proxy 写，不能直接往 doc.units 里塞快照值。
+      const cur = getPath(doc, p.path);
+      if (Array.isArray(cur) && typeof cur.splice === "function") {
+        const want = Array.isArray(p.v) ? p.v.length : 0;
+        // 先把“当前内容”另存一份，再对齐到目标长度。
+        // 不能先 splice 再取值——那时候当前内容已经被覆盖了，
+        // 记下来的会是目标值，重做就没有任何变化（静默失效）。
+        const now = JSON.parse(JSON.stringify(cur));
+        cur.splice(want, cur.length - want);
+        for (let i = 0; i < want; i++) cur[i] = p.v[i];
+        p.v = now;                                 // 视图格式，与 diff 快照同构
+      }
+    }
+    for (const p of patches) {
+      if (p.tail) continue;
+      const last = p.path[p.path.length - 1];
+      if (p.path[0] === "cells" && CELL_DERIVED.has(last)) continue;
+      const old = getPath(doc, p.path);
+      if (p.removed) {
+        if (old === undefined) setPath(doc, p.path, p.v);
+        else { delPathAt(doc, p.path); p.v = old; }
+      } else if (p.added) {
+        if (old !== undefined) setPath(doc, p.path, p.v);
+        else { setPath(doc, p.path, p.v); p.v = old; }
+      } else {
+        setPath(doc, p.path, p.v);
+        p.v = old;
+      }
+    }
+    return doc;
+  }
+
   function undo() {
     clearTimeout(histTimer);
     const e = history.undo(); if (!e) return;
-    maps[e.map] = attachLegacyViews(e.before);
+    swapApply(raw, e.patches);
+
     loadMap(e.map, true);
-    lastSnap = snapshot();
+    baseline = snapshot();
     pendingLabel = null;
     buildToolbar();          // 同步撤销/重做按钮的可用状态（旧实现遗漏）
   }
   function redo() {
     clearTimeout(histTimer);
     const e = history.redo(); if (!e) return;
-    maps[e.map] = attachLegacyViews(e.after);
+    swapApply(raw, e.patches);          // v 已在上次被换成“新值”，再换一次即重做
+
     loadMap(e.map, true);
-    lastSnap = snapshot();
+    baseline = snapshot();
     pendingLabel = null;
     buildToolbar();
   }
@@ -240,7 +315,7 @@ export function mountMapEditor(main, side, opts) {
     if (!raw.spawns) raw.spawns = [];
     hoverCell = null; hoverObj = -1; drag = null;
     for (const s of raw.spawns) { const d = npcById(s.npc); if (d && d.model) preloadChar(d.model.replace(/\.pmg$/, "")); }
-    lastSnap = snapshot();
+    baseline = snapshot();
     buildPaletteData();
     centerCamera();
     buildToolbar(); buildPalette(); buildSide(); draw();
@@ -934,6 +1009,49 @@ export function mountMapEditor(main, side, opts) {
 
   return {
     draw, loadMap,
+    // 测试钩子：E2E 没法稳定地模拟“在画布上拖一排地面”，
+    // 而撤销历史的正确性与手势无关——只需模拟“文档被改了 + 去抖到期”。
+    // 这里直接暴露最小面的编辑/历史入口，不参与生产路径。
+    __test: {
+      raw: () => raw,
+      cur: () => cur,
+      paint(row, col, sx, sy) {
+        if (!raw) return false;
+        const c = byKey.get(row + "," + col);
+        if (!c) return false;
+        c.sx = sx; c.sy = sy;
+        mark("测试编辑");
+        return true;
+      },
+      addSpawn(npc, row, col) {
+        if (!raw) return false;
+        raw.spawns.push({ npc, row, col });
+        mark("测试新增单位");
+        return true;
+      },
+      removeSpawn(i) {
+        if (!raw || !raw.spawns[i]) return false;
+        raw.spawns.splice(i, 1);
+        mark("测试删除单位");
+        return true;
+      },
+      flush() {
+        // 立即结算去抖中的历史（模拟 350ms 到期）
+        clearTimeout(histTimer);
+        const after = snapshot();
+        if (!after) return false;
+        if (baseline == null) { baseline = after; return false; }
+        const patches = diffPatches(baseline, after);
+        if (patches.length) { history.push({ map: cur, patches, label: pendingLabel || "编辑" }); pendingLabel = null; }
+        baseline = after;
+        return patches.length > 0;
+      },
+      undo, redo,
+      canUndo: () => history.canUndo(),
+      canRedo: () => history.canRedo(),
+      histSize: () => history.size(),
+      lastPatchCount() { return history.size(); },
+    },
     destroy() {
       ro.disconnect();
       clearTimeout(palT); clearTimeout(drawT);
