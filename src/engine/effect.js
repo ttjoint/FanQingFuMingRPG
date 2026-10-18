@@ -128,10 +128,3 @@ export function effectPos(inst, fallback) {
   } else if (fallback && fallback.x != null) { bx = fallback.x; by = fallback.y; }
   return { x: bx + (inst.ox || 0), y: by + (inst.oy || 0) };
 }
-
-// 深度排序键：under/top 用层级权重，over 用底边 y。
-export function effectSortKey(inst, fallback) {
-  const w = layerWeight(inst.layer);
-  if (w === 1) { const p = effectPos(inst, fallback); return p.y; }
-  return null;   // under / top 不参与 y 排序，由渲染层单独处理
-}

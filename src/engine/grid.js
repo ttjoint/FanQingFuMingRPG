@@ -92,12 +92,6 @@ export function smoothPath(width, isWalkable, path) {
   return out;
 }
 
-// A* + 平滑（常用入口）。
-export function astarSmooth(width, isWalkable, sr, sc, tr, tc) {
-  const p = astar(width, isWalkable, sr, sc, tr, tc);
-  return p ? smoothPath(width, isWalkable, p) : null;
-}
-
 // ---- 像素级连续路径（纯函数；isW(x,y) 判定世界坐标处是否可走）----
 // 菱形半宽/半高来自等距几何（可由配置注入），不再写死。
 // 线段按 ~4px 采样，每点都必须可走。

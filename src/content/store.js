@@ -41,7 +41,6 @@ function saveIndex(idx) { try { localStorage.setItem(INDEX_KEY, JSON.stringify(i
 // 静态清单缓存（versions/index.json）。versionName 读它，所以要声明在使用点之前。
 let _staticVersions = null;
 
-export function listVersions() { return loadIndex().packs; }
 export function activeId() { return loadIndex().active || DEFAULT_VERSION; }
 export function setActive(id) { const idx = loadIndex(); idx.active = id || DEFAULT_VERSION; saveIndex(idx); }
 // 版本显示名。三级回退：磁盘后端列表 → 静态清单 → 浏览器版本。
@@ -118,10 +117,6 @@ export async function listAllVersions() {
 
 export function defaultPack() {
   return { format: "gsxy.pack", version: 2, id: DEFAULT_VERSION, name: "默认版本", base: null, patch: {}, images: {} };
-}
-// 磁盘默认版本的等价包（也是空补丁，仅元信息不同）。
-export function diskDefaultPack() {
-  return { format: "gsxy.pack", version: 2, id: DEFAULT_VERSION, name: "默认版本（原版）", base: null, patch: {}, images: {} };
 }
 
 const assetKey = (packId, path) => "pack." + packId + ":" + path;

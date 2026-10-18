@@ -9,27 +9,12 @@
 // 技能数据（assets/skills.json，经 normalizeSkill 规整）字段：
 //   { name, type, range, mode, mp, reqLevel, power, sound, icon, frames, desc }
 //   type: 0 = 治疗（自身 / 后续可扩展为队友），1 = 攻击
-//   mode: "melee" | "ranged"
-
-export const MODE_MELEE = "melee";
-export const MODE_RANGED = "ranged";
-
-// 近战 / 远程的分界射程（像素）**仅作为引擎内置默认值**；
-// 实际分界由游戏配置 combat.meleeMaxRange 提供（见 content/schema.js 的 normalizeSkill）。
-export const MELEE_RANGE = 60;
-
-export const isMelee = sk => (sk ? sk.mode !== MODE_RANGED : true);
-export const isRanged = sk => (sk ? sk.mode === MODE_RANGED : false);
+//   mode: "melee" | "ranged"（由 combat.meleeMaxRange 推断，见 content/schema.js）
 
 // 技能生效射程：至少为 rangeMin（原版“贴脸也能打”的下限）。
 export function skillRange(sk, rangeMin) {
   const r = sk && typeof sk.range === "number" ? sk.range : 0;
   return Math.max(rangeMin || 0, r);
-}
-
-// 依据距离判断目标是否在射程内。
-export function inRange(sk, rangeMin, dist) {
-  return dist <= skillRange(sk, rangeMin);
 }
 
 // ---- 命中判定：不再用“命中率”随机 ----

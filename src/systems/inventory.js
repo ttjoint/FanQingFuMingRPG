@@ -14,17 +14,6 @@ import { instanceStats, equipSlotOf, canStack as canStackEntries, normalizeInsta
   enhance as enhancePure, canEnhance, enhanceCost, wearDurability, isBroken,
   ELEMENT_MOD_KEYS } from "../engine/item.js";
 
-// 条目是否为「有实例的单件」。
-export function isInstanceEntry(e) { return !!(e && e.inst); }
-
-// 可堆叠判定：模板可堆叠、且条目无实例。
-export function entryStackable(g, entry) {
-  if (!entry) return false;
-  if (entry.inst) return false;
-  const it = itemByName(g, entry.name) || {};
-  return it.stackable !== false;
-}
-
 // 条目的合并键：有实例的条目彼此不可合并（各自独立）。
 function sameKind(a, b) {
   if (!a || !b) return false;

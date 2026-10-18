@@ -19,18 +19,6 @@ export function fmtSize(n) {
   return (n / 1024 / 1024).toFixed(2) + " MB";
 }
 
-/** 播放速率 → 音程名（1.0 = 原调，每 +6% ≈ 一个半音） */
-export function rateToSemi(rate) {
-  return 12 * Math.log2(Math.max(1e-6, rate));
-}
-export function rateLabel(rate) {
-  const s = rateToSemi(rate);
-  const r = Math.round(s);
-  if (Math.abs(s) < 0.08) return "原调";
-  const sign = r > 0 ? "+" : "";
-  return sign + r + " 半音（×" + rate.toFixed(2) + "）";
-}
-
 /**
  * 把音频解码成波形峰值数组。
  *
@@ -105,11 +93,7 @@ function trimCache() {
   }
 }
 
-/** 清空波形缓存（测试 / 内存告急时可用）。 */
-export function clearPeaksCache() { peakCache.clear(); peakInflight.clear(); prefetchQueue.length = 0; }
-
-/**
- * 预取：列表里的其它音频可以提前解码，用户点过去时就是 0 ms。
+/** 预取：列表里的其它音频可以提前解码，用户点过去时就是 0 ms。
  * 一次只跑一个（解码是 CPU 密集的，并行只会互相抢核心）。
  * 不推荐一口气预取整张表：一个文件就 ~600 ms。
  */

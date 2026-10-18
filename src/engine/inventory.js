@@ -38,8 +38,3 @@ export function goodsList(inv, items) {
   if (types) return all.filter(i => types.includes(i.type) && i.price > 0).map(i => i.name);
   return null;
 }
-
-// 单位拥有的货物背包对应的商店货源（便捷封装）。
-export function shopGoodsFor(unit, items) {
-  return hasGoods(unit) ? goodsList(unit.inventory, items) : null;
-}

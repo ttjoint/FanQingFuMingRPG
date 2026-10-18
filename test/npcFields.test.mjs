@@ -112,3 +112,25 @@ export function resistOtherShapesPassThrough() {
   assertEq(m.fire, 20);
   assertEq(m.cold, 10);
 }
+
+// 原版数据里的 -1 被按无符号读出，变成 4294967295。
+// 现有 21 个 NPC 的 level/defence/exp 都是这个值。一旦在编辑器里
+// 给它们配上攻击，这个数就会直接进伤害/奖励公式。
+export function u32SentinelFallsBackToDefault() {
+  const f = npcFieldsFromTemplate({ name: "校尉", level: 4294967295, defence: 4294967295, exp: 4294967295 });
+  assertEq(f.level, 1, "哨兵等级应回落到 1");
+  assertEq(f.def, 0, "哨兵防御应回落到 0");
+  assertEq(f.exp, 0, "哨兵经验应回落到 0");
+}
+
+// 正常数值不能被误伤（尤其别把 0 当成缺省值）。
+export function normalNumbersSurviveSane() {
+  const f = npcFieldsFromTemplate({ name: "x", level: 0, defence: 0, exp: 0 });
+  assertEq(f.level, 0, "0 是合法等级，不能回落到 1");
+  assertEq(f.def, 0);
+  assertEq(f.exp, 0);
+  const g = npcFieldsFromTemplate({ name: "x", level: 42, defence: 7, exp: 99 });
+  assertEq(g.level, 42);
+  assertEq(g.def, 7);
+  assertEq(g.exp, 99);
+}

@@ -62,43 +62,6 @@ export function repairAll(ctx) {
   return { ok: true, cost: total, count: n };
 }
 
-// 单件修理（UI 点到某格时用）。slot 形如 { kind, key }。
-export function repairSlot(ctx, slot) {
-  const G = ctx.state;
-  const entry = slotEntry(G, slot);
-  if (!entry) return { ok: false, cost: 0, reason: "空格" };
-  const def = defOf(ctx, entry.name);
-  const cost = repairCost(entry, def, ctx.config);
-  if (!cost) { G.tip = "无需修理"; G.tipT = 1.5; return { ok: false, cost: 0, reason: "无需修理" }; }
-  const r = repairEntry(entry, def, ctx.config, G.stats.money || 0);
-  if (r.ok) { G.stats.money -= r.cost; reindex(G); playSound(G, "buy.wav"); G.tip = "修理 " + entry.name + " -" + r.cost; G.tipT = 2; }
-  else { G.tip = r.reason + "（需 " + r.cost + "）"; G.tipT = 2; }
-  return r;
-}
-
-// 取某格上的 entry（与 layout 的 entryOf 同语义，但避免 input 依赖）。
-function slotEntry(G, slot) {
-  if (!slot) return null;
-  if (slot.kind === "equip") return (G.equip || {})[slot.key] || null;
-  if (slot.kind === "pack") return (G.pack || [])[Number(slot.key)] || null;
-  if (slot.kind === "hotbar") return (G.hotbar || [])[Number(slot.key)] || null;
-  return null;
-}
-
-// 鉴定单件。
-export function identifySlot(ctx, slot) {
-  const G = ctx.state;
-  const entry = slotEntry(G, slot);
-  if (!entry) return { ok: false, cost: 0, reason: "空格" };
-  const r = identifyEntry(entry, ctx.config, G.stats.money || 0);
-  if (r.ok) {
-    if (r.cost > 0) G.stats.money -= r.cost;
-    playSound(G, "pick_item.wav");
-    G.tip = "鉴定 " + entry.name + (r.cost > 0 ? " -" + r.cost : ""); G.tipT = 2;
-  } else { G.tip = r.reason; G.tipT = 2; }
-  return r;
-}
-
 // 鉴定背包里所有未鉴定物品。
 export function identifyAll(ctx) {
   const G = ctx.state;

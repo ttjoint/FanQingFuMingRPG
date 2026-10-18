@@ -4,7 +4,22 @@
 // 如果按"逐个路径写回"的方式撤销，会写错位置（典型症状：撤销后少一个、
 // 或者恢复到了相邻的条目上）。所以长度变化单独记一条 tail 补丁整体还原。
 import assert from "node:assert/strict";
-import { diff, applyPatches, deepEqual, getPath, setPath, delPath } from "../src/editor/patch.js";
+import { diff, deepEqual, getPath, setPath, delPath } from "../src/editor/patch.js";
+
+// 撤销：把补丁里的旧值逐条写回（生产代码在 map-editor.js 的 swapApply 里实现，
+// 那里还要处理 MapDoc 的 live view / Proxy，这里用简化模型验证 diff 的正确性）。
+// 先处理 tail（数组长度变化），再处理具体路径——否则"先删后写"会越界。
+function applyPatches(target, patches) {
+  const tails = patches.filter(p => p.tail);
+  const rest = patches.filter(p => !p.tail);
+  for (const p of tails) setPath(target, p.path, p.v);
+  for (const p of rest) {
+    if (p.removed) setPath(target, p.path, p.v);
+    else if (p.added) delPath(target, p.path);
+    else setPath(target, p.path, p.v);
+  }
+  return target;
+}
 
 // 造一份形似 MapDoc 的小样本
 function sample() {

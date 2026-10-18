@@ -27,5 +27,3 @@ export function normalizePack(o) {
   if (o.domains && !o.patch) pack.patch = { legacyDomains: o.domains };
   return pack;
 }
-
-export function packMeta(p) { return { id: p.id, name: p.name, updatedAt: p.updatedAt }; }

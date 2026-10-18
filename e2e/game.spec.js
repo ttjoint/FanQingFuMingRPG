@@ -292,6 +292,43 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
       && afterMany === 0;                 // 磨穿了（不低于 0）
   })).toBe(true);
 
+  // 镶嵌能镶能拆：Ctrl+右键装备格应把孔里的宝石取回（进背包或快捷栏）。
+  // 以前 unsocketFrom 是完整实现，但只出现在 import 里、调用点 0 ——
+  // 玩家镶错宝石只能把整件装备扔掉。
+  expect(await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const { newInstance } = await import("/src/engine/item.js");
+    const { socketInto } = await import("/src/systems/inventory.js");
+    const { handleSlotClick } = await import("/src/input/slots.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    // 找一件真有孔的装备模板和一个宝石模板（不硬编码名字）。
+    const def = (rt.assets.items || []).find(x => (x.socketCount || 0) > 0);
+    // gem 字段是对象 { mods: {...} }，不是布尔值。
+    const gemDef = (rt.assets.items || []).find(x => x.gem && typeof x.gem === "object");
+    if (!def || !gemDef) return false;
+    const savedEquip = G.equip, savedPack = G.pack, savedHot = G.hotbar;
+    const inst = newInstance(def, {});
+    const equipEntry = { name: def.name, inst };
+    G.equip = { ...(savedEquip || {}), weapon: equipEntry };
+    G.pack = new Array(40).fill(null);
+    G.hotbar = new Array(9).fill(null);
+    // 走真实的镶嵌路径（必须传完整条目，否则 gem 的 mods 会丢）。
+    G.pack[0] = { name: gemDef.name, count: 1 };
+    const okSocket = socketInto(G, equipEntry, { name: gemDef.name, gem: gemDef.gem }, "pack", 0);
+
+    const had = (inst.sockets || []).filter(Boolean).length;
+    const gemMods = (inst.sockets[0] || {}).gem;
+    handleSlotClick({ kind: "equip", key: "weapon" }, 2, false, rt, true);   // Ctrl+右键
+    const left = (inst.sockets || []).filter(Boolean).length;
+    // freeSlot 优先用快捷栏，所以两处都要查。
+    const carried = [...(G.pack || []), ...(G.hotbar || [])].filter(Boolean).map(e => e.name);
+
+    G.equip = savedEquip; G.pack = savedPack; G.hotbar = savedHot;
+    return okSocket && had === 1 && left === 0
+      && carried.includes(gemDef.name)
+      && gemMods && Object.keys(gemMods.mods || {}).length > 0;   // 宝石属性没被丢掉
+  })).toBe(true);
+
   // 攻击动画重新起手：上一刀的最后一击没播完就换目标时，新的一刀必须从首帧开始。
   // 用户报的 bug：上一刀动画没播完就打另一个敌人，新动画不会从头播。
   // 根因是 setAnim 只在**动作名变化**时重置帧，而“再砍一刀”用的还是 "fight"。

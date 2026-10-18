@@ -33,7 +33,7 @@ export const DEFAULT_CONFIG = {
   // 共享仓库（P4）：账号级、不随存档。格子数影响玩家能攒多少东西。
   stash: { size: 100 },
   // 掉落物：存在时长 / 散布 / 拾取与保护 / 地面堆叠合并半径。
-  items: { dropTtl: 0, dropScatter: 22, pickupRadius: 20, pickupDelay: 0, stackRadius: 18, maxEnhance: 10, enhancePriceBase: 50, enhancePriceMul: 1.6, socketFailChance: 0, durabilityLossOnHit: 0.5,
+  items: { dropTtl: 0, dropScatter: 22, pickupRadius: 20, pickupDelay: 0, stackRadius: 18, maxEnhance: 10, enhancePriceBase: 50, enhancePriceMul: 1.6, durabilityLossOnHit: 0.5,
     // 铁匠（P4）：修理按"缺失耐久占比 × 物品价 × repairRate"计价；
     // 鉴定按稀有度倍率；赌博底价随等级上涨。三者都是金币出口。
     repairRate: 0.6, identifyBase: 20 },

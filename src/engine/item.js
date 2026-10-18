@@ -114,9 +114,6 @@ export function equipSlotOf(def) {
   if (k === "trinket") return "trinket";
   return null;
 }
-
-export function isEquippable(def) { return equipSlotOf(def) != null; }
-
 // ---- 实例 ----
 export function newInstance(def, opts) {
   const o = opts || {};
@@ -143,10 +140,6 @@ export function normalizeInstance(inst) {
   o.durability = num(o.durability);
   return o;
 }
-
-// 条目是否携带实例（即不可堆叠的单件）。
-export function hasInstance(entry) { return !!(entry && entry.inst); }
-
 // 两个条目能否合并堆叠：必须都无实例、同名、且未超上限。
 export function canStack(a, b, def) {
   if (!a || !b) return false;

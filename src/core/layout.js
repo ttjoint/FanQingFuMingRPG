@@ -14,8 +14,6 @@ import { VW, VH } from "./constants.js";
 let _ui = null;
 /** 注入 UI 配置（每帧从 render 侧读取，无需重新装配）。 */
 export function installUiLayout(ui) { _ui = ui || null; }
-/** 当前生效的 UI 配置（可能为 null）。 */
-export function currentUiLayout() { return _ui; }
 
 // 按 id 取元件（未注入则 null）。
 function comp(id) {

@@ -18,7 +18,6 @@
 // ---------------------------------------------------------------------------
 export const CONDITIONS = {};
 export function registerCondition(name, fn) { CONDITIONS[name] = fn; }
-export function conditionNames() { return Object.keys(CONDITIONS); }
 
 const frac = (a, b) => (b > 0 ? a / b : 0);
 
@@ -75,7 +74,6 @@ export function evalWhen(when, bb, ctx) {
 // ---------------------------------------------------------------------------
 export const ACTIONS = {};
 export function registerAction(name, fn) { ACTIONS[name] = fn; }
-export function actionNames() { return Object.keys(ACTIONS); }
 
 // ---------------------------------------------------------------------------
 // 编译：profile(> 轻量校验/补默认) -> plan

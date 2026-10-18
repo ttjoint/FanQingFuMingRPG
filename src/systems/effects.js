@@ -32,6 +32,3 @@ export function fxSystem(ctx, dt) {
   }
   list.length = w;
 }
-
-// 清空全部特效（切图/读档时调用）。
-export function clearFx(g) { if (g.fx) g.fx.length = 0; if (g.uiFx) g.uiFx.length = 0; }

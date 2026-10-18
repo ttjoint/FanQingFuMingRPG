@@ -16,6 +16,3 @@ export const isRef = s => typeof s === "string" && /^[a-z]+:/.test(s);
 
 export const npcRef = id => makeRef(KIND.NPC, id);
 export const itemRef = id => makeRef(KIND.ITEM, id);
-export const skillRef = id => makeRef(KIND.SKILL, id);
-export const scriptRef = id => makeRef(KIND.SCRIPT, id);
-export const mapRef = id => makeRef(KIND.MAP, id);

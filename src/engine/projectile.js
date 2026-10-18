@@ -105,6 +105,3 @@ export function stepProjectile(proj, dt, ctx) {
   if (reach) proj.dead = true;   // 追到终点（无论是否命中）结束
   return hits;
 }
-
-// 判断弹道是否已到期（供运行时清理）。
-export function isDone(proj) { return !!proj.dead; }

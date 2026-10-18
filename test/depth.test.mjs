@@ -1,6 +1,6 @@
 // 等距深度：纵向条带模型（engine/depth.js）+ 地基线拟合工具 测试。
 import {
-  buildObjectDrawables, suggestRoofY, lowerHull, hullYAt,
+  buildObjectDrawables, lowerHull, hullYAt,
   baseLineFromBottom, lineToArray, trimSteepEnds, ROOF_TOP,
 } from "../src/engine/depth.js";
 import { assert, assertEq, loadMap } from "./helpers.mjs";
@@ -113,7 +113,3 @@ export function manualLine() {
   assertEq(base[0], 180, "左端外推"); assertEq(base[127], 180, "右端外推");
 }
 
-export function suggestRoof() {
-  assertEq(suggestRoofY([0, 0, 192, 320, 0, 0], [[0, 96, 0, 0], [0, 64, 64, 32]]), 64);
-  assertEq(suggestRoofY([0, 0, 0, 0, 0, 0], []), null);
-}

@@ -1,7 +1,10 @@
 // 技能 / 攻击方式（阶段 A）：纯逻辑单测。
 import { assert, assertEq, loadAssets } from "./helpers.mjs";
 import { normalizeSkill } from "../src/content/schema.js";
-import { MODE_MELEE, MODE_RANGED, isMelee, isRanged, skillRange, inRange, rollAttackHit, damageRange, damage, MELEE_RANGE } from "../src/engine/skill.js";
+import { skillRange, rollAttackHit, damageRange, damage } from "../src/engine/skill.js";
+
+// mode 的取值是 "melee"/"ranged"（见 content/schema.js 的 normalizeSkill）。
+const MODE_MELEE = "melee", MODE_RANGED = "ranged";
 
 export function modeInferredFromRange() {
   // 未显式给出 mode -> 按射程推断
@@ -24,7 +27,7 @@ export function realAssetsMigrated() {
   assertEq(byName["龙家剑法"].mode, MODE_RANGED, "龙家剑法应为远程");
   assertEq(byName["清军剑法"].mode, MODE_MELEE, "清军剑法应为近战");
   assertEq(byName["长剑"].mode, MODE_MELEE, "长剑应为近战");
-  // type 0 治疗技能不应被当成攻击（mode 仍可推断，但 isRanged 语义只在攻击时用）
+  // type 0 治疗技能不应被当成攻击（但 mode 仍可推断）
   assert(byName["御心术"], "御心术应存在");
 }
 
@@ -35,11 +38,6 @@ export function rangeHelpers() {
   assertEq(skillRange(melee, 40), 40, "近战射程受 rangeMin 抬升");
   assertEq(skillRange(ranged, 40), 200, "远程射程为 200");
   assertEq(skillRange(null, 40), 40, "无技能 -> rangeMin");
-  assert(inRange(ranged, 40, 150), "150 应在远程射程内");
-  assert(!inRange(ranged, 40, 250), "250 超出远程射程");
-  assert(isMelee(melee) && !isRanged(melee), "近战判定");
-  assert(isRanged(ranged) && !isMelee(ranged), "远程判定");
-  assert(isMelee(null), "无技能视为近战");
 }
 
 export function hitIsDistanceBased() {
@@ -90,8 +88,4 @@ export function damageFormula() {
   assertEq(damage(10, 0, 0), 10, "基础伤害");
   assertEq(damage(10, 5, 4), 13, "威力+、防御/2 向下取整");
   assertEq(damage(1, 0, 100), 1, "最低 1 点");
-}
-
-export function meleeRangeConstant() {
-  assertEq(MELEE_RANGE, 60, "近战分界常量");
 }

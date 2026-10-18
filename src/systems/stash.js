@@ -5,7 +5,7 @@
 //   - 因此单独走一个 localStorage key，读档/新开局都不清。
 //
 // 仓库数据格式：{ version, slots: [null | { name, count } | { name, count:1, inst }] }
-import { normalizeStash, addToStash, canFit, countInStash, STASH_SIZE } from "../engine/stash.js";
+import { normalizeStash, addToStash, canFit, countInStash, takeFromStash, STASH_SIZE } from "../engine/stash.js";
 
 const KEY = "gsxy_stash";
 const VERSION = 1;
@@ -68,12 +68,11 @@ export function storeFromPack(ctx, packIndex) {
 export function takeToPack(ctx, slotIndex) {
   const G = ctx.state;
   const s = stashOf(ctx);
-  const e = s[slotIndex];
-  if (!e) return false;
   const free = G.pack.indexOf(null);
   if (free < 0) { G.tip = "背包已满"; G.tipT = 2; return false; }
+  const e = takeFromStash(s, slotIndex);
+  if (!e) return false;
   G.pack[free] = e;
-  s[slotIndex] = null;
   saveStash(ctx, s);
   G.tip = "已取出"; G.tipT = 1.5;
   return true;
@@ -85,11 +84,6 @@ export function maxStackOf(ctx, name) {
   const def = items.find(x => x && x.name === name);
   if (!def) return 99;
   return Math.max(1, Math.floor(Number(def.maxStack) || (def.stackable === false ? 1 : 99)));
-}
-
-// 仓库里某物品的总数（供 UI 显示"仓库已有 N 件"）。
-export function countIn(ctx, name) {
-  return countInStash(stashOf(ctx), name);
 }
 
 // 打开/关闭仓库面板（与商店、存档、传送点互斥）。

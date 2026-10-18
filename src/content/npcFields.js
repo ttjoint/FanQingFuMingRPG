@@ -14,6 +14,18 @@
 const int = d => (d && d.attack) > 0;
 const orElse = (v, d) => (v == null ? d : v);
 
+// 原版数据里的 `-1` 被当作无符号数读出，变成 4294967295（0xFFFFFFFF）。
+// 现有 21 个 NPC 的 level/defence/exp 都是这个值（都是不参战的对话 NPC）。
+// 目前无实际影响，但只要在编辑器里给它们配上攻击，4294967295 级的经验值
+// 就会直接进伤害/奖励公式。这类“看上去是数字、实际是哨兵值”的脏数据
+// 必须在入口归一，不能指望每份数据都干净。
+const U32_SEQ = 4294967295;
+const sane = (v, d) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n === U32_SEQ) return d;
+  return n;
+};
+
 export const NPC_FIELDS = {
   name: { fromTemplate: d => d.name || "", default: "" },
   model: { fromTemplate: d => String((d && d.model) || "").replace(/\.pmg$/, ""), default: "" },
@@ -22,9 +34,9 @@ export const NPC_FIELDS = {
   hp: { fromTemplate: d => orElse(d && d.hp, 0), default: 0 },
   hpMax: { fromTemplate: d => orElse(d && d.hp, 0), default: 0 },
   atk: { fromTemplate: d => orElse(d && d.attack, 0), default: 0 },
-  def: { fromTemplate: d => orElse(d && d.defence, 0), default: 0 },
-  level: { fromTemplate: d => orElse(d && d.level, 1), default: 1 },
-  exp: { fromTemplate: d => orElse(d && d.exp, 0), default: 0 },
+  def: { fromTemplate: d => sane(d && d.defence, 0), default: 0 },
+  level: { fromTemplate: d => sane(d && d.level, 1), default: 1 },
+  exp: { fromTemplate: d => sane(d && d.exp, 0), default: 0 },
   attackable: { fromTemplate: d => int(d), default: false },
   aggressive: { fromTemplate: d => !!(d && d.hostile), default: false },
   ai: { fromTemplate: d => (d && (d.ai == null || d.ai === "")) ? "" : (typeof d.ai === "number" ? d.ai : String(d.ai)), default: "" },

@@ -44,17 +44,13 @@ function walkFnOf(ctx, opts, sr, sc, tr, tc) {
   }
   return isW;
 }
+
+// 格子路径（经平滑）。E2E 用作连通性探测；游戏内移动走 findPathPoints（世界坐标点）。
 export function findPath(ctx, sr, sc, tr, tc, opts) {
   const m = ctx.state.map; if (!m) return null;
   const isW = walkFnOf(ctx, opts, sr, sc, tr, tc);
   const path = astar(m.width, isW, sr, sc, tr, tc);
   return path ? smoothPath(m.width, isW, path) : null;
-}
-// 原始 A*（相邻格，带对角），不经平滑 —— 供漏斗构造“门”。
-export function findPathRaw(ctx, sr, sc, tr, tc, opts) {
-  const m = ctx.state.map; if (!m) return null;
-  const isW = walkFnOf(ctx, opts, sr, sc, tr, tc);
-  return astar(m.width, isW, sr, sc, tr, tc);
 }
 
 export function nearestWalkable(ctx, row, col) {
@@ -103,16 +99,6 @@ export function nearestWalkablePoint(ctx, wx, wy) {
   }
   return best;
 }
-
-// 把格子路径转成世界坐标序列。
-// exact 不为空时，用精确的世界坐标替换最后一个路点（高精度移动：停在鼠标点击的那个像素，
-// 而不是最接近的格子中心）。仅当目标格可走时才应传入 exact。
-export function pathToWorld(path, exact) {
-  const pts = path.map(p => cellCenter(p.row, p.col));
-  if (exact && pts.length) pts[pts.length - 1] = { x: exact.x, y: exact.y };
-  return pts;
-}
-
 // 世界坐标 (wx,wy) 最近的可走**像素**：先找最近可走格，再把点夹进该格菱形（|dx|/32+|dy|/16<=1）。
 export function nearestWalkablePixel(ctx, wx, wy) {
   const n = nearestWalkablePoint(ctx, wx, wy); if (!n) return null;

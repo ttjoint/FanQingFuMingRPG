@@ -18,7 +18,7 @@ function stateOf(x) {
   return x;                          // 直接是游戏状态
 }
 
-export function handleSlotClick(slot, button, shift, rt) {
+export function handleSlotClick(slot, button, shift, rt, ctrl) {
   rt = rt || getRuntime();
   const G = stateOf(rt);
   if (slot.kind === "shop") {
@@ -35,8 +35,18 @@ export function handleSlotClick(slot, button, shift, rt) {
     // 仓库打开时，右键背包物品 = 存入仓库（这时的语境就是整理）。
     // 否则右键仍是"使用/装备"，不改既有手感。
     if (G.stashPanel && slot.kind === "pack") { storeFromPack(rt, Number(slot.key)); return; }
-    // 装备格：Shift+右键 = 强化；普通右键 = 卸下（沿用原行为）。
+    // 装备格：Shift+右键 = 强化；Ctrl+右键 = 取下一个孔的宝石（从前往后）；
+    // 普通右键 = 卸下（沿用原行为）。
     if (slot.kind === "equip" && shift) { enhanceEntry(G, entry); return; }
+    if (slot.kind === "equip" && ctrl) {
+      // 找第一个有宝石的孔，取下后放进背包（背包满时提示并保留宝石）。
+      const socks = entry.inst && entry.inst.sockets;
+      if (!socks || !socks.length) { G.tip = "该装备没有孔"; G.tipT = 2; return; }
+      const idx = socks.findIndex(Boolean);
+      if (idx < 0) { G.tip = "没有可取的宝石"; G.tipT = 2; return; }
+      if (unsocketFrom(G, entry, idx)) playSound(G, "drop_item.wav");
+      return;
+    }
     useEntry(G, entry, slot.kind, slot.key); return;
   }
   // 手上是从商店拿起的商品：只有“空格或可叠放的同类格”左键才算购入，否则放下

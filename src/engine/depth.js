@@ -143,28 +143,3 @@ function hullYAt_(pts, x) {
   }
   return pts[pts.length - 1][1];
 }
-
-// 地基线 → 头顶最高线（覆盖层分界）：ceiling[x] = base[x] − playerH。
-export function ceilingFromBase(base, playerH, sh) {
-  if (!base) return null;
-  const ceil = new Int16Array(base.length).fill(-1);
-  let any = false;
-  for (let x = 0; x < base.length; x++) {
-    if (base[x] < 0) continue;
-    const v = base[x] - playerH;
-    if (v >= 4) { ceil[x] = Math.min(sh, v); any = true; }
-  }
-  return any ? ceil : null;
-}
-
-export function ceilingFromBottom(bottom, tx0, tx1, playerH, sh) {
-  return ceilingFromBase(baseLineFromBottom(bottom, tx0, tx1), playerH, sh);
-}
-
-// 屋顶“自动分界”建议值（水平，历史保留）。
-export function suggestRoofY(sprite, tiles) {
-  if (!sprite || !tiles || !tiles.length) return null;
-  let top = Infinity;
-  for (const t of tiles) if (t[1] < top) top = t[1];
-  return top === Infinity ? null : top;
-}

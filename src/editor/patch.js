@@ -7,12 +7,11 @@
 //
 // 为什么不用 JSON Patch：我们的数据是纯 JSON（cells/objects/spawns），
 // 但路径里既有数组下标也有对象键，而且需要"旧值"而非"操作序列"——
-// 记录旧值让撤销/重做都只需一次 apply，不必维护正反两份操作。
+// 记录旧值让撤销/重做都只需逐条写回旧值，不必维护正反两份操作。
 //
 // 契约：
 //   diff(before, after) → patches（只含变化的最小集合）
-//   apply(target, patches) → 新的 target（原地修改，调用方需自行决定是否克隆）
-//   invert(patches) → 反打补丁用不到（旧值已在 patches 里），保留给"重做"场景
+//   getPath / setPath / delPath → 按路径读写（撤销时逐条写回旧值）
 //
 // 性能：cells 是 900 项的对象数组，逐项比较比整份 JSON.stringify 快得多，
 // 而且只在**被改动的那些格**上产生记录。
@@ -115,24 +114,4 @@ export function diff(before, after, path = [], out = []) {
     diff(before[k], after[k], path.concat(k), out);
   }
   return out;
-}
-
-// 应用补丁：把 patches 里的旧值写回 target（= 撤销）。
-// 数组长度变化用 tail 条目整体还原，避免逐个 splice 时的下标漂移。
-export function applyPatches(target, patches) {
-  // 先处理 tail（长度变化），再处理具体路径——否则"先删后写"会越界。
-  const tails = patches.filter(p => p.tail);
-  const rest = patches.filter(p => !p.tail);
-  for (const p of tails) setPath(target, p.path, p.v);
-  for (const p of rest) {
-    if (p.removed) setPath(target, p.path, p.v);
-    else if (p.added) delPath(target, p.path);
-    else setPath(target, p.path, p.v);
-  }
-  return target;
-}
-
-// 补丁的字节量级估算（用于调试/上限判断，不求精确）。
-export function patchWeight(patches) {
-  return patches.length;
 }

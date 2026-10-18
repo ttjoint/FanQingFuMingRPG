@@ -173,8 +173,6 @@ export function soundFiles() { return audioIndex().filter(p => /\/sound\//.test(
 
 export function assetIndex() { return INDEX || []; }
 
-export function resetAssetIndex() { INDEX = null; MANIFEST_LOADED = false; }
-
 // 模糊检索：空格分隔多关键词，全部命中（AND）才算匹配。
 export function searchAssets(query, limit) {
   const list = assetIndex();
@@ -229,9 +227,3 @@ export function fileName(p) {
   return i < 0 ? s : s.slice(i + 1);
 }
 
-export function isVersionOwned(key) {
-  const root = getAssetRoot();
-  if (!root) return false;
-  const id = root.split("/").pop();
-  return id !== "default";
-}

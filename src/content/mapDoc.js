@@ -74,12 +74,6 @@ export function toLegacyMap(doc) {
   };
 }
 
-export function mapDocToBuildInput(doc) { return toLegacyMap(doc); }
-
-// 单位（带可选 overrides）在一张地图内的键：id 稳定，便于编辑器与存档引用。
-export function findUnit(doc, id) { return (doc.units || []).find(u => u.id === id); }
-export function findDecoration(doc, id) { return (doc.decorations || []).find(d => d.id === id); }
-
 // ------------------------------------------------------------------ 旧视图适配
 // 让 MapDoc 直接暴露旧的 cells / objects / spawns 接口（非枚举、写穿到图层），
 // 使地图编辑器无需大改即可**直接编辑图层化 MapDoc**。视图不参与序列化（非枚举）。

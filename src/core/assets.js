@@ -10,16 +10,9 @@ import { A } from "./state.js";
 const IMG = {}, PENDING = {};
 // 当前数据版本对图片素材的覆盖：逻辑键 -> data URL。
 let ASSET_OVERRIDES = {};
-// 当前资源根前缀（不含尾斜杠）。默认指向原版只读版本。
-let ASSET_ROOT = "versions/default";
+// 当前资源根前缀（不含尾斜杠）。固定指向原版只读版本。
+const ASSET_ROOT = "versions/default";
 
-export function setAssetRoot(root) {
-  const next = String(root || "versions/default").replace(/\/+$/, "");
-  if (next === ASSET_ROOT) return;
-  ASSET_ROOT = next;
-  for (const k in IMG) delete IMG[k];
-  for (const k in PENDING) delete PENDING[k];
-}
 export function getAssetRoot() { return ASSET_ROOT; }
 
 export function setAssetOverrides(map) {
@@ -41,9 +34,6 @@ export function assetURL(key) {
 }
 // 向后兼容别名（旧代码 / 编辑器可能引用 resolve）。
 export const resolve = assetURL;
-
-// 把这些逻辑键种的图片预载 / 覆盖映射到当前版本。
-export function remapOverrideKeys() { /* 覆盖表按逻辑键存储，无需重映射 */ }
 
 // ---- 后台预载队列（限制并发）----
 // 角色帧动辄上百张，若一次性 new Image() 会占满浏览器每域名连接数（~6），

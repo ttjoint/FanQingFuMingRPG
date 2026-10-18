@@ -424,46 +424,73 @@ D2 的 build 多样性全建立在这套正交体系上。
 
 ## 待办（全项目扫描结果）
 
-用户问“还有哪些需要改进”，以下都是本轮**实测扫描**得出、尚未动手的：
-
-- [ ] **编辑器致命：没用的配置项遍地**。编辑器把一堆旋钮摆给了策划，
-      但运行时**根本没有读取方**。已确认的：
-      - `config.items.socketFailChance`：全仓库除 config/编辑器外 **0 引用**。
-        策划改它，什么也不会发生。
-      - `unsocketFrom`：镶嵌能镶（`input/slots.js` 接了 `socketInto`），
-        但**不能拆**——`unsocketFrom` 只出现在 import 语句里，调用点 0。
-        玩家镶错了宝石只能把装备扔掉。
-      - 这类问题的危害比其他 bug 都大：它不报错、不崩溃，只是**默默不生效**，
-        而且在编辑器里“看起来已经做好了”。
-
-- [ ] **脏数据：21 个 NPC 的 level/defence/exp = 4294967295**。
-      是原版数据里的 `-1` 被当无符号数读出。目前**无实际影响**
-      （这 21 个都是 `attack=0` 的对话/场景 NPC，包括校尉/明兵/明卒，
-      等级不参与伤害公式），但一旦在编辑器里给它们配上攻击就会爆炸。
-      应在 `npcFields.js` 或 `schema.js` 归一化时把 4294967295 当作 -1/缺省。
+用户问“还有哪些需要改进”，以下都是**实测扫描**得出、尚未动手的。
+（原列的 ①②③④ 已在 2026-11-08 全部处理完毕，见下「已完成」。）
 
 - [ ] **工程遗留：`editor/index.js` 还有 1345 行**（ROADMAP 里那条 `[~]`）。
       可继续拆的有 `tabConfig` ~200 行、`tabGame` 133 行、`tabAssets` 164 行。
 
-- [ ] **无引用的导出**（实测扫出，`find`+`grep` 确认零调用点）：
-      `isInstanceEntry`、`entryStackable`、`hasInstance`、`isEquippable`、
-      `clearFx`、`countIn`、`conditionNames`、`actionNames`、
-      `ceilingFromBottom`、`effectSortKey`、`astarSmooth`、`shopGoodsFor`、
-      `isDone`、`repairSlot`、`identifySlot`（后两个是铁匠批量版的单件备用 API）。
-      核实后：这些大多是**无害的便捷封装**，不是功能缺口——
-      如 `astarSmooth` = `astar` + `smoothPath` 的合成入口（调用方直接用了两者），
-      `shopGoodsFor` = `hasGoods` + `goodsList` 的合成入口。
-      不紧急，但建议删掉以减少误读（让人以为有平滑寻路/货源逻辑在跑）。
+- [ ] **仅测试引用、生产无调用的引擎 API（22 个）**。与上一轮不同，这批
+      **不是**无害封装，而是「游戏目前不具备该能力」——删了就等于承认永远不做，
+      所以**保留并在此登记**，避免下次扫描又当成死代码：
+      - `engine/buff.js` 的 `hasBuff`/`getStacks`/`removeBuff`/`clearBuffs`：
+        buff 只能靠到期自然消失，**没有驱散 buff 的手段**（技能/装备都做不到）。
+      - `engine/damage.js` 的 `dominantType`：没有「按主要伤害类型」的展示/统计。
+      - `engine/difficulty.js` 的 `cycleDifficulty`：难度只能在编辑器改，没有游戏内切换。
+      - `engine/stash.js` 的 `isFull`/`removeFromStash`：仓库不支持「取出一半」。
+      - `engine/faction.js` 的 `hasAnyHostile`、`engine/waypoint.js` 的 `groupByAct`、
+        `engine/uniqueItem.js` 的 `setOfInstance`、`engine/item.js` 的 `typeFromKind`、
+        `engine/lootScale.js` 的 `pickWeighted`、`engine/npcSerialize.js` 的 `makeSchema`：
+        纯逻辑原语，供后续功能取用。
+      - `content/npcFields.js` 的 `npcFieldDefaults`、`content/ui.js` 的 `uiComponent`、
+        `content/uiDefault.js` 的 `DEFAULT_UI_METRICS`、`content/ids.js` 的
+        `npcRef`/`itemRef`、`core/registry.js` 的 `setAssets`：测试专用的查询/构造入口。
+      - `world/pathfinding.js` 的 `findPath`：游戏内移动走 `findPathPoints`（世界坐标点），
+        `findPath`（格子路径）只被 E2E 用作连通性探测。
 
 - [ ] **无自动化测试的模块**：`systems/aiActions.js`（499 行）、
       `render/panels.js`（448 行）、`input/input.js`（389 行）、
       `render/hud.js` 等视图/输入层全靠 E2E 单向覆盖。
       视图层不要求单测，但 `aiActions.js` 里全是行为策略，值得抽纯函数。
 
+- [ ] **`test/patch.test.mjs` 测的是简化模型，不是生产路径**。
+      生产撤销在 `map-editor.js` 的 `swapApply`（要处理 MapDoc live view / Proxy /
+      `CELL_DERIVED`），测试里用的是自己实现的简化 `applyPatches`。
+      能验证 `diff` 的正确性，但**测不到 `swapApply` 的真实行为**。
 
 ---
 
 ## 已完成（归档）
+
+- ✅ 2026-11-08 清理待办 ①～④（删除死代码 + 补两个真缺口）：
+  - **删** `config.items.socketFailChance`（编辑器/配置/数据三处）：运行时零引用，
+    且「镶嵌有失败率」本身就是负面体验（宝石白丢），决定删除而不是实现。
+  - **通** 镶嵌拆拔：`Ctrl+右键装备槽` 拆下第一颗宝石到背包（`input/slots.js` + `input/input.js`）。
+    `unsocketFrom` 本来就是完整实现，只是没接线。`Shift+右键` 的强化保持不动。
+  - **修** 脏数据：`npcFields.js` 新增 `sane(v, d)`，把原版 `-1` 被读成 `4294967295`
+    （U32 哨兵）的 `level`/`defence`/`exp` 归一到缺省值。新增 2 例单测，
+    其中一例专门钉住「合法的 0 不能被吞掉」。
+  - **删** 大批无引用导出（见下），`engine/flowfield.js` 整模块（66 行）连测试一并删除。
+  - 反向验证：去掉哨兵判断 → 1 例失败；恢复 → 13/13 通过。
+
+  本轮删掉的死代码（均为全仓库零引用，含注释一并清理）：
+  - 重复/被取代的实现：`findPathRaw`/`pathToWorld`（`findPathPoints` 已内联）、
+    `astarSmooth`、`shopGoodsFor`、`applyPatches`（生产走 `map-editor.js` 的 `swapApply`）、
+    `repairSlot`/`identifySlot`/`slotEntry`（铁匠只用了批量版）、`ceilingFromBase`、
+    `isMelee`/`isRanged`/`inRange`/`MELEE_RANGE`/`MODE_MELEE`/`MODE_RANGED`。
+  - 空壳/假承诺：`remapOverrideKeys`（空函数占位）、`patchWeight`（注释说「用于上限判断」但无人用）、
+    `rateLabel`/`rateToSemi`、`clearPeaksCache`、`resetAssetIndex`、`isVersionOwned`。
+  - 假承诺的注释：`countIn` 写着「供 UI 显示仓库已有 N 件」但零调用（已删）；
+    `clearFx` 写着「切图/读档时调用」但没人调（已删）。
+  - 其他：`isInstanceEntry`/`entryStackable`/`hasInstance`/`isEquippable`/`isDone`、
+    `conditionNames`/`actionNames`、`effectSortKey`、`ceilingFromBottom`、`suggestRoofY`、
+    `setAssetRoot`/`currentUiLayout`、`packMeta`/`listVersions`/`diskDefaultPack`、
+    `mapDocToBuildInput`/`findUnit`/`findDecoration`、`skillRef`/`scriptRef`/`mapRef`。
+  - 同时修掉一处重复：`takeToPack` 改为复用 `takeFromStash`（顺带去掉多余的 `s[i] = null`）。
+  - **教训**：先前两次「零引用」扫描都是错的。第一次用 `grep -v` 排除定义行，
+    把整个 import 行也排掉了；第二次 heredoc 里 `\\b` 被解释成退格符，正则匹配一切为空。
+    正确做法：用**词边界正则**扫全文，并把 `test/`/`e2e/` 也算作引用方
+    （`findPath` 就是这样被误删后靠 E2E 抓回来的）。
 
 - ✅ 2026-10-18 `2f05224` 修复 `.gitignore` 误排除整个 `test/`（228 个单测当时 0 个入库）
 - ✅ 2026-10-18 `07c07b6` 删除废弃 `tools/e2e.mjs`、接通 GSP `PlaySound`、修正文档失效路径
