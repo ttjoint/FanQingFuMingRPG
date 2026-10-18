@@ -8,6 +8,7 @@ import { SETTINGS_BOX, SETTINGS_BAR, SETTINGS_BTN, uiRect, uiSlotRect } from "..
 import { PACK_BOX } from "../core/layout.js";
 import { SAVE_SLOTS, saveSlotInfo } from "../systems/save.js";
 import { normalizeDifficulties } from "../engine/difficulty.js";
+import { mercList, mercInfo } from "../systems/merc.js";
 import { getRuntime } from "../runtime/context.js";
 
 export function drawTip() {
@@ -225,6 +226,76 @@ export function drawDifficulty() {
     ctx.fillStyle = "#9a8e78"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
     ctx.fillText("血×" + d.hp + "  伤×" + d.damage + "  经验×" + d.exp + "  掉落×" + d.drop, r.x + 10, r.y + 32);
   });
+}
+
+// 随从面板（P4）：未招募时列出可招募项，已招募则显示状态 + 遣散。
+export const MERC_BOX = { x: 170, y: 100, w: 300, h: 250 };
+const MERC_ROW_H = 52;
+
+export function mercRowRect(i) {
+  const B = MERC_BOX;
+  return { x: B.x + 12, y: B.y + 44 + i * MERC_ROW_H, w: B.w - 24, h: MERC_ROW_H - 8 };
+}
+
+// 当前面板的可点击行：未招募 = 可招募列表；已招募 = [遣散]。
+export function mercRowAt(sx, sy) {
+  if (!G.mercPanel) return -1;
+  for (let i = 0; i < 4; i++) {
+    const r = mercRowRect(i);
+    if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return i;
+  }
+  return -1;
+}
+
+export function drawMercPanel() {
+  if (!G.mercPanel) return;
+  const B = MERC_BOX;
+  ctx.fillStyle = "rgba(16,12,8,0.96)"; ctx.fillRect(B.x, B.y, B.w, B.h);
+  ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(B.x + 1, B.y + 1, B.w - 2, B.h - 2); ctx.lineWidth = 1;
+  ctx.fillStyle = "#f0d060"; ctx.font = "bold 14px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.fillText("随从", B.x + 14, B.y + 26);
+  ctx.fillStyle = "#7a3a10"; ctx.font = "bold 11px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.textAlign = "right"; ctx.fillText("银两 " + G.stats.money, B.x + B.w - 14, B.y + 26); ctx.textAlign = "left";
+
+  const info = mercInfo(getRuntime());
+  if (info) {
+    // 已招募：显示状态
+    const r = mercRowRect(0);
+    ctx.fillStyle = "rgba(60,48,28,0.9)"; ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = "#8a7040"; ctx.strokeRect(r.x + .5, r.y + .5, r.w - 1, r.h - 1);
+    ctx.fillStyle = "#f0e0b0"; ctx.font = "bold 13px 'Microsoft YaHei',SimHei,sans-serif";
+    ctx.fillText(info.def.name, r.x + 10, r.y + 20);
+    ctx.fillStyle = "#9a8e78"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
+    if (info.dead) {
+      ctx.fillText(info.state === "ready" ? "倒下了（可归队 " + info.reviveCost + "）" : "倒下了（" + Math.ceil(20 - info.deadT) + "s 后可归队）", r.x + 10, r.y + 36);
+    } else {
+      ctx.fillText("气血 " + info.hp + "/" + info.hpMax + "　下次薪水 " + Math.ceil(info.nextFeeIn) + "s", r.x + 10, r.y + 36);
+    }
+    const r2 = mercRowRect(1);
+    ctx.fillStyle = "rgba(70,40,30,0.9)"; ctx.fillRect(r2.x, r2.y, r2.w, r2.h);
+    ctx.strokeStyle = "#a06050"; ctx.strokeRect(r2.x + .5, r2.y + .5, r2.w - 1, r2.h - 1);
+    ctx.fillStyle = "#f0c0b0"; ctx.font = "13px 'Microsoft YaHei',SimHei,sans-serif";
+    ctx.fillText("遣散（不退款）", r2.x + 10, r2.y + 20);
+    // 薪水提示
+    ctx.fillStyle = "#6a6050"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
+    ctx.fillText("每 60 秒扣薪水；钱不够会自动离开。", B.x + 14, B.y + B.h - 10);
+    return;
+  }
+  // 未招募：可招募列表
+  const list = mercList(getRuntime());
+  list.slice(0, 3).forEach((m, i) => {
+    const r = mercRowRect(i);
+    ctx.fillStyle = "rgba(60,48,28,0.9)"; ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = "#8a7040"; ctx.strokeRect(r.x + .5, r.y + .5, r.w - 1, r.h - 1);
+    ctx.fillStyle = "#f0e0b0"; ctx.font = "bold 13px 'Microsoft YaHei',SimHei,sans-serif";
+    ctx.fillText(m.name, r.x + 10, r.y + 18);
+    ctx.fillStyle = "#9a8e78"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
+    ctx.fillText("气血 " + m.hp + "　攻 " + m.atk + "　薪酬 " + m.fee + "/分", r.x + 10, r.y + 32);
+    ctx.fillStyle = "#e0c060"; ctx.textAlign = "right";
+    ctx.fillText(m.price + " 两", r.x + r.w - 10, r.y + 18); ctx.textAlign = "left";
+  });
+  ctx.fillStyle = "#6a6050"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.fillText("点击招募；Esc 关闭", B.x + 14, B.y + B.h - 10);
 }
 
 export function drawSavePanel() {

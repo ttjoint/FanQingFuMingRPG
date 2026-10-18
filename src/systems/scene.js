@@ -66,6 +66,7 @@ export function resetNewGame(ctx) {
   G.waypoints = {};
   // 难度默认普通档。存档会覆盖它（读档时写回 G.difficulty）。
   G.difficulty = "normal";
+  G.mercenary = null;         // 随从不跨周目继承（新开局重新招募）
 }
 
 // 开始新游戏：真正启动 main.gsp（其第一条就是 LoadInitialMap）。

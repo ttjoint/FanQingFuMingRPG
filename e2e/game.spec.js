@@ -1076,6 +1076,68 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     expect(df.unknown.atk).toBe(df.normal.atk);
   }
 
+  // ---- 雇佣兵（P4）----
+  // 随从是挂在 G.mercenary 上的友好 NPC，直接进 G.npcs 复用现有 AI/寻路/伤害。
+  const mc = await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const M = await import("/src/systems/merc.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    const out = {};
+    G.mercenary = null;
+    G.stats.money = 10000;
+    out.list = M.mercList(rt).map(m => m.id);
+    const before = G.npcs.length;
+    const h = M.hire(rt, out.list[0]);
+    out.hire = { ok: h.ok, cost: h.cost };
+    out.npcDelta = G.npcs.length - before;                  // 真的进了场景
+    out.unitFaction = G.mercenary.unit && G.mercenary.unit.faction;   // 与玩家同阵营
+    // 没钱 / 已有随从 都要拒绝
+    G.stats.money = 0;
+    out.poorHire = M.hire(rt, out.list[1]).ok;
+    G.stats.money = 10000;
+    out.doubleHire = M.hire(rt, out.list[1]).ok;            // 不能有两个随从
+    // 薪水按周期扣
+    const m0 = G.stats.money;
+    M.mercSystem(rt, 61);
+    out.fee = m0 - G.stats.money;
+    // 跟随：挪远后应产生移动目标
+    const u = G.mercenary.unit;
+    u.x = G.player.x + 2000; u.y = G.player.y;
+    M.mercSystem(rt, 0.016);
+    out.moved = !!u.moveGoal;
+    // 死亡 → 摘除 → 等够时间 → 付费归队
+    u.dead = true;
+    const n2 = G.npcs.length;
+    M.mercSystem(rt, 0.016);
+    out.removedOnDeath = G.npcs.length < n2;
+    for (let i = 0; i < 10; i++) M.mercSystem(rt, 1);
+    out.after10s = G.mercenary.dead;                        // 还没到点，仍倒着
+    const mBefore = G.stats.money;
+    for (let i = 0; i < 12; i++) M.mercSystem(rt, 1);       // 累计 22s > 20s
+    out.revived = !G.mercenary.dead;
+    out.reviveCost = mBefore - G.stats.money;               // 归队要付钱
+    out.unitBack = !!G.mercenary.unit;
+    // 遣散
+    out.dismissed = M.dismiss(rt);
+    out.mercGone = !G.mercenary;
+    return out;
+  });
+  expect(mc.list.length).toBeGreaterThanOrEqual(2);
+  expect(mc.hire.ok).toBe(true);
+  expect(mc.npcDelta).toBe(1);                    // 随从真的进了 G.npcs
+  expect(mc.unitFaction).toBe("player");          // 与玩家同阵营，复用现有 ally 判定
+  expect(mc.poorHire).toBe(false);
+  expect(mc.doubleHire).toBe(false);              // 同时只能有一个随从
+  expect(mc.fee).toBeGreaterThan(0);              // 薪水按周期扣
+  expect(mc.moved).toBe(true);                    // 走远会跟
+  expect(mc.removedOnDeath).toBe(true);
+  expect(mc.after10s).toBe(true);                 // 10s 还没到复活时间
+  expect(mc.revived).toBe(true);                  // 到点归队
+  expect(mc.reviveCost).toBeGreaterThan(0);       // 归队要付费，不是白送
+  expect(mc.unitBack).toBe(true);
+  expect(mc.dismissed).toBe(true);
+  expect(mc.mercGone).toBe(true);
+
   // ---- 编辑器 ----
   await page.evaluate(() => { window.prompt = () => "PW版本"; window.confirm = () => true; });
   await page.evaluate(async () => { const m = await import("/src/editor/index.js"); await m.openEditor(); });

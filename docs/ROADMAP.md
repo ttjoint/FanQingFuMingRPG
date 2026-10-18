@@ -186,7 +186,26 @@ D2 的 build 多样性全部建立在这套正交体系上。
       - ⚠️ **读档顺序**：`G.difficulty` 必须在 `loadMap` **之前**恢复，
         否则读档后场上是一批普通难度数值的怪
       - 单测 `test/difficulty.test.mjs` 9 例；E2E 钉住逐档变强 + 未知 id 退回普通
-- [ ] **雇佣兵 / 随从**（敌人 AI 已有协防/仇恨基础）
+- [x] **雇佣兵 / 随从**
+      - `engine/merc.js`（纯逻辑）：`MERCENARIES`（护卫/弓手）/ `normalizeMerc` /
+        `normalizeMercs` / `mercById` / `feesDue` / `nextFeeIn` / `reviveCost` /
+        `reviveState` / `followStep` / `canHire`
+      - **随从不是新的实体类型**：就是一个 `faction: "player"` 的 NPC 实例，
+        挂在 `G.mercenary` 并塞进 `G.npcs`，直接复用现有 AI/寻路/动画/伤害结算。
+        为它另写一套战斗逻辑只会产生两份要同步维护的伤害公式。
+      - 跟随用**滞回带**（`FOLLOW_LEAD` 140 / `FOLLOW_STOP` 84）：
+        越过 lead 才追、追到 stop 才停，否则会在边界每帧反复启停（抽搐）。
+        目标点保持 stop 距离，不叠在玩家身上。
+      - 薪水每 60 秒扣一次，**钱不够自动离开**（不留"欠薪的随从"）；
+        这给了金币一个持续去处（铁匠的三个出口都是一次性的）。
+      - 死亡不永久消失：20 秒后可花 30% 招募价归队。
+        永久死亡会让玩家因为一次失误丢掉几百金币而直接读档读档。
+      - 正在战斗时不跟（`busy` 判定）——追着玩家跑会打断正在打的架
+      - 切图时把 `G.mercenary.unit` 置空，由 `mercSystem` 下一帧补建
+        （旧实体随 `G.npcs` 清空了，留着就是野指针）
+      - UI：游戏内 **P** 开随从面板，未招募列出可招项、已招募显示状态 + 遣散
+      - 单测 `test/merc.test.mjs` 11 例；E2E 钉住招募扣钱/进场景/同阵营、
+        没钱与重复招募被拒、薪水、跟随、死亡摘除、10s 未复活、到点付费归队、遣散
 
 ## P5 · 技术债与解耦
 

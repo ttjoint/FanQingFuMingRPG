@@ -17,6 +17,8 @@ import { waypointAt, WP_BOX, stashSlotAt, stashRect, STASH_BOX } from "../render
 import { storeFromPack, takeToPack, toggleStashPanel, stashOf } from "../systems/stash.js";
 import { smithButtonAt, smithRect, diffRowAt, DIFF_BOX } from "../render/panels.js";
 import { normalizeDifficulties } from "../engine/difficulty.js";
+import { mercRowAt, MERC_BOX } from "../render/panels.js";
+import { hire, dismiss, toggleMercPanel, mercList, mercInfo } from "../systems/merc.js";
 import { repairAll, identifyAll, gamble, toggleSmith } from "../systems/smith.js";
 import { togglePanel, travelTo } from "../systems/waypoint.js";
 import { saveBtnAt, saveSlot, loadSlot } from "../systems/save.js";
@@ -205,6 +207,18 @@ export function addInput() {
       return;
     }
     if (G.gameOver) return;
+    // 随从面板：未招募点行 = 招募；已招募点第二行 = 遣散。
+    if (G.mercPanel) {
+      const mi = mercRowAt(sp.x, sp.y);
+      if (mi >= 0) {
+        const rt = getRuntime();
+        const info = mercInfo(rt);
+        if (info) { if (mi === 1) dismiss(rt); }
+        else { const list = mercList(rt); if (list[mi]) hire(rt, list[mi].id); }
+        return;
+      }
+      if (sp.x >= MERC_BOX.x && sp.x <= MERC_BOX.x + MERC_BOX.w && sp.y >= MERC_BOX.y && sp.y <= MERC_BOX.y + MERC_BOX.h) return;
+    }
     // 难度面板：点一行即切换（立即生效；已出场的怪不改，新出场的按新倍率）。
     if (G.diffPanel) {
       const di = diffRowAt(sp.x, sp.y);
@@ -298,6 +312,7 @@ export function addInput() {
     if (G.stashPanel) { toggleStashPanel(getRuntime(), false); return; }
     if (G.smithPanel) { G.smithPanel = false; return; }
     if (G.diffPanel) { G.diffPanel = false; return; }
+    if (G.mercPanel) { G.mercPanel = false; return; }
     if (G.shop) { closeShop(getRuntime()); return; }
     if (G.savePanel) { G.savePanel = false; return; }
     if (G.packOpen) { G.packOpen = false; G.cursor = null; return; }
@@ -337,6 +352,7 @@ export function addInput() {
     if (e.key === "m" || e.key === "M") { togglePanel(getRuntime()); e.preventDefault(); return; }
     if (e.key === "b" || e.key === "B") { toggleStashPanel(getRuntime()); e.preventDefault(); return; }
     if (e.key === "n" || e.key === "N") { toggleSmith(getRuntime()); e.preventDefault(); return; }
+    if (e.key === "p" || e.key === "P") { toggleMercPanel(getRuntime()); e.preventDefault(); return; }
     if (e.key === "F2") { const G2 = getRuntime().state; G2.diffPanel = !G2.diffPanel; if (G2.diffPanel) { G2.shop = null; G2.savePanel = false; G2.waypointPanel = false; G2.stashPanel = false; G2.smithPanel = false; } e.preventDefault(); return; }
     if (e.key === "F4") { setPanel("mission"); return; }
     if (e.key === "F1") { setPanel("note"); return; }

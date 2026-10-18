@@ -26,6 +26,9 @@ export const DEFAULT_CONFIG = {
   // 在不同难度下手感割裂。掉 drop 倍率故意**小于** hp/damage 倍率，
   // 否则最优解永远是无脑开最高难度。见 engine/difficulty.js。
   difficulties: null,           // null = 用 engine/difficulty.js 的内置三档
+  // 随从表（P4）：null = 用 engine/merc.js 的内置两条。
+  // 随从是挂在 G.mercenary 上的友好 NPC，复用现有 AI/寻路/伤害结算。
+  mercenaries: null,
   inventory: { packItem: "包裹", packSize: 25 },
   // 共享仓库（P4）：账号级、不随存档。格子数影响玩家能攒多少东西。
   stash: { size: 100 },

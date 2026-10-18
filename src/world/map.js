@@ -158,6 +158,10 @@ export function loadMap(ctx, name) {
   G.waypointPanel = false;         // 传送面板（P4）
   G.stashPanel = false;            // 仓库面板（P4）；G.stash 数据本身不随切图清空
   G.smithPanel = false;            // 铁匠面板（P4）
+  G.mercPanel = false;             // 随从面板（P4）；G.mercenary 实体在下面重新 spawn
+  // 随从跨图跟随：旧图的实体已随 G.npcs 清空，这里指个空指针，
+  // 由 mercSystem 下一帧补建（否则旧实体成了野指针）。
+  if (G.mercenary) G.mercenary.unit = null;
   G._wpCell = null;                // 传送点踩点缓存（新图重新判定）
   G.dialog = null;                 // 对话
   G.script = null;                 // 脚本执行栈（脚本上下文绑定旧图单位）
