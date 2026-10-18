@@ -1,6 +1,8 @@
 // ContentDB：内容定义的规范模型（Record<id, Def>），由旧 assets 数据构建，
 // 也可由打包补丁（patch）覆盖。构建脚本、运行时、编辑器共用这一份结构。
 import { CONTENT_VERSION, normalizeNpc, normalizeItem, normalizeSkill, normalizeConfig, normalizeMapDoc, normalizeDecorTemplates, normalizeFactions, normalizeAis, normalizeBuffList, normalizeEffectList, normalizeAffixList } from "./schema.js";
+import { normalizeUi } from "./ui.js";
+import { defaultUi } from "./uiDefault.js";
 
 const deep = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
 export const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -26,6 +28,8 @@ export function buildContentDB(assets, mapDocs) {
     game: deep(assets.game) || {}, transitions: deep(assets.transitions) || {}, mapsIndex: deep(assets.mapsIndex) || {},
     mapsManifest: (assets.mapsManifest || []).slice(), mapDocs: docs,
     decorTemplates: normalizeDecorTemplates(assets.decorTemplates || {}),   // 跨地图共享的装饰物模板
+    // 界面布局：可编辑的 UI 元件表。缺省 = 改造前的硬编码布局（逐像素一致）。
+    ui: normalizeUi(assets.ui || defaultUi()),
   };
 }
 
@@ -70,6 +74,8 @@ export function diffContent(base, next) {
   if (!eq(base.buffs, next.buffs)) patch.content.buffs = deep(next.buffs);   // Buff 配置表（整表替换）
   if (!eq(base.effects, next.effects)) patch.content.effects = deep(next.effects);   // 特效定义表（整表替换）
   if (!eq(base.affixes, next.affixes)) patch.content.affixes = deep(next.affixes);   // 词缀表（整表替换）
+  // 界面布局：元件是**有序数组**（z 序/同层绘制顺序有意义），增删移动都属于整表差异。
+  if (!eq(base.ui, next.ui)) patch.content.ui = deep(next.ui);
   // 装饰物模板（按贴图键）：只存非空且变化的条目
   {
     const b = base.decorTemplates || {}, n = next.decorTemplates || {};
@@ -106,6 +112,7 @@ export function applyPatch(base, patch) {
   if (c.buffs !== undefined) out.buffs = normalizeBuffList(c.buffs);
   if (c.effects !== undefined) out.effects = normalizeEffectList(c.effects);
   if (c.affixes !== undefined) out.affixes = normalizeAffixList(c.affixes);
+  if (c.ui !== undefined) out.ui = normalizeUi(c.ui);
   {
     if (!out.decorTemplates) out.decorTemplates = {};
     const mod = c.decorTemplates || {};

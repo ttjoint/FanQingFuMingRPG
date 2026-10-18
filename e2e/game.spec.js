@@ -49,6 +49,25 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   expect(await page.evaluate(() => window.__GAME__.G.currentMap)).toBe("孙家庄");
   expect(await page.evaluate(() => !!window.__GAME__.G.player)).toBe(true);
 
+  // HUD 真的画出来了（数据驱动的 ui 配置 → 实际像素）。
+  // 单测只能验证“默认配置坐标与旧硬编码逐像素一致”，验证不了绘制循环
+  // 真的跑了。改造过程中就因为 rt.ctx.content 应为 rt.content 而使整个 HUD
+  // 静默不画（页面无报错），这条断言就是为那个 bug 加的护栏。
+  expect(await page.evaluate(async () => {
+    const hud = await import("/src/render/hud.js");
+    const cv = document.getElementById("cv");
+    const c = cv.getContext("2d");
+    c.fillStyle = "#ff00ff"; c.fillRect(0, 0, cv.width, cv.height);   // 洋红底，未画到就还是洋红
+    hud.drawHUD();
+    const at = (x, y) => { const q = c.getImageData(x, y, 1, 1).data; return [q[0], q[1], q[2]]; };
+    const hp = at(120, 431);        // 血条中段（逻辑 44..203 y428..435）
+    const panel = at(2, 382);       // 底部面板底图
+    const isMagenta = (p) => p[0] === 255 && p[1] === 0 && p[2] === 255;
+    // 血条应接近配置里的 #c0392b（192,57,43），面板不应是洋红
+    return !isMagenta(hp) && hp[0] > 120 && hp[0] > hp[1] + 40 && hp[0] > hp[2] + 40
+      && !isMagenta(panel);
+  })).toBe(true);
+
   // 存读档往返（含 NPC 货物背包 / 实例阵营等非默认字段）
   expect(await page.evaluate(async () => {
     const { getRuntime } = await import("/src/runtime/context.js");
@@ -113,42 +132,40 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
     return enemy.dead === true;
   })).toBe(true);
 
-  // 伤害类型/抗性：同一发攻击，火抗 50 的怪承伤减半，冰霜弱点 -25 承伤增加。
+  // 伤害类型/抗性：同一发攻击，火抗 50 承伤减半，冰霜弱点 -25 承伤增加，抗性 100 免疫。
   // 这是 P0 地基的端到端回归——纯逻辑单测在 test/damage.test.mjs。
+  // 注意：这里**不打真怪**，而是直接对"干净的目标对象"结算，
+  // 避免受到场景里残留的 NPC / buff / 攻击力影响（早期版本因此偶发失败）。
   expect(await page.evaluate(async () => {
     const { getRuntime } = await import("/src/runtime/context.js");
-    const { makeNPC } = await import("/src/world/npc.js");
     const c = await import("/src/systems/combat.js");
-    const G = window.__GAME__.G, A = window.__GAME__.A, rt = getRuntime();
-    const tmpl = A.npcsData.find(n => n.attack > 0);
-    const mk = (resist) => {
-      const e = makeNPC(tmpl, 0, 0);
-      e.x = G.player.x; e.y = G.player.y + 30;
-      e.hp = 100000; e.hpMax = 100000; e.resist = resist;
-      G.npcs.push(e);
-      return e;
-    };
-    // 固定伤害 100，用 forceHit + 固定威力，排除浮动与命中判定干扰
-    const hit = (victim, type) => {
-      const before = victim.hp;
-      c.resolveHit(rt, G.player, victim, { type: 1, power: 100, damageType: type, mode: "melee" },
+    const G = window.__GAME__.G, rt = getRuntime();
+    const player = G.player;
+    // 用最简目标对象：resolveHit 只读取 hp / resist / x / y 等字段。
+    const mkTarget = (resist) => ({ hp: 1e6, hpMax: 1e6, x: player.x, y: player.y + 10, resist, buffs: [] });
+    const hit = (target, type) => {
+      const before = target.hp;
+      c.resolveHit(rt, player, target,
+        { type: 1, power: 100, damageType: type, mode: "melee" },
         { atk: 0, forceHit: true, reach: 9999 });
-      return before - victim.hp;
+      return before - target.hp;
     };
-    // 玩家攻击力拉到 0，只靠 power 走固定底数
-    const savedAtk = G.stats.attack; G.stats.attack = 0;
-    const e1 = mk([{ type: "fire", value: 50 }]);
-    const e2 = mk([{ type: "cold", value: -25 }]);
-    const e3 = mk([{ type: "fire", value: 100 }]);
-    const dmgFire = hit(e1, "fire");
-    const dmgCold = hit(e2, "cold");
-    const dmgImmune = hit(e3, "fire");
-    const dmgPlain = hit(mk(null), "physical");
-    G.stats.attack = savedAtk;
-    G.npcs = G.npcs.filter(n => n !== e1 && n !== e2 && n !== e3);
-    // 火抗 50 → 约一半；冰霜 -25 → 更多；免疫 → 0；无抗性 → 基准
-    return dmgPlain > 0 && dmgFire > 0 && dmgFire < dmgPlain
-      && dmgCold > dmgPlain && dmgImmune === 0;
+    // 关掉伤害浮动（damageVariance），否则各次命中独立随机 ±25%，
+    // "火抗伤害 < 基准伤害"这种比较会偶发翻转 —— 这是最初偶发失败的原因。
+    const saved = { atk: G.stats.attack, variance: rt.config.combat.damageVariance };
+    G.stats.attack = 0;                       // 只靠 power，排除角色成长
+    rt.config.combat.damageVariance = 0;
+    const dmgPlain = hit(mkTarget(null), "physical");
+    const dmgFire = hit(mkTarget([{ type: "fire", value: 50 }]), "fire");
+    const dmgCold = hit(mkTarget([{ type: "cold", value: -25 }]), "cold");
+    const dmgImmune = hit(mkTarget([{ type: "fire", value: 100 }]), "fire");
+    G.stats.attack = saved.atk;
+    rt.config.combat.damageVariance = saved.variance;
+    // 火抗 50 → 明显低于基准；冰霜 -25 → 明显高于基准；免疫 → 恰好 0。
+    return dmgPlain > 0
+      && dmgFire > 0 && dmgFire < dmgPlain
+      && dmgCold > dmgPlain
+      && dmgImmune === 0;
   })).toBe(true);
 
   // 阵营系统：按 faction 判定敌对（不靠 attack 有无），且实例阵营可动态改。

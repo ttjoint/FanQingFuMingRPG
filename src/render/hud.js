@@ -1,59 +1,161 @@
 // HUD：底部状态面板、快捷栏、装备栏、光标持物。
+//
+// 布局来自内容里的 ui 配置（content/ui.js），不再是这里的硬编码坐标。
+// 元件按 z 升序绘制；每个 kind 由一个 draw* 函数负责。
+// 默认配置（versions/default/assets/ui.json）与改造前的硬编码逐像素一致，
+// 由 test/ui.test.mjs 守着——所以这次改造不改变任何视觉结果。
 import { G } from "../core/state.js";
 import { VW, VH, ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { itemByName, skillByName } from "../core/registry.js";
-import { HOTBAR_X0, HOTBAR_DX, HOTBAR_Y, HOTBAR_W, HOTBAR_H, FN_BUTTONS, FN_BUTTON_Y, FN_BUTTON_SIZE } from "../core/layout.js";
+import { resolvePos, slotRect } from "../content/ui.js";
+import { getRuntime } from "../runtime/context.js";
 
-export function drawHUD() {
-  const st = G.stats, Y = VH - 100;
-  const P = getImg("assets/ui/userpanel.png");
-  if (P) ctx.drawImage(P, 0, Y);
-  else { ctx.fillStyle = "rgba(18,14,10,0.9)"; ctx.fillRect(0, Y, VW, 100); }
-  const bar = (x, y, w, h, cur, max, col) => {
-    ctx.fillStyle = "#111"; ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = col; ctx.fillRect(x, y, Math.round(w * Math.max(0, Math.min(1, cur / max))), h);
-  };
-  // 坐标按 res/ini.agp 的 playerpanel.ini
-  bar(44, Y + 48, 159, 7, st.hp, st.hpMax, "#c0392b");
-  bar(259, Y + 48, 159, 7, st.mp, st.mpMax || 1, "#2d7fd0");
-  bar(475, Y + 48, 159, 7, st.exp, st.expNext || 1, "#c9a227");
-  ctx.font = "9px 'Microsoft YaHei',SimHei,sans-serif";
-  // 数值写在栏内部（居中、带描边，保证叠在彩色条上仍可读）
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  const barText = (x, w, y, h, t) => {
-    ctx.lineWidth = 2; ctx.strokeStyle = "rgba(0,0,0,0.85)"; ctx.strokeText(t, x + w / 2, y + h / 2 + 0.5);
-    ctx.fillStyle = "#ffffff"; ctx.fillText(t, x + w / 2, y + h / 2 + 0.5);
-  };
-  barText(44, 159, Y + 48, 7, `${st.hp} / ${st.hpMax}`);
-  barText(259, 159, Y + 48, 7, `${Math.round(st.mp)} / ${st.mpMax}`);
-  barText(475, 159, Y + 48, 7, `${st.exp} / ${st.expNext}`);
-  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = "#ffd75e"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
-  // 等级：居中写在中间的小格内（playerpanel.ini levelLbl 363,70）；金钱：居中写在“金钱”字样下方（moneyLbl 418,80）
-  ctx.textAlign = "center";
-  ctx.fillText("等级" + st.level, 362, Y + 82);
-  ctx.fillText(String(st.money), 417, Y + 92);
-  ctx.textAlign = "left";
-  // 技能图标按钮 (playerpanel.ini skillButton 7,10)
-  const sk = skillByName(G.skill);
-  const bt = getImg("assets/ui/button.png");
-  if (bt) ctx.drawImage(bt, 7, Y + 10, 35, 35);
-  if (sk && sk.icon) { const ic = getImg("assets/skill_icons/" + sk.icon.replace(/\.bmp$/, ".png")); if (ic) ctx.drawImage(ic, 7, Y + 10, 35, 35); }
-  ctx.fillStyle = "#e8e0c8"; ctx.font = "11px 'Microsoft YaHei',SimHei,sans-serif";
-  ctx.fillText(sk ? sk.name : G.skill, 46, Y + 28);
-  // 快捷栏 1~9：对齐 userpanel.bmp 里 9 个格子（首格 x=6，间距 37，宽 35）
-  for (let i = 0; i < 9; i++) drawItemSlot(G.hotbar[i], HOTBAR_X0 + i * HOTBAR_DX, Y + HOTBAR_Y, HOTBAR_W, HOTBAR_H);
-  // 装备（playerpanel.ini weaponButtons：Shi1=492 Wu=530 Jia=566 Shi2=603, y=12）
-  for (const [k, x] of [["Shi1", 492], ["Wu", 530], ["Jia", 566], ["Shi2", 603]])
-    drawItemSlot(G.equip[k], x, Y + 12, 35, 35);
-  // 右下角功能按钮：属性 / 记事 / 荣辱 / 任务 / 菜单
-  for (const b of FN_BUTTONS) {
-    const im = getImg("assets/ui/" + b.img + ".png");
-    if (im) ctx.drawImage(im, b.x, Y + FN_BUTTON_Y, FN_BUTTON_SIZE, FN_BUTTON_SIZE);
+// 取当前 UI 配置。内容缺失时返回 null（不画任何元件），
+// 这比“退回一份硬编码”更容易发现装配问题。
+function uiOf() {
+  const rt = getRuntime();
+  const c = rt && rt.content;
+  return (c && c.ui) || null;
+}
+
+// 按 z 升序返回可见元件（同 z 保持加入顺序，与 hitTop 的判定一致）。
+function sortedComps(ui) {
+  if (!ui || !Array.isArray(ui.components)) return [];
+  return ui.components
+    .map((c, i) => ({ c, i }))
+    .filter(x => x.c.visible)
+    .sort((a, b) => (a.c.z - b.c.z) || (a.i - b.i))
+    .map(x => x.c);
+}
+
+const EQUIP_KEYS = ["Shi1", "Wu", "Jia", "Shi2"];
+
+// 绑定键 -> 当前值。未识别的绑定返回 null（元件不画）。
+function bindValue(bind, st) {
+  switch (bind) {
+    case "stats.hp": return { cur: st.hp, max: st.hpMax };
+    case "stats.mp": return { cur: st.mp, max: st.mpMax || 1 };
+    case "stats.exp": return { cur: st.exp, max: st.expNext || 1 };
+    case "stats.level": return st.level;
+    case "stats.money": return st.money;
+    default: return null;
   }
 }
 
+export function drawHUD() {
+  const ui = uiOf();
+  const comps = sortedComps(ui);
+  for (const c of comps) {
+    const p = resolvePos(c, VW, VH);
+    if (c.kind === "panel") drawPanel(c, p);
+    else if (c.kind === "bar") drawBar(c, p);
+    else if (c.kind === "label") drawLabel(c, p);
+    else if (c.kind === "button") drawButton(c, p);
+    else if (c.kind === "image") drawImage(c, p);
+    else if (c.kind === "slotgrid") drawSlotGrid(c);
+  }
+}
+
+function drawPanel(c, p) {
+  const im = c.img ? getImg(c.img) : null;
+  if (im) { ctx.drawImage(im, p.x, p.y, c.w || im.width, c.h || im.height); return; }
+  // 无贴图时画一个可辨认的底（不再静默“什么都不画”，便于排查缺图）
+  ctx.fillStyle = "rgba(18,14,10,0.9)";
+  ctx.fillRect(p.x, p.y, c.w, c.h);
+}
+
+function drawBar(c, p) {
+  const st = G.stats;
+  const v = bindValue(c.bind, st);
+  if (!v) return;
+  ctx.fillStyle = c.bg || "#111";
+  ctx.fillRect(p.x, p.y, c.w, c.h);
+  const ratio = Math.max(0, Math.min(1, v.cur / (v.max || 1)));
+  ctx.fillStyle = c.color || "#c0392b";
+  ctx.fillRect(p.x, p.y, Math.round(c.w * ratio), c.h);
+  // 数值写在栏内部（居中、带描边，保证叠在彩色条上仍可读）
+  if (c.text === "value") {
+    const t = Math.round(v.cur) + " / " + Math.round(v.max);
+    ctx.font = "9px 'Microsoft YaHei',SimHei,sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.lineWidth = 2; ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    ctx.strokeText(t, p.x + c.w / 2, p.y + c.h / 2 + 0.5);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(t, p.x + c.w / 2, p.y + c.h / 2 + 0.5);
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  }
+}
+
+function drawLabel(c, p) {
+  const st = G.stats;
+  const v = bindValue(c.bind, st);
+  const txt = c.text ? c.text + (v == null ? "" : v) : (v == null ? "" : String(v));
+  if (!txt) return;
+  ctx.fillStyle = c.color || "#ffd75e";
+  ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(txt, p.x + c.w / 2, p.y + c.h);
+  ctx.textAlign = "left";
+}
+
+function drawButton(c, p) {
+  const im = c.img ? getImg(c.img) : null;
+  if (im) ctx.drawImage(im, p.x, p.y, c.w, c.h);
+  // 技能图标：绑定了 skill.icon 时叠在按钮上，并在右侧写技能名
+  if (c.bind === "skill.icon") {
+    const sk = skillByName(G.skill);
+    if (sk && sk.icon) {
+      const ic = getImg("assets/skill_icons/" + sk.icon.replace(/\.bmp$/, ".png"));
+      if (ic) ctx.drawImage(ic, p.x, p.y, c.w, c.h);
+    }
+    ctx.fillStyle = "#e8e0c8"; ctx.font = "11px 'Microsoft YaHei',SimHei,sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(sk ? sk.name : G.skill, p.x + c.w + 4, p.y + c.h / 2 + 4);
+  }
+}
+
+function drawImage(c, p) {
+  const im = c.img ? getImg(c.img) : null;
+  if (im) ctx.drawImage(im, p.x, p.y, c.w || im.width, c.h || im.height);
+}
+
+function drawSlotGrid(c) {
+  if (c.bind === "inventory.hotbar") {
+    for (let i = 0; i < c.cols * c.rows; i++) {
+      const r = slotRect(c, i, VW, VH);
+      drawItemSlot(G.hotbar && G.hotbar[i], r.x, r.y, r.w, r.h);
+    }
+    return;
+  }
+  if (c.bind === "equipment") {
+    for (let i = 0; i < EQUIP_KEYS.length; i++) {
+      const r = slotRect(c, i, VW, VH);
+      drawItemSlot(G.equip && G.equip[EQUIP_KEYS[i]], r.x, r.y, r.w, r.h);
+    }
+    return;
+  }
+  if (c.bind === "inventory.pack") {
+    if (!G.packOpen) return;              // 背包未打开时不画内容
+    for (let i = 0; i < (G.pack ? G.pack.length : 0); i++) {
+      const r = slotRect(c, i, VW, VH);
+      if (i >= c.cols * c.rows) break;
+      drawItemSlot(G.pack[i], r.x, r.y, r.w, r.h);
+    }
+    return;
+  }
+  // 功能按钮：hud.fn 这类无绑定的格子，按序号取 assets/ui/<img>.png
+  if (!c.bind) {
+    const names = ["属性", "记事", "荣辱", "任务", "菜单"];
+    for (let i = 0; i < Math.min(c.cols * c.rows, names.length); i++) {
+      const r = slotRect(c, i, VW, VH);
+      const im = getImg("assets/ui/" + names[i] + ".png");
+      if (im) ctx.drawImage(im, r.x, r.y, r.w, r.h);
+    }
+  }
+}
+
+// 商店格由 shop-ui.js 画（它需要处理售罄/悬停等状态），这里不重复。
 export function drawItemSlot(entry, x, y, w, h) {
   if (!entry) return;
   const it = itemByName(entry.name);
