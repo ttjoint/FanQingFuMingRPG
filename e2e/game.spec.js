@@ -970,6 +970,66 @@ test("游戏可玩 + 编辑器 + 内容管线", async ({ page }) => {
   expect(st.stashCleared).toBe(true);
   expect(st.reloaded).toEqual({ n: "金创药", c: 3 }); // 清缓存后仍能读回 = 真持久化
 
+  // ---- 铁匠：修理 / 鉴定 / 赌博（P4）----
+  // 耐久会随受击掉（items.durabilityLossOnHit），归零后装备加成被拒；
+  // 此前**没有任何修理途径**，等于装备会自己慢慢死掉。
+  const sm = await page.evaluate(async () => {
+    const { getRuntime } = await import("/src/runtime/context.js");
+    const S = await import("/src/systems/smith.js");
+    const { makeDropInstance } = await import("/src/engine/lootTable.js");
+    const G = window.__GAME__.G, rt = getRuntime();
+    const out = {};
+    G.pack = new Array(25).fill(null);
+    G.stats.money = 100000;
+    G.stats.level = 5;
+    const def = (rt.assets.items || []).find(i => i.maxDurability > 0);
+    if (!def) return { skip: true };
+    // 1) 修理：造一件磨损装备
+    const inst = makeDropInstance(def, {}, Math.random, [], null);
+    inst.durability = 1;
+    G.pack[0] = { name: def.name, count: 1, inst };
+    out.wearables = S.wearables(rt).length;
+    const money0 = G.stats.money;
+    const rr = S.repairAll(rt);
+    out.repair = { ok: rr.ok, cost: rr.cost, n: rr.count };   // n 必须 > 0：钱扣了就得真修
+    out.durAfter = G.pack[0].inst.durability;
+    out.maxDur = def.maxDurability;        // 满耐久在模板上，不在 inst 上
+    out.moneySpentR = money0 - G.stats.money;
+    // 2) 鉴定
+    const inst2 = makeDropInstance(def, { rarity: "rare" }, Math.random, rt.assets.affixes || [], null);
+    inst2.unid = true;
+    G.pack[1] = { name: def.name, count: 1, inst: inst2 };
+    out.unidBefore = !!(G.pack[1].inst.unid);
+    const ir = S.identifyAll(rt);
+    out.identify = { ok: ir.ok, cost: ir.cost, n: ir.count };
+    out.unidAfter = !!(G.pack[1].inst.unid);
+    // 3) 赌博：扣钱、钱只扣一次、产出必未鉴定
+    const m1 = G.stats.money;
+    const g = S.gamble(rt);
+    out.gamble = { ok: g.ok, price: g.price };
+    out.moneySpentG = m1 - G.stats.money;
+    const all = [...(G.pack || []), ...(G.hotbar || [])];
+    out.gambleUnid = all.some(e => e && e.inst && e.inst.unid);   // 赌博产物必未鉴定
+    // 钱不够时必须拒绝，不能白送
+    G.stats.money = 0;
+    out.poor = S.gamble(rt).ok;
+    return out;
+  });
+  if (!sm.skip) {
+    expect(sm.wearables).toBeGreaterThan(0);
+    expect(sm.repair.ok).toBe(true);
+    expect(sm.repair.n).toBe(1);                    // 钱扣了就必须真修好
+    expect(sm.durAfter).toBe(sm.maxDur);            // 修满
+    expect(sm.moneySpentR).toBe(sm.repair.cost);    // 只扣报价那么多
+    expect(sm.unidBefore).toBe(true);
+    expect(sm.identify.n).toBe(1);
+    expect(sm.unidAfter).toBe(false);               // 鉴定后看不到 unid 标记
+    expect(sm.gamble.ok).toBe(true);
+    expect(sm.moneySpentG).toBe(sm.gamble.price);   // 只扣一次
+    expect(sm.gambleUnid).toBe(true);               // 赌博产物必未鉴定
+    expect(sm.poor).toBe(false);                    // 没钱不能赌
+  }
+
   // ---- 编辑器 ----
   await page.evaluate(() => { window.prompt = () => "PW版本"; window.confirm = () => true; });
   await page.evaluate(async () => { const m = await import("/src/editor/index.js"); await m.openEditor(); });

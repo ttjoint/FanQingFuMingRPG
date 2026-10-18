@@ -130,6 +130,53 @@ export function drawStash() {
   }
 }
 
+// 铁匠面板（P4）：赌博 / 鉴定 / 修理。
+// 做成固定按钮列表而不是"对某件装备右键"的菜单，是因为三件事分别作用于
+// 「无目标（赌博）」「背包全体（全部鉴定/全部修理）」，用格子菜单表达会更绕。
+export const SMITH_BOX = { x: 150, y: 110, w: 340, h: 250 };
+const SMITH_ROW_H = 38;
+const SMITH_BTN_Y0 = 74;
+
+export function smithRect() { return SMITH_BOX; }
+
+// 三个动作的按钮矩形。返回 [{ id, x, y, w, h }]。
+export function smithButtons() {
+  const B = SMITH_BOX;
+  const ids = ["gamble", "identify", "repair"];
+  return ids.map((id, i) => ({ id, x: B.x + 16, y: B.y + SMITH_BTN_Y0 + i * SMITH_ROW_H, w: B.w - 32, h: SMITH_ROW_H - 8 }));
+}
+
+// 命中测试：返回按钮 id 或 null。
+export function smithButtonAt(sx, sy) {
+  if (!G.smithPanel) return null;
+  for (const b of smithButtons()) if (sx >= b.x && sx <= b.x + b.w && sy >= b.y && sy <= b.y + b.h) return b.id;
+  return null;
+}
+
+export function drawSmith() {
+  if (!G.smithPanel) return;
+  const B = SMITH_BOX;
+  ctx.fillStyle = "rgba(16,12,8,0.96)"; ctx.fillRect(B.x, B.y, B.w, B.h);
+  ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(B.x + 1, B.y + 1, B.w - 2, B.h - 2); ctx.lineWidth = 1;
+  ctx.fillStyle = "#f0d060"; ctx.font = "bold 15px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.fillText("铁匠", B.x + 16, B.y + 26);
+  ctx.fillStyle = "#7a3a10"; ctx.font = "bold 12px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.textAlign = "right"; ctx.fillText("银两 " + G.stats.money, B.x + B.w - 16, B.y + 26); ctx.textAlign = "left";
+  // 三类数量提示，让玩家知道"有没有东西可做"
+  const wear = (G.pack || []).filter(e => e && e.inst && e.inst.durability != null && e.inst.durability < ((e.inst.maxDurability) || 1e9)).length;
+  const unid = (G.pack || []).filter(e => e && e.inst && e.inst.unid).length;
+  const lv = (G.stats && G.stats.level) || 1;
+  const info = { gamble: "赌一把（Lv" + lv + "）", identify: "鉴定全部（" + unid + "）", repair: "修理全部（" + wear + "）" };
+  for (const b of smithButtons()) {
+    ctx.fillStyle = "rgba(60,48,28,0.9)"; ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.strokeStyle = "#8a7040"; ctx.strokeRect(b.x + .5, b.y + .5, b.w - 1, b.h - 1);
+    ctx.fillStyle = "#f0e0b0"; ctx.font = "13px 'Microsoft YaHei',SimHei,sans-serif";
+    ctx.fillText(info[b.id] || b.id, b.x + 12, b.y + b.h / 2 + 5);
+  }
+  ctx.fillStyle = "#6a6050"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif";
+  ctx.fillText("Esc 关闭", B.x + 16, B.y + B.h - 10);
+}
+
 export function drawSavePanel() {
   if (!G.savePanel) return;
   const R = uiRect("save.panel") || { x: (VW - 460) / 2, y: 40, w: 460, h: 340 };

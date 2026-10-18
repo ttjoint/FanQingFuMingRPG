@@ -1069,6 +1069,10 @@ function tabConfig() {
     { k: "enhancePriceMul", label: "强化价格倍率", type: "number", step: 0.1, def: 1.6 },
     { k: "socketFailChance", label: "镶嵌失败率(0~1)", type: "number", step: 0.05, def: 0 },
     { k: "durabilityLossOnHit", label: "受击耐久损耗", type: "number", step: 0.1, def: 0.5 },
+    { k: "repairRate", label: "修理费率", type: "number", step: 0.1, def: 0.6,
+      hint: "修理费 = 物品价 × 缺失耐久占比 × 本值；调 0 等于免费修理。" },
+    { k: "identifyBase", label: "鉴定底价", type: "number", def: 20,
+      hint: "实际价格按稀有度再乘倍率（魔法 1.5 / 稀有 2.5 / 暗金 4）。" },
   ]);
 
   sec("强化加成", "itemEnhance", [

@@ -4,7 +4,7 @@
 export const VW = 640, VH = 480;
 
 // 版本标记：每次改动算法可改此串，用来确认浏览器是否真的加载到新代码（控制台会打印）。
-export const BUILD = "2026-10-24-stash";
+export const BUILD = "2026-10-25-smith";
 
 export const cv = /** @type {HTMLCanvasElement} */ (document.getElementById("cv"));
 export const ctx = cv.getContext("2d");

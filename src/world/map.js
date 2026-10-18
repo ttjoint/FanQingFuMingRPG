@@ -157,6 +157,7 @@ export function loadMap(ctx, name) {
   G.savePanel = false;
   G.waypointPanel = false;         // 传送面板（P4）
   G.stashPanel = false;            // 仓库面板（P4）；G.stash 数据本身不随切图清空
+  G.smithPanel = false;            // 铁匠面板（P4）
   G._wpCell = null;                // 传送点踩点缓存（新图重新判定）
   G.dialog = null;                 // 对话
   G.script = null;                 // 脚本执行栈（脚本上下文绑定旧图单位）

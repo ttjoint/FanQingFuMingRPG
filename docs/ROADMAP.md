@@ -146,7 +146,26 @@ D2 的 build 多样性全部建立在这套正交体系上。
       - 单测 `test/stash.test.mjs` 15 例；E2E 钉住存/取双向 + 清内存缓存后仍能读回
       - 注：`engine/` 里不能出现 `localStorage` 字样（架构检查用正则扫全文，
         注释也算），所以纯逻辑层的注释改为"浏览器持久化"
-- [ ] **赌博 / 鉴定 / 修理**（装备循环闭环缺三环）
+- [x] **赌博 / 鉴定 / 修理**
+      - `engine/smith.js`（纯逻辑）：`repairCost` / `repairEntry` / `repairAllCost` /
+        `isUnidentified` / `identifyCost` / `identifyEntry` / `gamblePrice` / `gamblePool`
+      - **修理**：此前耐久会随受击掉（`items.durabilityLossOnHit`），
+        归零后装备加成被拒（`inventory.js:145`），而**没有任何修回来的途径**
+        —— 等于装备会慢慢自己死掉。现在按「缺失耐久占比 × 物品价 × repairRate」计价，
+        至少收 1 金币（否则缺一点耐久可以免费无限修）。
+      - **鉴定**：赌博产物带 `inst.unid`，tooltip 层隐藏词缀（只显示【未鉴定】），
+        否则鉴定就只是个收费按钮，玩家开赌前已经知道结果。费用按稀有度乘倍率。
+      - **赌博**：金币此前只有买卖两个出口，中期就溢出。赌价随角色等级上涨，
+        防止前期刷出终局装备；产物必带 `unid`，所以金币有两级去处（赌 → 鉴）。
+      - `systems/smith.js`：`wearables` / `repairAll` / `repairSlot` / `identifyAll` /
+        `identifySlot` / `gamble` / `toggleSmith`
+      - UI：游戏内 **N** 开铁匠面板（三个按钮：赌一把 / 鉴定全部 / 修理全部），
+        Esc 关闭，与商店/存档/仓库/传送点互斥
+      - ⚠️ **踩过的坑**：`num(Infinity)` 会退化成 0（`Number.isFinite(Infinity)` 为 false），
+        所以批量修理/鉴定**不能传 `Infinity` 表示"余额无限"**——
+        那会导致钱扣了但一件都没修。单测 `moneyInfinityMeansNoMoney` 钉住。
+      - 单测 `test/smith.test.mjs` 12 例；E2E 钉住"钱扣了就必须真修好"、
+        鉴定清标记、赌博只扣一次钱、没钱不能赌
 - [ ] **套装 / 暗金物品**（有稀有度，缺独特命名层级）
 - [ ] **难度分级**（依赖 P2 的 monsterLevel）
 - [ ] **雇佣兵 / 随从**（敌人 AI 已有协防/仇恨基础）

@@ -20,12 +20,15 @@ export const DEFAULT_CONFIG = {
   // - players ：人数（暗黑2 风格），掉落几率 × sqrt(players)。
   // - rarityLevelStep / rarityStrength：怪物等级每 N 级把稀有度权重往上挪一档，
   //   每次挪「当前权重 × strength」。曲线见 engine/lootScale.js。
-  economy: { sellRate: 0.5, dropRate: 1, players: 1, rarityLevelStep: 5, rarityStrength: 0.5 },
+  economy: { sellRate: 0.5, dropRate: 1, players: 1, rarityLevelStep: 5, rarityStrength: 0.5, gambleBase: 120, gambleLevelStep: 8 },
   inventory: { packItem: "包裹", packSize: 25 },
   // 共享仓库（P4）：账号级、不随存档。格子数影响玩家能攒多少东西。
   stash: { size: 100 },
   // 掉落物：存在时长 / 散布 / 拾取与保护 / 地面堆叠合并半径。
-  items: { dropTtl: 0, dropScatter: 22, pickupRadius: 20, pickupDelay: 0, stackRadius: 18, maxEnhance: 10, enhancePriceBase: 50, enhancePriceMul: 1.6, socketFailChance: 0, durabilityLossOnHit: 0.5 },
+  items: { dropTtl: 0, dropScatter: 22, pickupRadius: 20, pickupDelay: 0, stackRadius: 18, maxEnhance: 10, enhancePriceBase: 50, enhancePriceMul: 1.6, socketFailChance: 0, durabilityLossOnHit: 0.5,
+    // 铁匠（P4）：修理按"缺失耐久占比 × 物品价 × repairRate"计价；
+    // 鉴定按稀有度倍率；赌博底价随等级上涨。三者都是金币出口。
+    repairRate: 0.6, identifyBase: 20 },
   // 强化等级每级对 atk/def 的加成（applyBonus/instanceStats 读它）。
   itemEnhance: { enhancePerLevel: 2 },
   // 特效/指示：层级、颜色、开关（可由内容覆盖）。

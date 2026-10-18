@@ -20,7 +20,10 @@ export function itemInfoLines(it, entry) {
   if (def) L.push("防御 +" + def);
   if (hit) L.push("命中 +" + hit);
   if (entry && entry.inst) {
-    for (const af of entry.inst.affixes || []) {
+    // 未鉴定（P4 赌博产物）：词缀对玩家隐藏，只显示"未鉴定"。
+    // 否则鉴定就只是个收费按钮，玩家开赌前已经知道结果。
+    if (entry.inst.unid) L.push("【未鉴定】");
+    for (const af of (entry.inst.unid ? [] : (entry.inst.affixes || []))) {
       if (!af) continue;
       const nm = affixModsText(af.mods);
       L.push("· " + (af.prefix || af.name || "词缀") + (nm ? "（" + nm + "）" : ""));

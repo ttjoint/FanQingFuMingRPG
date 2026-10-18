@@ -5,7 +5,7 @@ import { getImg } from "../core/assets.js";
 import { itemByName } from "../core/registry.js";
 import { drawHUD, drawCursorItem } from "./hud.js";
 import { drawDialog } from "./dialog-ui.js";
-import { drawTip, drawPanels, drawPack, drawSavePanel, drawSettingsPanel, drawWaypointPanel, drawStash } from "./panels.js";
+import { drawTip, drawPanels, drawPack, drawSavePanel, drawSettingsPanel, drawWaypointPanel, drawStash, drawSmith } from "./panels.js";
 import { drawShop } from "./shop-ui.js";
 import { drawTooltip } from "./tooltip.js";
 import { drawScene } from "./scene-ui.js";
@@ -138,7 +138,7 @@ export function render() {
   drawProjectiles(camX, camY);
   // 2) 顶层特效（top）：头顶 buff/称号 —— 永远在最顶层。
   for (const inst of topEffects(G)) drawEffect(inst, camX, camY);
-  drawHUD(); drawDialog(); drawPanels(); drawPack(); drawShop(); drawSavePanel(); drawWaypointPanel(); drawStash(); drawSettingsPanel(); drawTip(); drawCursorItem(); drawTooltip();
+  drawHUD(); drawDialog(); drawPanels(); drawPack(); drawShop(); drawSavePanel(); drawWaypointPanel(); drawStash(); drawSmith(); drawSettingsPanel(); drawTip(); drawCursorItem(); drawTooltip();
   if (typeof window !== "undefined" && window.__POLY_DEBUG__) {
     ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(6, 26, 236, 18);
     ctx.fillStyle = "#8fd0ff"; ctx.font = "12px sans-serif"; ctx.textAlign = "left";
