@@ -166,7 +166,15 @@ export function loadMap(ctx, name) {
   // 由 mercSystem 下一帧补建（否则旧实体成了野指针）。
   if (G.mercenary) G.mercenary.unit = null;
   G._wpCell = null;                // 传送点踩点缓存（新图重新判定）
-  G.script = null;                 // 脚本执行栈（脚本上下文绑定旧图单位）
+  // 脚本执行栈：只有在「非脚本触发」的切图时才清（踩传送点、调试跳图）。
+  // 绝不能无条件清 —— 原版 GSP 里 ChangeMap 大量出现在脚本**中间**，
+  // 后面还跟着整段剧情/任务发放。实测：脚本 Say→ChangeMap→Say→Say，
+  // 若这里置 null，stepScript 第二句之后 `if (!G.script) return` 直接把
+  // 剩下的语句全丢掉。受影响的 10 个脚本（鳌拜_死/多尔衮_死/清军大营/
+  // 平原到扬州/战场到扬州/扬州到平原/后山/史可法/龙家庄/后山到龙家）
+  // 里，鳌拜_死 丢的正是 AddMission("保卫扬州") → 主线直接断死。
+  // 用 inScript 标记区分：ChangeMap 指令执行期间为 true，保留脚本栈。
+  if (!G._inScriptChangeMap) G.script = null;
   G.lastCell = null;               // 防止落地格与旧图重复
   G.triggerCD = 0;
   G.deathT = 0;

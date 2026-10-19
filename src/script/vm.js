@@ -230,7 +230,14 @@ export function* execCall(ctx, name, args) {
     }
 
     case "LoadInitialMap": loadMap(ctx, s(0)); setPlayer(ctx, v(1), v(2), v(3)); return;
-    case "ChangeMap": loadMap(ctx, s(0)); setPlayer(ctx, v(1), v(2), v(3)); return;
+    case "ChangeMap": {
+      // 标记「本次 loadMap 是脚本内部发起的」：loadMap 默认会清 G.script，
+      // 但用在这里会把当前 generator 后续的剧情/任务发放全部丢掉。
+      const prev = G._inScriptChangeMap;
+      G._inScriptChangeMap = true;
+      try { loadMap(ctx, s(0)); } finally { G._inScriptChangeMap = prev; }
+      setPlayer(ctx, v(1), v(2), v(3)); return;
+    }
     case "CmpMapName": setVar(args[1], G.currentMap === s(0).replace(/\.map$/, "") ? 1 : 0, G.vars); return;
     case "GameOver": G.gameOver = true; return;
     case "ShowEnding": G.pendingEnd = true; return;   // 剧本显式结束：切到结局场景（数据驱动，不靠文本关键字）
