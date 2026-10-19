@@ -39,6 +39,17 @@
     ]
   },
   {
+    "id": "beast_passive",
+    "name": "野兽（游荡+被动还击）",
+    "idle": { "action": "wander", "radius": 200, "interval": [2, 5], "speed": 45 },
+    "targeting": { "aggroRange": 170, "aggressive": false, "retaliate": true, "giveUpT": 5, "leash": 240, "leashFrom": 160 },
+    "rules": [
+      { "when": { "hpBelow": 0.25 }, "do": { "action": "flee", "range": 420, "speed": 1.5 } },
+      { "when": { "targetInRange": "melee" }, "do": { "action": "attack", "cooldown": 1.1 } },
+      { "when": { "hasTarget": true }, "do": { "action": "chase", "stopRange": "melee" } }
+    ]
+  },
+  {
     "id": "bandit",
     "name": "强盗（主动+呼朋引伴+低血逃跑）",
     "idle": { "action": "wander", "radius": 180, "interval": [2, 6], "speed": 45 },

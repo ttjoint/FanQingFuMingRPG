@@ -142,7 +142,7 @@
     "defence": 6,
     "level": 9,
     "exp": 92,
-    "ai": "beast",
+    "ai": "beast_passive",
     "skills": "*/*",
     "talks": [],
     "drops": [

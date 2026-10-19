@@ -436,6 +436,10 @@ export function createAiRuntime(ctx) {
         const a = n.lastAttacker;
         if (Math.hypot(n.x - a.x, n.y - a.y) <= aggroRange) return a;
       }
+      // 被动单位（aggressive:false）到此为止：不主动找目标，但上面那条
+      // 报复分支仍然有效 —— 被打过且攻击者在范围内就会还手。
+      // 队友求援（allyBeingAttacked）走的是 assist 分支，不受此开关影响。
+      if (plane.aggressive === false) return null;
       return nearestHostile(n, units, table, aggroRange);
     },
     run(bb, action, params, dt) {

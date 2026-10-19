@@ -230,3 +230,51 @@ function mkLossRt() {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// 回归：被动野兽（原版野猴）不该主动扑过来
+//
+// 实机反馈：原版野猴是被动攻击怪，复刻版里会主动追杀玩家。
+// 根因：pickTarget 只看 aggroRange > 0 就主动索敌，targeting.retaliate
+// 仅是"优先报复攻击者"那条分支的开关 —— "被打才还手"根本表达不出来。
+// 修复：新增 targeting.aggressive 开关（缺省 true，保持既有行为不变）；
+//       为 false 时只走报复分支，不主动找目标。
+// ---------------------------------------------------------------------------
+export async function aiPassiveBeastDoesNotAggro() {
+  const { normalizeProfile } = await import("../src/engine/ai.js");
+  const p = normalizeProfile({ id: "passive", targeting: { aggressive: false, aggroRange: 200 } });
+  if (p.targeting.aggressive !== false) throw new Error("aggressive:false 应被保留，实际 " + p.targeting.aggressive);
+  const d = normalizeProfile({ id: "default" });
+  if (d.targeting.aggressive !== true) throw new Error("缺省必须是主动（向后兼容），实际 " + d.targeting.aggressive);
+  return;
+}
+
+export async function aiWildMonkeyIsPassive() {
+  const { readFileSync } = await import("node:fs");
+  const path = new URL("../versions/default/assets/npcs.json", import.meta.url);
+  const d = JSON.parse(readFileSync(path, "utf8"));
+  const arr = Array.isArray(d) ? d : Object.values(d);
+  const monkey = arr.find(n => n.name === "野猴");
+  if (!monkey) throw new Error("找不到野猴模板");
+  if (monkey.ai !== "beast_passive") throw new Error("野猴应使用被动 AI（beast_passive），实际 " + monkey.ai);
+  // 花豹是原版主动怪，不应被顺手改掉。
+  const leopard = arr.find(n => n.name === "花豹");
+  if (leopard && leopard.ai === "beast_passive") throw new Error("花豹不应被改成被动");
+  return;
+}
+
+export async function aiBeastPassiveProfileIsRegistered() {
+  const { readFileSync } = await import("node:fs");
+  const path = new URL("../versions/default/assets/ais.json", import.meta.url);
+  const d = JSON.parse(readFileSync(path, "utf8"));
+  const arr = Array.isArray(d) ? d : Object.values(d);
+  const bp = arr.find(a => a.id === "beast_passive");
+  if (!bp) throw new Error("ais.json 缺少 beast_passive 定义");
+  if (!bp.targeting || bp.targeting.aggressive !== false)
+    throw new Error("beast_passive 必须带 aggressive:false，否则仍是主动怪");
+  // 规则要和主动野獸一致：近身反击 + 追击 + 低血逃跑
+  const acts = (bp.rules || []).map(r => r.do && r.do.action);
+  for (const need of ["attack", "chase", "flee"])
+    if (!acts.includes(need)) throw new Error("beast_passive 缺少规则 " + need + "，实际 " + acts.join(","));
+  return;
+}

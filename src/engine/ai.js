@@ -82,7 +82,14 @@ export function registerAction(name, fn) { ACTIONS[name] = fn; }
 // ---------------------------------------------------------------------------
 // leashFrom: 允许离开出生/巡逻锚点的最大距离（缺省 = leash）。
 //   超出即放弃追击并返回原地 —— 避免"追着玩家横穿整张地图"。
-export const DEFAULT_TARGETING = { aggroRange: 260, retaliate: true, giveUpT: 8, leash: 480, leashFrom: 0 };
+// aggroRange: 主动索敌半径（像素，<=0 表示完全不索敌）。
+// aggressive: 是否**主动**索敌。
+//   true （缺省）—— 自己会去发现玩家；配 aggroRange 生效。
+//   false        —— 不主动找目标，但被打了仍会还手（见 retaliate）。
+//   ⬇ 这两个开关以前是合并的：只要 aggroRange > 0 就会主动索敌，
+//   retaliate 只影响“优先报复攻击者”那条分支，于是“被打才还手”的
+//   被动怪（如原版的野猴）也会主动扑过来。现在拆开了。
+export const DEFAULT_TARGETING = { aggroRange: 260, aggressive: true, retaliate: true, giveUpT: 8, leash: 480, leashFrom: 0 };
 
 // 字段缺省值可注入：runtime 可传入由游戏配置派生的 targeting 默认，
 // 使“索敌半径/追丢时间/拴绳距离”等平衡数值不再写死在引擎里。
@@ -96,6 +103,7 @@ export function normalizeProfile(p, defaults) {
     idle: (o.idle && typeof o.idle === "object") ? o.idle : { action: "idle" },
     targeting: {
       aggroRange: num(t.aggroRange, def.aggroRange),
+      aggressive: t.aggressive !== false,
       retaliate: t.retaliate !== false,
       giveUpT: num(t.giveUpT, def.giveUpT),
       leash: num(t.leash, def.leash),
