@@ -204,11 +204,21 @@ export function drawEntity(e, camX, camY) {
   ctx.drawImage(im, x, y);
   if (e.dmgT > 0) ctx.restore();
   if (e.dead && e.model) { /* 已播放 die 帧 */ }
-  if (!e.dead && (e.attackable || (e.hp != null && e.hpMax && e.hp < e.hpMax))) {
+  // 血条：敌人（可攻击/已掉血）与主角都画。
+  // 主角的 hp 存在 G.stats（不在实体上），所以对主角单独取值；
+  // 并且**满血也显示**（与敌人“满血不显示”区分，方便随时看到自身状态）。
+  let hp = e.hp, hpMax = e.hpMax, barColor = e.attackable ? "#c0392b" : "#589b3a";
+  const isPlayer = e.isPlayer === true || e === G.player;
+  if (isPlayer) {
+    const st = G.stats;
+    if (st) { hp = st.hp; hpMax = st.hpMax; barColor = "#c0392b"; }
+  }
+  const showBar = !e.dead && (isPlayer ? (hpMax > 0) : (e.attackable || (hp != null && hpMax && hp < hpMax)));
+  if (showBar) {
     const w = 40, hx = Math.round(e.x - camX - w / 2), hy = y - 6;
     ctx.fillStyle = "#000"; ctx.fillRect(hx, hy, w, 4);
-    ctx.fillStyle = e.attackable ? "#c0392b" : "#589b3a";
-    ctx.fillRect(hx, hy, Math.round(w * Math.max(0, e.hp) / e.hpMax), 4);
+    ctx.fillStyle = barColor;
+    ctx.fillRect(hx, hy, Math.round(w * Math.max(0, hp) / hpMax), 4);
   }
   if (e.talkT > 0) { ctx.fillStyle = "#ffe07a"; ctx.font = "12px sans-serif"; ctx.textAlign = "center"; ctx.fillText("!", e.x - camX, y - 8); ctx.textAlign = "left"; e.talkT -= 0.016; }
   drawBuffIcons(e, camX, y);

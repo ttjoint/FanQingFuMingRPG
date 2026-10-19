@@ -48,14 +48,18 @@ function close() { if (root) { root.remove(); root = null; } }
 
 async function render(opts) {
   clear(root);
-  await refreshDiskVersions();
+  // 先立即渲染骨架（含内置版本行），再异步拉磁盘版本列表填表。
+  //
+  // 旧实现先 await refreshDiskVersions() 再建 DOM —— 静态部署下
+  // __api__/versions 的 404 往返可能好几秒，这段时间页面只有黑底
+  // 「加载引擎…」，用户看起来就像“退出游戏后黑屏卡死”。
+  // 入口页自身不依赖磁盘探测结果，骨架先行即可；内置版本在探测完成
+  // 前就能进，探测完成后重填列表补上磁盘/浏览器版本。
   const disk = diskVersionsReady();
-
   const bar = h("div", { class: "ed-bar" },
     h("span", { class: "ed-title" }, "引擎入口"),
-    h("span", { class: "ed-hint" }, disk
-      ? "本地模式：版本可直接写入 versions/ 文件夹"
-      : "浏览器模式：版本保存在本地浏览器（静态部署不含写文件后端）"),
+    h("span", { class: "ed-hint", "data-role": "mode-hint" },
+      disk ? "本地模式：版本可直接写入 versions/ 文件夹" : ""),
     h("span", { class: "ed-spacer" }),
     h("button", { class: "ed-btn primary", onclick: () => choose(activeId(), opts) }, "▶ 进入当前版本"),
     h("button", { class: "ed-btn", onclick: () => close() }, "关闭"),
@@ -66,7 +70,31 @@ async function render(opts) {
   body.append(h("div", { class: "ed-hint", style: "margin-bottom:10px" },
     "版本决定用哪套游戏数据（物品、地图、脚本、界面、菜单页）。",
     "默认版本为原版复刻内容，只读；要改请「复制」出一个新版本。"));
+  const tblWrap = h("div");
+  body.append(tblWrap);
+  body.append(h("div", { class: "ed-hint", style: "margin-top:14px", "data-role": "foot-hint" },
+    "·「进入」会切到该版本并重新载入页面。",
+    h("br"),
+    "·「编辑」会以该版本为基准打开内容编辑器（只读版本也能编辑，保存时自动复制为可写版本）。"));
+  root.append(bar, body);
+  fillTable(tblWrap, disk, opts);
 
+  // 异步探测磁盘/浏览器版本，完成后重填（快时无感，慢时用户已能看到内置版本）。
+  refreshDiskVersions().then(() => {
+    const d = diskVersionsReady();
+    const modeHint = root.querySelector("[data-role=mode-hint]");
+    if (modeHint && d && !disk) modeHint.textContent = "本地模式：版本可直接写入 versions/ 文件夹";
+    const footHint = root.querySelector("[data-role=foot-hint]");
+    if (footHint && d) {
+      footHint.append(h("br"), "· 本地模式下：新建/复制的版本直接写入项目 versions/ 文件夹。");
+    }
+    fillTable(tblWrap, d, opts);
+  }).catch(() => { });
+}
+
+/** 渲染版本列表（含内置版本，探测中也不至于空白）。 */
+async function fillTable(wrap, disk, opts) {
+  clear(wrap);
   const tbl = h("table", { class: "ed-table" });
   tbl.append(h("thead", null, h("tr", null,
     h("th", null, "版本"), h("th", null, "来源"), h("th", null, "更新时间"), h("th", null, "操作"))));
@@ -101,18 +129,7 @@ async function render(opts) {
     tb.append(h("tr", null, h("td", null, v.name), h("td", null, src), h("td", null, upd), ops));
   }
   tbl.append(tb);
-  body.append(tbl);
-
-  body.append(h("div", { class: "ed-hint", style: "margin-top:14px" },
-    "·「进入」会切到该版本并重新载入页面。",
-    h("br"),
-    "·「编辑」会以该版本为基准打开内容编辑器（只读版本也能编辑，保存时自动复制为可写版本）。",
-    h("br"),
-    disk
-      ? "· 本地模式下：新建/复制的版本直接写入项目 versions/ 文件夹。"
-      : "· 浏览器模式下：版本保存在本地浏览器；导出 .gsxy.json / zip 可备份或迁移。"));
-
-  root.append(bar, body);
+  wrap.append(tbl);
 }
 
 /** 进入某个版本的游戏（写索引 + 回调/reload）。 */
