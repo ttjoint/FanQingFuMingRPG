@@ -68,21 +68,39 @@ function withToken(url) {
 export const resolve = assetURL;
 
 // ---- 后台预载队列（限制并发）----
-// 角色帧动辄上百张，若一次性 new Image() 会占满浏览器每域名连接数（~6），
-// 使 UI 图片（背包/商店面板等）长期停在 pending。这里用低并发队列慢慢预热，
-// 让即时需要的图片通过 getImg 优先拿到连接。
+// 角色帧动辄上百张（role 就 360 帧），若一次性 new Image() 会占满浏览器每域名
+// 连接数（~6），使 UI 图片（背包/商店面板等）长期停在 pending。这里用低并发
+// 队列慢慢预热。
+//
+// ⚠ 预载队列登记过的路径曾经被 getImg 当成“已在加载中”而直接返回 null，
+// 导致排队中的帧在真正轮到之前完全不可用（开局 NPC 全部隐形就是这个后果）。
+// 修复：用独立的 QUEUED 集合做去重，不再占用 PENDING；同时给预载让路——
+// 一旦某个路径被 getImg 即时请求，就从队列里作废（gen 计数），
+// 保证“玩家现在看得见的”总是比“提前热身”优先。
 const Q = [];
+const QUEUED = {};
 let active = 0;
-const MAX_PRELOAD = 3;
+const MAX_PRELOAD = 2;   // 从 3 降为 2：给即时请求留出至少一条连接
+let qGen = 0;
+
 export function preload(path) {
-  if (IMG[path] || PENDING[path]) return;
-  PENDING[path] = true;   // 预约，避免重复请求
+  if (IMG[path] || PENDING[path] || QUEUED[path]) return;
+  QUEUED[path] = qGen;
   Q.push(path);
   pump();
+}
+// 即时请求已开始加载该路径 → 把队列里的同名任务作废。
+function cancelQueued(path) {
+  if (QUEUED[path] === undefined) return;
+  delete QUEUED[path];
 }
 function pump() {
   while (active < MAX_PRELOAD && Q.length) {
     const path = Q.shift();
+    const gen = QUEUED[path];
+    if (gen === undefined) continue;          // 已被即时请求接管/作废
+    delete QUEUED[path];
+    if (IMG[path]) continue;                  // 已经加载好了，不用再来一次
     active++;
     const im = new Image();
     im.onload = () => { IMG[path] = im; active--; pump(); };
@@ -92,13 +110,35 @@ function pump() {
 }
 
 // 懒加载图片：未加载完成时返回 null，加载完成后进缓存。
+//
+// ⚠ 历史上这里有个会让线上“NPC 集体隐形二十几秒”的坑，修复要点：
+//   1) 不要和后台预载队列共用 PENDING 的语义。预载队列（preload）一次排进
+//      主角全部帧（role 有 360 帧，且其中 60 帧在磁盘上不存在），并发只有 3，
+//      在真实网络下要跑十几到几十秒。若即时请求只能排在它后面，玩家开局的
+//      画面就是“只有主角、所有 NPC 隐形”。实测（GitHub Pages）：NPC 图要
+//      **26 秒**后才加载成功；本地 127.0.0.1 因为极快，根本看不出来。
+//   2) 失败（onerror）必须清 PENDING，否则一旦某张图失败过，该路径就**永久**
+//      返回 null，连重试的机会都没有（这里 onerror 只写了 IMG[path]=null，
+//      PENDING 残留 true，后续全被 `if (PENDING[path]) return null` 拦死）。
+//   3) 已判定失败（IMG[path] === null）的路径允许再次尝试，用 FAILED 记次数
+//      限制重试，避免抖动时无限刷请求。
+const FAILED = {};
+const MAX_RETRY = 2;
+
 export function getImg(path) {
   if (IMG[path]) return IMG[path];
+  if (IMG[path] === null) {              // 之前失败过：有限次重试
+    if ((FAILED[path] || 0) >= MAX_RETRY) return null;
+    FAILED[path] = (FAILED[path] || 0) + 1;
+  }
   if (PENDING[path]) return null;
+  cancelQueued(path);          // 即时请求优先：作废后台队列里的同名预热任务
   PENDING[path] = true;
   const im = new Image();
-  im.onload = () => { IMG[path] = im; };
-  im.onerror = () => { IMG[path] = null; };
+  // 即时请求优先：用它自己加载，不等后台预载队列（两者共用 PENDING 会让
+  // 可见性关键资源被预载饿死）。
+  im.onload = () => { delete PENDING[path]; IMG[path] = im; };
+  im.onerror = () => { delete PENDING[path]; IMG[path] = null; };
   im.src = assetURL(path);
   return null;
 }
@@ -129,9 +169,39 @@ export const loadJSON = p => {
 // 解析音频 / 任意资源路径（供 audio.js 等使用）。
 export const assetPath = assetURL;
 
-// 预载某角色模型的所有帧（走低并发队列，不阻塞、不挤占 UI 图片）。
-export function preloadChar(model) {
+// 预载某角色模型的帧（走低并发队列，不阻塞、不挤占 UI 图片）。
+//
+// 顺序很重要：**先排静止帧（stand），再排其它动作**。
+// role 模型有 360 个帧引用（去重后 300 个文件），如果只按 chars.json 的顺序
+// 一股脑往队列里塞，真实网络下（CDN 慢）玩家会先看完“隐形主角/隐形 NPC”好几十秒。
+// 而开局实际只需要每个单位的 stand 帧就能把画面画对。
+//
+// onlyStand: 只排站立帧。开场预热主角用这个——走路/跑步/战斗帧等真正
+// 动起来时由 getImg 即时拉，没必要在标题画面就把 300 张全排上。
+export function preloadChar(model, onlyStand) {
   const ch = A.chars && A.chars[model]; if (!ch) return;
-  for (const a in ch) for (const block of ch[a]) for (const f of block)
+  const actions = Object.keys(ch);
+  if (onlyStand) {
+    if (ch.stand) for (const block of ch.stand) for (const f of block)
+      preload("assets/role/" + f.replace(/\.bmp$/, ".png"));
+    return;
+  }
+  // stand 优先；其余保持原有相对顺序。
+  actions.sort((a, b) => (a === "stand" ? -1 : b === "stand" ? 1 : 0));
+  for (const a of actions) for (const block of ch[a]) for (const f of block)
     preload("assets/role/" + f.replace(/\.bmp$/, ".png"));
 }
+
+// ---- 仅测试用钩子 ----
+// 图片加载全是模块级私有状态，单元测试无法直接观察。这里只开放
+// “重置缓存”与“读预载队列快照”两个只读/重置用途，不开任何可以伪造
+// 加载结果的入口（避免测试自己造数据把 bug 盖住）。
+export function __resetAssetsForTest() {
+  for (const k in IMG) delete IMG[k];
+  for (const k in PENDING) delete PENDING[k];
+  for (const k in FAILED) delete FAILED[k];
+  for (const k in QUEUED) delete QUEUED[k];
+  Q.length = 0;
+  active = 0;
+}
+export function __pendingQueueForTest() { return Q; }

@@ -189,7 +189,10 @@ async function bootInner() {
   for (const it of A.items) if (it.icon) getImg("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png"));
   for (const sk of A.skills) if (sk.icon) getImg("assets/skill_icons/" + sk.icon.replace(/\.bmp$/, ".png"));
 
-  preloadChar("role");
+  // 主角开场只预热站立帧（8 帧）。其余 三个多百帧走路/跑步/战斗图
+  // 等玩家真动起来时再由 getImg 即时拉 + 预载队列补——否则在真实网络
+  // （CDN 慢）下这 300 张会把连接占满十几秒，期间 NPC 全部隐形。
+  preloadChar("role", true);
   preloadSceneArt();
   addInput(runtime);
   // 预热版本清单：标题栏「数据版本：X」读的是同步缓存，静态部署下
