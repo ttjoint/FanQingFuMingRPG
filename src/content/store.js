@@ -6,6 +6,7 @@
 //   写入 versions/<id>/ 文件夹（仅本地开发时可用）。磁盘版本与浏览器版本共存于同一份索引，
 //   由 id 前缀区分（磁盘版本 id 即文件夹名；浏览器版本 id 形如 p<timestamp>）。
 import { createPackObj, normalizePack, newPackId } from "./pack.js";
+import { setAssetToken } from "../core/assets.js";
 import { idbAvailable, idbSet, idbGet, idbDel } from "./idb.js";
 import { packToZip, zipToPack } from "./projectZip.js";
 import {
@@ -206,19 +207,42 @@ async function loadStaticPack(id) {
   return p;
 }
 
+// 把版本元数据里的素材指纹应用到 assetURL。
+//
+// 只有只读版本（原版）会带 assetsToken（服务端按目录 mtime 生成）。
+// 可写版本的素材随时会变，不能给长期缓存，所以一律清掉指纹
+// → assetURL 不带 ?v= → 服务端回落到 no-cache + ETag 每次校验（仍能 304，不会拿到旧图）。
+function applyAssetsToken(meta) {
+  const tok = meta && meta.readonly ? meta.assetsToken : null;
+  setAssetToken(tok || null);
+}
+
 // 读取：磁盘版本从 versions/<id>/ 读补丁 + 图片覆盖（图片以 URL 表示）；
 // 浏览器版本从 localStorage/IndexedDB 读。异步。
 export async function loadPack(id) {
-  if (!id || id === DEFAULT_VERSION) return defaultPack();
+  if (!id || id === DEFAULT_VERSION) {
+    // 默认版本就是 ASSET_ROOT 指向的 versions/default（只读）：取它的指纹。
+    // 注意用 DISK_DEFAULT_ID（"default"）而不是 DEFAULT_VERSION（"__default__"）：
+    // 后者是给前端本地存档用的虚拟 id，磁盘上并无此目录。
+    // 拿不到后端时（静态部署）退化为不加指纹，行为与改造前一致。
+    try {
+      const d = await loadDiskVersion(DISK_DEFAULT_ID);
+      applyAssetsToken(d);
+    } catch (e) { setAssetToken(null); }
+    return defaultPack();
+  }
   await refreshDiskVersions();
   if (isDiskVersion(id) && await diskAvailable()) {
     const d = await loadDiskVersion(id);
     if (d) {
+      applyAssetsToken(d);
       const p = normalizePack({ format: "gsxy.pack", version: 2, id: d.id, name: d.name, base: d.base || "default", patch: d.patch || {}, images: {} });
       applyDiskImages(id, d.assets, p);
       return p;
     }
   }
+  // 非磁盘（浏览器本地）版本：素材可能随时改，不要长期缓存。
+  setAssetToken(null);
   let stored = null;
   try { stored = JSON.parse(localStorage.getItem(PACK_PREFIX + id) || "null"); } catch (e) { }
   // 静态部署：按 versions/index.json 清单直读磁盘版本（无写入后端，只读可玩）。

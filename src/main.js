@@ -2,7 +2,7 @@
 // 装配职责在 runtime/context.js；本文件只负责“加载 + 启动”。
 import { VW, VH, cv } from "./core/constants.js";
 import { G, A, MAPS } from "./core/state.js";
-import { loadJSON, loadImg, getImg, preloadChar, setAssetOverrides } from "./core/assets.js";
+import { loadJSON, loadImg, getImg, preloadChar, setAssetOverrides, assetURL, fetchOpts } from "./core/assets.js";
 import { DEFAULT_CONFIG } from "./core/config.js";
 import { screenToWorld } from "./core/utils.js";
 import { buildContentDB, applyPatch } from "./content/contentdb.js";
@@ -28,8 +28,16 @@ import { BUILD } from "./core/constants.js";
 console.log("[gsxy] build:", BUILD);
 
 // 调试入口（控制台 / E2E 脚本可用）：window.__GAME__
+//
+// G/A/MAPS 用 getter 而不是直接取值：它们是 core/state.js 的 ESM 活绑定，
+// 但 runtime.reset()（测试、重开一局）会**重新赋值**这三个变量。
+// 直接写 `G` 相当于在定义时拍了一张快照，reset 后 __GAME__.MAPS 会永远是旧的空对象
+// （实际踩过：控制台里 Object.keys(__GAME__.MAPS) 返回 0，而游戏里 9 张图都在）。
 globalThis.__GAME__ = {
-  G, A, MAPS, runtime, screenToWorld, advanceDialog: ans => advanceDialog(runtime, ans), update, render,
+  get G() { return G; },
+  get A() { return A; },
+  get MAPS() { return MAPS; },
+  runtime, screenToWorld, advanceDialog: ans => advanceDialog(runtime, ans), update, render,
   // 调试/测试用：直接切地图。正常流程由脚本系统的 LoadMap 指令驱动。
   // 直接进入指定地图（跳过片头/菜单）。供调试与 e2e 使用：
   // 把场景强制切到 "game" 并装配主角，否则画面仍停留在菜单。
@@ -87,8 +95,13 @@ const DATA_FILES = [
 // 从指定版本文件夹读取数据文件：先取原版，再（若存在）用版本自身 assets/ 覆盖。
 async function loadVersionData(versionId) {
   // 原版基准（版本文件夹中的 default/assets）
+  // 注意：走 assetURL 而不是手拼路径——手拼会绕过资源指纹（?v=），
+  // 导致这批 JSON 每次刷新都要重传（实测 21 个请求）。
   const base = {};
-  await Promise.all(DATA_FILES.map(async f => { base[f] = await fetch("versions/default/assets/" + f).then(r => (r.ok ? r.json() : null)).catch(() => null); }));
+  await Promise.all(DATA_FILES.map(async f => {
+    const u = assetURL("assets/" + f);
+    base[f] = await fetch(u, fetchOpts(u)).then(r => (r.ok ? r.json() : null)).catch(() => null);
+  }));
   // 若当前是磁盘版本，尝试用版本自己的 assets/ 覆盖（不存在则沿用原版）。
   if (versionId && versionId !== "default" && versionId !== "__default__") {
     const dir = "versions/" + encodeURIComponent(versionId) + "/assets/";

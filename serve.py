@@ -40,6 +40,40 @@ PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8005
 
 ID_RE = re.compile(r"^[A-Za-z0-9_\-.]+$")
 
+# ---- 缓存策略（按路径分级）----
+#
+# 历史：这里曾经对**所有**响应无条件发 "no-store"。
+# 代价是浏览器每次刷新都要把 470+ 个请求、约 12MB 正文全部重传一遍
+# （实测：首次 11.87MB，刷新同样 11.87MB，304 命中 0 次）。
+# 对本地开发服务器来说，"永远不缓存"的意图可以理解（改了源文件要立刻生效），
+# 但做法过猛——它把**不可能变的内容**（图片素材、只读版本的数据）也一起废了。
+#
+# 分级原则："改得勤、必须立即生效" 的就不缓存；"基本不变" 的允许缓存但必须校验。
+#   1) /src/** 与 HTML 入口：no-cache（配合 ETag → 内容没变时走 304，不重传正文）。
+#      这里用 no-cache 而不是 no-store：no-cache 仍允许本地存副本，
+#      只是每次用前必须跟服务端核对；改了文件 mtime 变 → ETag 变 → 立即拿到新内容。
+#   2) /versions/<id>/assets/**：带 ?v= 指纹时 immutable（一年）；不带时 no-cache。
+#      ?v= 由前端在确认版本更新后才换，带上它就是"内容不变"的承诺。
+#   3) /__api__/**：no-store（接口响应永远不缓存）。
+#   4) 其他（编辑器页面、打包产物等）：no-cache + ETag。
+CACHE_IMMUTABLE = "public, max-age=31536000, immutable"
+CACHE_REVALIDATE = "no-cache"
+CACHE_NONE = "no-store, no-cache, must-revalidate, max-age=0"
+
+
+def _cache_policy(path):
+    """根据请求路径决定 Cache-Control（见上面的分级说明）。"""
+    p = path.split("?", 1)[0]
+    if p.startswith("/__api__/"):
+        return CACHE_NONE
+    if p.startswith("/versions/") and "/assets/" in p:
+        # 带指纹参数才允许 immutable；没有指纹时无法保证内容不变，只能每次校验。
+        q = path.split("?", 1)[1] if "?" in path else ""
+        if re.search(r"(?:^|&)v=", q):
+            return CACHE_IMMUTABLE
+        return CACHE_REVALIDATE
+    return CACHE_REVALIDATE
+
 
 def _safe_id(vid):
     """版本 id 白名单校验，防止路径穿越。"""
@@ -94,6 +128,25 @@ def _list_versions():
     return out
 
 
+def _assets_stamp(adir):
+    """目录内容指纹（用于素材 URL 的 ?v= 参数）。
+
+    为什么用 mtime 而不是内容哈希：默认版本有 2700+ 个文件、共 42MB，
+    每次启动把它们全读一遍算哈希要好几秒，而缓存头只能省传输、不能省启动。
+    (mtime_ns, 文件数) 已足够判"变没变"：素材库里增删改文件都会推到目录 mtime 上。
+    注意它不如内容哈希严格（同 ns 内改完又改回同一大小可能漏判），
+    所以调用方仅在"已知不会变"的只读版本上用它（见前端 setAssetToken）。
+    """
+    try:
+        st = os.stat(adir)
+    except OSError:
+        return None
+    n = 0
+    for _r, _d, fs in os.walk(adir):
+        n += len(fs)
+    return "%x-%x" % (int(st.st_mtime_ns), n)
+
+
 def _load_version(vid):
     d = _version_dir(vid)
     vj = os.path.join(d, "version.json")
@@ -104,7 +157,12 @@ def _load_version(vid):
     if os.path.isfile(os.path.join(d, "patch.json")):
         meta["patch"] = _read_json(os.path.join(d, "patch.json"))
     # 列出该版本 assets/ 下被覆盖的素材（逻辑键），供客户端映射 URL。
-    meta["assets"] = _list_assets(os.path.join(d, "assets"))
+    adir = os.path.join(d, "assets")
+    meta["assets"] = _list_assets(adir)
+    # 素材目录指纹：前端拿它当 ?v=，让 serve.py 对素材返回 immutable。
+    # 只对只读（原版）版本提供：可写版本随时会变，给指纹反而会把旧内容钉在缓存里。
+    if meta.get("readonly"):
+        meta["assetsToken"] = _assets_stamp(adir)
     return meta
 
 
@@ -145,13 +203,29 @@ def _list_assets(adir):
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    # 用 HTTP/1.1。
+    #
+    # 标准库默认是 HTTP/1.0，它带来的问题不只是"无 keep-alive"：
+    # 旧版协议下频繁/大文件的缓存语义更保守，浏览器会把带 immutable 的响应
+    # 也当成"下次还要问一下"——实测 HTTP/1.0 时刷新仍会重发 476 个请求 / 11MB。
+    # 切成 1.1 后：
+    #   - 连接可复用，启动时 2700+ 个资源不再反复建 TCP；
+    #   - 缓存的正常规则生效，带 immutable 的素材直接从本地拿。
+    # 前提：每个响应必须有 Content-Length 或 chunked，否则客户端不知道何时结束。
+    # 静态文件由 SimpleHTTPRequestHandler 自行填 Content-Length；
+    # _json 显式填；304 无正文（标准允许）。
+    protocol_version = "HTTP/1.1"
+
     # ---- 响应工具 ----
     def _json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        # 不在这里写 Cache-Control：统一由 end_headers 按策略发，
+        # 否则同一个响应会出现两条 Cache-Control（浏览器取哪条是未定义的）。
+        self._cache_policy = CACHE_NONE
+        self._headers_sent_once = False
         self.end_headers()
         self.wfile.write(body)
 
@@ -169,11 +243,82 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return None
 
     def end_headers(self):
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        self.send_header("Pragma", "no-cache")
-        self.send_header("Expires", "0")
+        # 缓存头统一在这里注入（见文件头 CACHE_* 的分级说明）。
+        #
+        # 为什么放 end_headers 而不是 send_head：http.server 的 send_head 内部
+        # 就会调 end_headers 把头一次性刷出，所以想在父类流程里插头，
+        # 只能挤在 end_headers 这个唯一的出口上。
+        # 上下文由 prepare_cache_policy() 提前填好：静态请求填文件信息，
+        # 接口响应填 CACHE_NONE；两者都没填时用最保守的 no-cache。
+        if not self._headers_sent_once:
+            self._emit_cache_headers()
+            self._headers_sent_once = True
         super().end_headers()
 
+    def _emit_cache_headers(self):
+        """按当前请求的策略写入 Cache-Control / ETag，并处理 If-None-Match。"""
+        pol = getattr(self, "_cache_policy", None) or _cache_policy(self.path)
+        self.send_header("Cache-Control", pol)
+        if pol == CACHE_NONE:
+            # 接口响应：不缓存，也不做条件请求。
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+            return
+
+        etag = getattr(self, "_etag", None)
+        if etag:
+            self.send_header("ETag", etag)
+
+    def _check_not_modified(self, fs):
+        """ETag/Last-Modified 命中时直接回 304。返回 True 表示已经回了 304。
+
+        ETag 由 (mtime_ns, size) 构造（与 nginx 的默认做法一致）：
+        文件一改动，mtime 和 size 至少一个会变，所以不会出现"改了没生效"。
+        """
+        etag = '"%x-%x"' % (int(fs.st_mtime_ns), fs.st_size)
+        self._etag = etag
+        inm = self.headers.get("If-None-Match")
+        if inm:
+            # 允许逗号分隔的多个候选，以及弱校验前缀 W/
+            cands = [c.strip() for c in inm.split(",")]
+            for c in cands:
+                if c == "*" or c == etag or c == "W/" + etag:
+                    return True
+        return False
+
+    def _not_modified(self):
+        """发一个 304（无正文）。"""
+        self.send_response(304)
+        # 304 必须带上与 200 相同的缓存头，否则浏览器会改用下一次的策略。
+        self.end_headers()
+
+    # ---- 静态文件的缓存头与 304 ----
+    def send_head(self):
+        """在父类发头之前，把本次请求的缓存策略与 ETag 算好。
+
+        历史：父类 SimpleHTTPRequestHandler 只发 Last-Modified，不发 ETag；
+        本服务原先又在 end_headers 里强塞 no-store，两个问题叠加的结果是
+        "缓存一次都没生效过"（实测刷新重传 11.87MB）。
+        现在：先算策略/ETag → 命中条件请求就 304 → 否则让父类正常发 200。
+        """
+        self._cache_policy = _cache_policy(self.path)
+        self._headers_sent_once = False
+
+        # 先把文件系统信息拿到，才能算出 ETag。
+        fs = None
+        try:
+            path = self.translate_path(self.path)
+            if os.path.isfile(path):
+                fs = os.stat(path)
+        except OSError:
+            fs = None
+
+        if fs is not None and self._cache_policy != CACHE_NONE:
+            if self._check_not_modified(fs):
+                self._not_modified()
+                return None
+
+        return super().send_head()
     # ---- 路由 ----
     def _api(self, method):
         # /__api__/versions          GET 列表 | POST 新建
@@ -335,6 +480,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if self.path.split("?", 1)[0].startswith("/__api__/"):
             return self._api("GET")
         return super().do_GET()
+
+    def do_HEAD(self):
+        # 旧实现没拦 HEAD，于是 curl -I /__api__/versions 会掉进静态文件分支，
+        # 去找一个并不存在的磁盘文件而返回 404（浏览器/监控探活会误判接口挂了）。
+        if self.path.split("?", 1)[0].startswith("/__api__/"):
+            return self._api("GET")
+        return super().do_HEAD()
 
     def do_POST(self):
         if self.path.split("?", 1)[0].startswith("/__api__/"):
