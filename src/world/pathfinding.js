@@ -1,10 +1,13 @@
 // A* 寻路与格子定位辅助（薄封装：把运行时地图适配成引擎的纯 A*）。ctx 由调用方注入。
 import { cellCenter, worldToCell, UNIT_RX } from "../core/utils.js";
+import { mapSize, inBounds } from "../engine/iso.js";
 import { astar, nearestWalkableIn, smoothPath, walkableSegment as wsPure, tautPath as tpPure, cornerPath as cpPure } from "../engine/grid.js";
 
 function walkableOf(state) {
   const m = state.map;
-  return (r, c) => !!m && r >= 0 && c >= 0 && r < m.width && c < m.width && m.flags[r * m.width + c] === 1;
+  if (!m) return () => false;
+  const { rows, cols } = mapSize(m), w = cols;
+  return (r, c) => inBounds(m, r, c) && m.flags[r * w + c] === 1;
 }
 
 // 单位“占位圈”（用于绕行）：把单位周围**净空半径**内的格子都算障碍，这样路径是从旁边**绕过去**、
@@ -49,13 +52,15 @@ function walkFnOf(ctx, opts, sr, sc, tr, tc) {
 export function findPath(ctx, sr, sc, tr, tc, opts) {
   const m = ctx.state.map; if (!m) return null;
   const isW = walkFnOf(ctx, opts, sr, sc, tr, tc);
-  const path = astar(m.width, isW, sr, sc, tr, tc);
-  return path ? smoothPath(m.width, isW, path) : null;
+  const { rows, cols } = mapSize(m);
+  const path = astar(rows, cols, isW, sr, sc, tr, tc);
+  return path ? smoothPath(cols, isW, path) : null;
 }
 
 export function nearestWalkable(ctx, row, col) {
   const m = ctx.state.map; if (!m) return null;
-  return nearestWalkableIn(m.width, walkableOf(ctx.state), row, col);
+  const { rows, cols } = mapSize(m);
+  return nearestWalkableIn(rows, cols, walkableOf(ctx.state), row, col);
 }
 
 // ---- 角点路径（Simple Stupid Funnel）----
@@ -74,7 +79,8 @@ export function cornerPath(ctx, nodes, start, end) { return cpPure(isWorldWalkab
 export function findPathPoints(ctx, sr, sc, tr, tc, opts, startPos, exactPos) {
   const m = ctx.state.map; if (!m) return null;
   const isW = walkFnOf(ctx, opts, sr, sc, tr, tc);
-  const cells = astar(m.width, isW, sr, sc, tr, tc);
+  const { rows, cols } = mapSize(m);
+  const cells = astar(rows, cols, isW, sr, sc, tr, tc);
   if (!cells) return null;
   const nodes = [{ row: sr, col: sc }, ...cells];
   const start = startPos ? { x: startPos.x, y: startPos.y } : cellCenter(sr, sc);
@@ -89,10 +95,10 @@ export function findPathPoints(ctx, sr, sc, tr, tc, opts, startPos, exactPos) {
 // 世界坐标 (wx,wy) 最近的**可走格中心**（确定性，按世界距离）。用于点击到不可走位置时“贴近该点”。
 export function nearestWalkablePoint(ctx, wx, wy) {
   const m = ctx.state.map; if (!m) return null;
-  const w = m.width;
+  const { rows, cols } = mapSize(m);
   let best = null, bd = Infinity;
-  for (let r = 0; r < w; r++) for (let c = 0; c < w; c++) {
-    if (m.flags[r * w + c] !== 1) continue;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (m.flags[r * cols + c] !== 1) continue;
     const p = cellCenter(r, c);
     const d = (p.x - wx) * (p.x - wx) + (p.y - wy) * (p.y - wy);
     if (d < bd) { bd = d; best = { row: r, col: c, x: p.x, y: p.y }; }

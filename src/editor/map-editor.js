@@ -388,7 +388,8 @@ export function mountMapEditor(main, side, opts) {
   function cellAt(ev) {
     const w = worldAt(ev);
     const c = worldToCell(w.x, w.y);
-    if (c.row < 0 || c.col < 0 || c.row >= raw.width || c.col >= raw.width) return null;
+    const RH = (raw.height == null ? raw.width : raw.height);
+    if (c.row < 0 || c.col < 0 || c.row >= RH || c.col >= raw.width) return null;
     return byKey.get(c.row + "," + c.col) || null;
   }
   function spawnAt(w) {
@@ -536,7 +537,7 @@ export function mountMapEditor(main, side, opts) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = "rgba(255,255,255,0.65)"; ctx.font = "11px sans-serif";
     const toolName = ({ paint: "刷地面", place: "放置", select: "选择", delete: "删除", entry: "设置入口" })[tool] || tool;
-    ctx.fillText("地图：" + cur + "  (" + raw.width + "×" + raw.width + ")  层：" + (LAYERS.find(l => l[0] === layer) || [])[1] + "  工具：" + toolName + "  缩放 " + cam.zoom.toFixed(2), 8, 16);
+    ctx.fillText("地图：" + cur + "  (" + raw.width + "×" + (raw.height == null ? raw.width : raw.height) + ")  层：" + (LAYERS.find(l => l[0] === layer) || [])[1] + "  工具：" + toolName + "  缩放 " + cam.zoom.toFixed(2), 8, 16);
   }
 
   // ---------- 工具动作 ----------

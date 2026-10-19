@@ -10,9 +10,13 @@ export const cellDy = (r, c) => 16 * (r + c);
 // legacy raw -> MapDoc
 export function fromLegacyMap(raw) {
   const w = raw.width;
-  const ground = new Array(w * w);
-  const collision = new Array(w * w).fill(1);
-  const cellLayer = new Array(w * w).fill(1);
+  // 旧 .map json 只有 width，行数 = 列数（正方形）。height 显式写出来，
+  // 后续所有 w*h 运算都读它，而不是继续沿用「width 当边长」的隐式假设。
+  const h = raw.height != null ? raw.height : w;
+  const n = w * h;
+  const ground = new Array(n);
+  const collision = new Array(n).fill(1);
+  const cellLayer = new Array(n).fill(1);
   const events = {};
   for (const c of raw.cells || []) {
     const i = c.row * w + c.col;
@@ -21,7 +25,7 @@ export function fromLegacyMap(raw) {
     if (c.layer != null) cellLayer[i] = c.layer;
     if (c.trigger || c.map) events[i] = { trigger: c.trigger || 0, map: c.map || 0 };
   }
-  for (let i = 0; i < w * w; i++) if (!ground[i]) ground[i] = [0, 0];
+  for (let i = 0; i < n; i++) if (!ground[i]) ground[i] = [0, 0];
   const decorations = (raw.objects || []).map((o, idx) => {
     const d = { id: "o" + (idx + 1), sprite: o.sprite.slice(), tiles: (o.tiles || []).map(t => t.slice()), layer: o.layer || 0 };
     if (o.roof != null) d.roof = o.roof;     // 水平分界源 y（可选）
@@ -36,7 +40,7 @@ export function fromLegacyMap(raw) {
     return u;
   });
   return normalizeMapDoc({
-    schemaVersion: MAPDOC_VERSION, name: raw.name, width: w, music: raw.music || "",
+    schemaVersion: MAPDOC_VERSION, name: raw.name, width: w, height: h, music: raw.music || "",
     entry: raw.entry ? raw.entry.slice() : null,
     ground, collision, cellLayer, events, decorations, units,
   });
@@ -44,8 +48,8 @@ export function fromLegacyMap(raw) {
 
 // MapDoc -> legacy raw（供 buildMapData / 旧编辑器视图使用）
 export function toLegacyMap(doc) {
-  const w = doc.width, cells = [];
-  for (let r = 0; r < w; r++) for (let c = 0; c < w; c++) {
+  const w = doc.width, h = (doc.height == null ? doc.width : doc.height), cells = [];
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
     const i = r * w + c;
     const g = doc.ground[i] || [0, 0];
     const ev = doc.events[i] || {};
@@ -56,7 +60,7 @@ export function toLegacyMap(doc) {
     });
   }
   return {
-    name: doc.name, width: w, music: doc.music, entry: doc.entry ? doc.entry.slice() : null,
+    name: doc.name, width: w, height: h, music: doc.music, entry: doc.entry ? doc.entry.slice() : null,
     cells,
     objects: (doc.decorations || []).map(d => {
       const o = { sprite: d.sprite.slice(), tiles: (d.tiles || []).map(t => t.slice()), layer: d.layer || 0 };
@@ -136,15 +140,17 @@ function arrayProxy(backing, toStore, fromStore) {
 export function attachLegacyViews(doc) {
   if (!doc || doc.__legacyViews) return doc;
   const w = doc.width || 0;
-  if (!Array.isArray(doc.ground)) doc.ground = new Array(w * w).fill(null).map(() => [0, 0]);
-  if (!Array.isArray(doc.collision)) doc.collision = new Array(w * w).fill(1);
+  const h = doc.height == null ? w : (doc.height || 0);
+  const n = w * h;
+  if (!Array.isArray(doc.ground)) doc.ground = new Array(n).fill(null).map(() => [0, 0]);
+  if (!Array.isArray(doc.collision)) doc.collision = new Array(n).fill(1);
   if (!doc.events || typeof doc.events !== "object") doc.events = {};
   if (!Array.isArray(doc.decorations)) doc.decorations = [];
   if (!Array.isArray(doc.units)) doc.units = [];
 
-  const cells = new Array(w * w);
+  const cells = new Array(n);
   const def = (o, k, get, set) => Object.defineProperty(o, k, { get, set, enumerable: true, configurable: true });
-  for (let r = 0; r < w; r++) for (let c = 0; c < w; c++) {
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
     const i = r * w + c, cell = {};
     def(cell, "row", () => r); def(cell, "col", () => c);
     def(cell, "dx", () => cellDx(r, c)); def(cell, "dy", () => cellDy(r, c));
@@ -156,7 +162,7 @@ export function attachLegacyViews(doc) {
     def(cell, "map", () => { const e = doc.events[i]; return e ? (e.map || 0) : 0; },
                     v => { const e = doc.events[i] || (doc.events[i] = { trigger: 0, map: 0 }); e.map = v; if (!e.trigger && !e.map) delete doc.events[i]; });
     def(cell, "layer", () => (doc.cellLayer ? (doc.cellLayer[i] || 1) : 1),
-                     v => { if (!doc.cellLayer) doc.cellLayer = new Array(w * w).fill(1); doc.cellLayer[i] = v; });
+                     v => { if (!doc.cellLayer) doc.cellLayer = new Array(n).fill(1); doc.cellLayer[i] = v; });
     cells[i] = cell;
   }
   Object.defineProperty(doc, "cells", { value: cells, enumerable: false, configurable: true });

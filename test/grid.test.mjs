@@ -78,3 +78,58 @@ export function cornerPathBendsAtCorner() {
   for (const p of pts.slice(1, -1)) { const c = worldToCell(p.x, p.y); const cen = cellCenter(c.row, c.col); if (Math.hypot(p.x - cen.x, p.y - cen.y) > 2) corner = true; }
   assert(corner, "折点是角点而非格心");
 }
+
+// ---- 非方形网格（rows ≠ cols）----
+// 引擎的 astar / nearestWalkableIn 原先只收一个 width 并把行数也当成 width，
+// 于是「宽 > 高」的网格会扫描/索引到不存在的行（越界或漏格）。
+// 下面把它钉成回归条件：传入 (rows, cols) 时行与列必须各按各的维度处理。
+
+function rectGrid(rows, cols, blocked) {
+  const b = new Set(blocked);
+  return (r, c) => r >= 0 && c >= 0 && r < rows && c < cols && !b.has(r + "," + c);
+}
+
+export function astarRectWide() {
+  // 3 行 8 列：从最左到最右必须能走通（旧实现只认 8×8，行 0..2 虽在范围内但列索引会错）
+  const R = 3, C = 8, isWalk = rectGrid(R, C, []);
+  const p = astar(R, C, isWalk, 1, 0, 1, 7);
+  assert(p, "宽网格应能走通");
+  assertEq(p[p.length - 1], { row: 1, col: 7 });
+  for (const pt of p) assert(pt.row >= 0 && pt.row < R && pt.col >= 0 && pt.col < C, "路径点在网格内");
+}
+
+export function astarRectTall() {
+  // 8 行 3 列：上下走通
+  const R = 8, C = 3, isWalk = rectGrid(R, C, []);
+  const p = astar(R, C, isWalk, 0, 1, 7, 1);
+  assert(p, "高网格应能走通");
+  assertEq(p[p.length - 1], { row: 7, col: 1 });
+  for (const pt of p) assert(pt.row >= 0 && pt.row < R && pt.col >= 0 && pt.col < C, "路径点在网格内");
+}
+
+export function astarRectNoWrap() {
+  // 3 行 4 列，右下角封死整列 -> 不可达。若索引用了错误的步长（按 4 行展开），
+  // 路径会从行尾「绕回」下一行行首，产生不可能的通路。
+  const R = 3, C = 4;
+  const wall = [];
+  for (let r = 0; r < R; r++) wall.push(r + ",2");
+  const isWalk = rectGrid(R, C, wall);
+  assertEq(astar(R, C, isWalk, 0, 0, 0, 3), null, "整列封死时不可达（不能借错行索引绕过去）");
+}
+
+export function nearestWalkableRect() {
+  const R = 2, C = 6;
+  // 只有最后一行最后一列可走
+  const isWalk = (r, c) => r === 1 && c === 5;
+  assertEq(nearestWalkableIn(R, C, isWalk, 0, 0), { row: 1, col: 5 }, "必须能扫到列 5（旧实现只扫到 col<R=2）");
+}
+
+// 旧单参签名必须保持原行为（按正方形处理），否则既有调用点会静默变形
+export function legacySingleWidthStillSquare() {
+  const W = 6, isWalk = grid(W, []);
+  const p = astar(W, isWalk, 0, 0, 5, 5);
+  assert(p, "旧签名仍可用");
+  assertEq(p[p.length - 1], { row: 5, col: 5 });
+  const n = nearestWalkableIn(W, (r, c) => r === 4 && c === 5, 0, 0);
+  assertEq(n, { row: 4, col: 5 }, "旧签名按正方形扫描");
+}

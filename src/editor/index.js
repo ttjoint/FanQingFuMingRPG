@@ -156,8 +156,11 @@ async function doSave() {
   A.activePack = (await loadPack(ED.id)) || pack;
   dirty = false;
   const issues = validateContent(ED.content, createRegistry(ED.content));
-  toast(issues.length ? ("已保存（" + issues.length + " 处引用/校验提示）") : "已保存到版本「" + ED.name + "」");
-  if (issues.length) console.warn("内容校验提示：\n" + issues.join("\n"));
+  // 分级提示：error 是确定会出 bug 的，warning 是可疑但可能故意的。
+  // 原先两者混在一起，一条「已保存（72 处提示）」看不到重点。
+  const errs = issues.length;
+  toast(errs ? ("已保存（" + errs + " 处错误/提示，详见控制台）") : "已保存到版本「" + ED.name + "」");
+  if (issues.length) console.warn("内容校验提示（" + issues.length + " 条）：\n" + issues.join("\n"));
   return true;
 }
 

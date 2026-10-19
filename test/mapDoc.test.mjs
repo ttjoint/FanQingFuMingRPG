@@ -1,4 +1,4 @@
-import { fromLegacyMap, toLegacyMap, cellDx, cellDy } from "../src/content/mapDoc.js";
+import { fromLegacyMap, toLegacyMap, attachLegacyViews, cellDx, cellDy } from "../src/content/mapDoc.js";
 import { loadAllMaps, assert, assertEq } from "./helpers.mjs";
 
 export function destFormula() {
@@ -68,4 +68,62 @@ export function objectExtrasRoundTrip() {
   assertEq(back.objects[0].layer, 2, "layer");
   assertEq(back.objects[0].roof, 32, "roof");
   assertEq(back.objects[0].bias, -8, "bias");
+}
+
+// ---- 非方形地图（width ≠ height）----
+// 历史上 MapDoc 只有 width，且所有网格运算都假设 height === width。
+// 原版 9 张图恰好都是正方形，所以这个假设从未暴露。下面这几条用例把
+// "非方形必须正确"钉成回归条件。
+
+// 3 行 5 列（宽 5 高 3）的最小 legacy raw
+function rectRaw(width, height) {
+  const cells = [];
+  for (let r = 0; r < height; r++) for (let c = 0; c < width; c++)
+    cells.push({ row: r, col: c, sx: r, sy: c, flag: 1, trigger: 0, map: 0 });
+  return { name: "rect", width, height, cells, objects: [], spawns: [] };
+}
+
+export function rectSizePreserved() {
+  const raw = rectRaw(5, 3);
+  const doc = fromLegacyMap(raw);
+  assertEq(doc.width, 5, "width");
+  assertEq(doc.height, 3, "height 必须被保留，不能按 width 补齐");
+  // 图层长度 = w*h，而不是 w*w
+  assertEq(doc.ground.length, 15, "ground 长度 = w*h");
+  assertEq(doc.collision.length, 15, "collision 长度 = w*h");
+}
+
+export function rectCellCount() {
+  const raw = rectRaw(5, 3);
+  const doc = attachLegacyViews(fromLegacyMap(raw));
+  assertEq(doc.cells.length, 15, "cell 视图数量 = w*h");
+  // 每个 cell 的 row/col 都应落在范围内
+  const seen = new Set();
+  for (const c of doc.cells) {
+    assert(c.row >= 0 && c.row < 3, "row 越界：" + c.row);
+    assert(c.col >= 0 && c.col < 5, "col 越界：" + c.col);
+    seen.add(c.row + "," + c.col);
+  }
+  assertEq(seen.size, 15, "全部格子唯一");
+}
+
+export function rectRoundTrip() {
+  const raw = rectRaw(5, 3);
+  const back = toLegacyMap(fromLegacyMap(raw));
+  assertEq(back.width, 5);
+  assertEq(back.height, 3);
+  assertEq(back.cells.length, 15, "往返后 cell 数不变");
+  for (const c of back.cells) {
+    assert(c.row < 3 && c.col < 5, "往返后越界");
+  }
+}
+
+// 缺 height 的旧数据必须按方形处理（向后兼容）
+export function missingHeightIsSquare() {
+  const raw = rectRaw(4, 4);
+  delete raw.height;
+  const doc = fromLegacyMap(raw);
+  assertEq(doc.width, 4);
+  assertEq(doc.height, 4, "缺 height 时按 width 补齐");
+  assertEq(doc.ground.length, 16);
 }

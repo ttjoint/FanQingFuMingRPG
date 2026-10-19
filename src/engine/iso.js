@@ -44,3 +44,26 @@ export function dirFromVec(dx, dy) {
   d = ((d % 8) + 8) % 8;                   // 0=南,2=东,4=北,6=西
   return ((4 - d) % 8 + 8) % 8;            // 帧块下标：0=北,2=东,4=南,6=西
 }
+
+// ---- 网格尺寸与边界判定（纯函数）----
+//
+// 地图是 row × col 的矩形网格，行数（rows/height）与列数（cols/width）是**两个独立维度**。
+// 历史上这里习惯把 width 当边长用（`row < width && col < width`、`new Uint8Array(w*w)`），
+// 因为原版地图恰好都是正方形，所以从未暴露；但那是隐式不变量，会让非方形地图
+// 静默错乱（行数偏多时下半张图走不进去，列数偏多时越界读到「可走」）。
+//
+// mapSize() 把「缺 height 时按方形补齐」这条兼容规则收在一个地方，
+// 上层（core/utils、world/pathfinding、world/map、engine/grid）统一走它，
+// 避免每个调用点各自 `m.height == null ? m.width : m.height` 手抄一遍。
+export function mapSize(m) {
+  if (!m) return { rows: 0, cols: 0 };
+  const cols = m.width | 0;
+  const rows = (m.height == null ? cols : m.height | 0);
+  return { rows, cols };
+}
+
+// (row,col) 是否落在地图范围内。
+export function inBounds(m, row, col) {
+  const { rows, cols } = mapSize(m);
+  return row >= 0 && col >= 0 && row < rows && col < cols;
+}

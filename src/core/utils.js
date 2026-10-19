@@ -2,13 +2,22 @@
 // 纯几何/方向函数已抽到 engine/iso.js，这里再导出以保持既有 import 不变。
 import { G } from "./state.js";
 import { VW, VH, cv } from "./constants.js";
-import { cellCenter, worldToCell, randomPointInCell, dirFromVec } from "../engine/iso.js";
+import { cellCenter, worldToCell, randomPointInCell, dirFromVec, inBounds } from "../engine/iso.js";
 import { ellipsesOverlap } from "../engine/collision.js";
 export { cellCenter, worldToCell, randomPointInCell, dirFromVec };
 
-export function inMap(row, col) { const m = G.map; return m && row >= 0 && col >= 0 && row < m.width && col < m.width; }
+// 地图边界判定（纯逻辑在 engine/iso.js 的 inBounds，这里只负责取当前地图）。
+//
+// 历史上这里是 `row < m.width && col < m.width`（行也拿宽度判），因为地图恰好都
+// 是正方形所以从未出错。现在显式区分行对 height、列对 width，并在缺 height 时
+// 退回方形假设，保证旧的构建产物与存档行为不变。
+export function inMap(row, col) { return inBounds(G.map, row, col); }
 
-export function walkable(row, col) { return inMap(row, col) && G.map.flags[row * G.map.width + col] === 1; }
+export function walkable(row, col) {
+  const m = G.map;
+  if (!inBounds(m, row, col)) return false;
+  return m.flags[row * m.width + col] === 1;
+}
 
 // ---- 单位碰撞体 ----
 // 每个单位在地面上占一个椭圆足迹：水平半径 UNIT_RX，垂直半径 UNIT_RY（接近 2:1 等距投影）。

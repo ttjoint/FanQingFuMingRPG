@@ -1,6 +1,7 @@
 // 地图数据构建 / 切换 / 玩家落点。ctx 由调用方注入；buildMapData(assets, data) 只依赖资源。
 import { VW, VH } from "../core/constants.js";
 import { cellCenter } from "../core/utils.js";
+import { mapSize } from "../engine/iso.js";
 import { getImg } from "../core/assets.js";
 import { spawnNPC, placeFree } from "./npc.js";
 import { playBGM } from "../systems/audio.js";
@@ -76,11 +77,15 @@ export function playerHeadHeight(assets) {
 
 // 把 assets/maps/*.json 转成运行时结构：可行走网格、地形离屏画布、对象表。
 export function buildMapData(assets, data) {
-  const w = data.width;
-  const flags = new Uint8Array(w * w);
+  const { rows: h, cols: w } = mapSize(data);   // 行 = height，列 = width；缺 height 时按方形补齐
+  const n = w * h;
+  // flags 必须用 w*h 而不是 w*w：后者在非方形地图上会得到错误长度的位图，
+  // 使得行偏移 idx = row*w + col 静默溢出（要么越界、要么写到错行）。
+  const flags = new Uint8Array(n);
   let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
-  const cellOf = new Array(w * w);
-  for (const c of data.cells) {
+  const cellOf = new Array(n);
+  for (const c of data.cells || []) {
+    if (c.row < 0 || c.row >= h || c.col < 0 || c.col >= w) continue;   // 防御：越界格直接忽略
     flags[c.row * w + c.col] = c.flag;
     cellOf[c.row * w + c.col] = c;
   }
@@ -128,7 +133,7 @@ export function buildMapData(assets, data) {
     tctx.drawImage(assets.atlas, (ix % cols) * tw, Math.floor(ix / cols) * th, tw, th,
                    c.dx - minX, c.dy - minY, tw, th);
   }
-  return { ...data, flags, cellOf, terrain: tc, minX, minY, maxX, maxY, objects };
+  return { ...data, width: w, height: h, flags, cellOf, terrain: tc, minX, minY, maxX, maxY, objects };
 }
 
 export function loadMap(ctx, name) {

@@ -9,11 +9,19 @@ const NEIGHBORS = [
 ];
 
 // 从 (row,col) 由近及远找最近的可走格。
-export function nearestWalkableIn(width, isWalkable, row, col) {
+//
+// rows/cols：网格的行数与列数。引擎本身不假设网格是正方形——旧的 `width` 单参数
+// 把「列数」同时当行数用，在非方形网格上会漏掉一半行（或越界），因此拆成两个维度。
+//
+// 为兼容既有调用点与单测，也接受旧的单参形式 `nearestWalkableIn(width, …)`：
+// 此时按正方形处理（rows = cols = width），行为与改造前完全一致。
+export function nearestWalkableIn(rows, cols, isWalkable, row, col) {
+  // 旧签名：(width, isWalkable, row, col) —— 第二个参数是函数
+  if (typeof cols === "function") return nearestWalkableIn(rows, rows, cols, isWalkable, row);
   if (isWalkable(row, col)) return { row, col };
   // 确定性“欧氏最近”：扫描所有可走格取距离最小者（原按切比雪夫环+固定顺序会偏向另一侧）。
   let best = null, bd = Infinity;
-  for (let r = 0; r < width; r++) for (let c = 0; c < width; c++) {
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     if (!isWalkable(r, c)) continue;
     const d = (r - row) * (r - row) + (c - col) * (c - col);
     if (d < bd) { bd = d; best = { row: r, col: c }; }
@@ -22,18 +30,21 @@ export function nearestWalkableIn(width, isWalkable, row, col) {
 }
 
 // A*：返回 [{row,col}...]（不含起点，含终点）；不可达返回 null。
-export function astar(width, isWalkable, sr, sc, tr, tc) {
+// rows/cols 为网格行数/列数；也接受旧的单参形式 `astar(width, …)`（按正方形处理）。
+export function astar(rows, cols, isWalkable, sr, sc, tr, tc) {
+  // 旧签名：(width, isWalkable, sr, sc, tr, tc) —— 第二个参数是函数
+  if (typeof cols === "function") return astar(rows, rows, cols, isWalkable, sr, sc, tr);
   if (!isWalkable(tr, tc)) {
-    const n = nearestWalkableIn(width, isWalkable, tr, tc);
+    const n = nearestWalkableIn(rows, cols, isWalkable, tr, tc);
     if (!n) return null;
     tr = n.row; tc = n.col;
   }
-  const N = width * width, start = sr * width + sc, goal = tr * width + tc;
+  const N = rows * cols, start = sr * cols + sc, goal = tr * cols + tc;
   if (!isWalkable(sr, sc) || start === goal) return [{ row: tr, col: tc }];
   const open = [start], g = new Float32Array(N).fill(-1), came = new Int32Array(N).fill(-1);
   g[start] = 0;
   const closed = new Uint8Array(N);
-  const h = i => { const r = (i / width) | 0, c = i % width; return Math.max(Math.abs(r - tr), Math.abs(c - tc)); };
+  const h = i => { const r = (i / cols) | 0, c = i % cols; return Math.max(Math.abs(r - tr), Math.abs(c - tc)); };
   const f = new Float32Array(N); f[start] = h(start);
   let guard = 0;
   while (open.length && guard++ < 20000) {
@@ -42,9 +53,10 @@ export function astar(width, isWalkable, sr, sc, tr, tc) {
     const cur = open.splice(bi, 1)[0];
     if (cur === goal) break;
     closed[cur] = 1;
-    const cr = (cur / width) | 0, cc = cur % width;
+    const cr = (cur / cols) | 0, cc = cur % cols;
     for (const [dr, dc, cost] of NEIGHBORS) {
-      const nr = cr + dr, nc = cc + dc, ni = nr * width + nc;
+      const nr = cr + dr, nc = cc + dc, ni = nr * cols + nc;
+      if (nr < 0 || nc < 0 || nr >= rows || nc >= cols) continue;   // 显式边界（不依赖 isWalkable 是否已检查）
       if (!isWalkable(nr, nc) || closed[ni]) continue;
       if (dr && dc && (!isWalkable(cr + dr, cc) || !isWalkable(cr, cc + dc))) continue;   // 不穿角
       const ng = g[cur] + cost;
@@ -53,11 +65,12 @@ export function astar(width, isWalkable, sr, sc, tr, tc) {
   }
   if (came[goal] < 0 && goal !== start) return null;
   const path = []; let cur = goal;
-  while (cur !== -1 && cur !== start) { path.push({ row: (cur / width) | 0, col: cur % width }); cur = came[cur]; }
+  while (cur !== -1 && cur !== start) { path.push({ row: (cur / cols) | 0, col: cur % cols }); cur = came[cur]; }
   return path.reverse();
 }
 
 // 网格直线可见（supercover 采样，且不允许穿角）：从 (r0,c0) 到 (r1,c1) 沿途都不被阻挡。
+// 第一个参数仅为兼容旧签名保留（边界由 isWalkable 负责），实际不使用。
 export function lineOfSight(width, isWalkable, r0, c0, r1, c1) {
   if (!isWalkable(r0, c0) || !isWalkable(r1, c1)) return false;
   const steps = Math.max(Math.abs(r1 - r0), Math.abs(c1 - c0)) * 2;
@@ -78,6 +91,7 @@ export function lineOfSight(width, isWalkable, r0, c0, r1, c1) {
 
 // 路径平滑（string pulling）：在可见的前提下尽量跳过中间路点，消除网格“阶梯/折线”。
 // path 为 astar 的输出（不含起点，含终点）。
+// 第一参数仅为兼容保留（同 lineOfSight，可见性完全由 isWalkable 决定）。
 export function smoothPath(width, isWalkable, path) {
   if (!path || path.length <= 2) return path;
   const out = [path[0]];
