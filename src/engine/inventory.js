@@ -33,7 +33,10 @@ export function goodsList(inv, items) {
     }
     return out.length ? out : null;
   }
-  if (inv.auto === "potion") return all.filter(i => i.type === 0 && (i.hp > 0 || i.mp > 0) && i.price > 0).map(i => i.name);
+  // auto:"potion" 按原版语义只卖药/水（金创药/活气水等）。
+  // 仅靠 type/hp/mp 判定会把「猴皮(+10精力)」「豹牙(+20体力)」这类
+  // 任务材料也摆上货架 —— 原版商人不收这些。名字含药/水才是原版口径。
+  if (inv.auto === "potion") return all.filter(i => i.type === 0 && (i.hp > 0 || i.mp > 0) && i.price > 0 && /药|水/.test(i.name)).map(i => i.name);
   const types = AUTO_TYPES[inv.auto];
   if (types) return all.filter(i => types.includes(i.type) && i.price > 0).map(i => i.name);
   return null;

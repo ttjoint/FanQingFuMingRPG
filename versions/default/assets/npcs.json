@@ -683,6 +683,7 @@
     "exp": 0,
     "ai": "wander",
     "skills": "*/*",
+    "inventory": { "auto": "potion" },
     "talks": [],
     "tier": "npc"
   },
@@ -700,6 +701,7 @@
     "exp": 0,
     "ai": "wander",
     "skills": "*/*",
+    "inventory": { "auto": "weapon" },
     "talks": [],
     "tier": "npc"
   },
@@ -717,6 +719,7 @@
     "exp": 0,
     "ai": "wander",
     "skills": "*/*",
+    "inventory": { "stock": [ { "name": "铁布衫" }, { "name": "牛革甲" }, { "name": "武者之戒" }, { "name": "护身符" }, { "name": "圣者之戒" }, { "name": "佑灵符" }, { "name": "翠玉镯" }, { "name": "王者之戒" }, { "name": "天圣符" } ] },
     "talks": [],
     "tier": "npc"
   },

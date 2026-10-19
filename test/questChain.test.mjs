@@ -12,6 +12,7 @@
 //   type=1 的击杀类任务不走这条规则（目标是被打死的单位名，不是物品）。
 import { strict as assert } from "assert";
 import fs from "fs";
+import { goodsList } from "../src/engine/inventory.js";
 
 const NPCS = new URL("../versions/default/assets/npcs.json", import.meta.url);
 const ITEMS = new URL("../versions/default/assets/items.json", import.meta.url);
@@ -44,8 +45,12 @@ export function itemSources() {
   };
   for (const n of loadArr(NPCS)) {
     for (const d of (n.drops || [])) add(d.name, "drop:" + n.name);
-    // 商店 / 携带货物
-    for (const g of (n.inventory || n.goods || [])) {
+    // 商店 / 携带货物：inventory 可为 {stock:[{name},…]} 或 {auto:…}
+    const inv = n.inventory;
+    if (inv && Array.isArray(inv.stock)) for (const g of inv.stock) { if (g && g.name) add(g.name, "shop:" + n.name); }
+    else if (inv && inv.auto) {
+      for (const nm of (goodsList(inv, loadArr(ITEMS)) || [])) add(nm, "shop:" + n.name);
+    } else if (Array.isArray(n.goods)) for (const g of n.goods) {
       const nm = typeof g === "string" ? g : (g && g.name);
       if (nm) add(nm, "shop:" + n.name);
     }
