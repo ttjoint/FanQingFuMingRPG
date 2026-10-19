@@ -46,6 +46,17 @@ export const UI_BINDS = [
   "equipment", "skill.icon",
 ];
 
+// 绘制归属：元件由谁画。
+//
+// 背景（真实 bug）：pack.panel / shop.panel 既被 drawHUD 的通用循环画，
+// 又被 drawPack / drawShop 画——同一张底图同坐标画两遍，且两份代码各自
+// 维护标题、提示文字，职责不清。只靠 id 前缀猜测“这个元件归谁”太脆，
+// 所以把归属写成字段：
+//   "hud"  —— drawHUD 的通用循环（panel/bar/label/button/image/slotgrid）
+//   "none" —— 不由通用循环画，由专用绘制函数独占（drawPack / drawShop 等）
+// 专用函数需要读它的矩形时用 uiRect(id)，仍与配置同源。
+export const UI_DRAWN_BY = ["hud", "none"];
+
 const clone = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
 const num = (v, d) => (typeof v === "number" && isFinite(v) ? v : (v == null || v === "" ? d : Number(v) || d));
 const str = (v, d = "") => (v == null ? d : String(v));
@@ -74,6 +85,8 @@ export function normalizeUiComponent(c) {
   // 原来存在于 drawPack/drawShop 里的 packOpen / shop 守卫没有跟过来，
   // 导致背包与商店面板从 P1 起常驻屏幕（“进游戏多出一个关不掉的 UI 框”）。
   o.visibleBind = VIS_BINDS.includes(o.visibleBind) ? o.visibleBind : "";
+  // 绘制归属：默认由 drawHUD 的通用循环画；"none" 表示专用函数独占。
+  o.drawnBy = UI_DRAWN_BY.includes(o.drawnBy) ? o.drawnBy : "hud";
   o.visible = bool(o.visible, true);
   // slotgrid 专用：格子布局。
   if (o.kind === "slotgrid") {

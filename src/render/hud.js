@@ -76,6 +76,9 @@ export function drawHUD(rt) {
   installUiLayout(ui);
   const comps = sortedComps(ui);
   for (const c of comps) {
+    // 只画“归通用循环管”的元件；drawnBy==="none" 的由专用函数独占
+    // （drawPack / drawShop），否则同一层底图会被画两遍。
+    if (c.drawnBy === "none") continue;
     // visibleBind 优先于 visible：两者都满足才绘制。
     // 命中测试（layout.js）同样按此过滤，见 installUiLayout 的入口。
     if (!visibleOf(c.visibleBind, G)) continue;

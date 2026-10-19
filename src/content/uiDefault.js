@@ -111,12 +111,12 @@ export function defaultUiComponents() {
 
   // ---- 背包面板 ----
   comps.push({
-    id: "pack.panel", kind: "panel", anchor: "topLeft", visibleBind: "packOpen",
+    id: "pack.panel", kind: "panel", anchor: "topLeft", visibleBind: "packOpen", drawnBy: "none",
     x: PACK_BOX.x, y: PACK_BOX.y, w: PACK_BOX.w, h: PACK_BOX.h, z: 200,
     img: "assets/ui/packpanel.png",
   });
   comps.push({
-    id: "pack.grid", kind: "slotgrid", anchor: "topLeft", visibleBind: "packOpen",
+    id: "pack.grid", kind: "slotgrid", anchor: "topLeft", visibleBind: "packOpen", drawnBy: "none",
     x: PACK_BOX.x, y: PACK_BOX.y, w: PACK_BOX.w, h: PACK_BOX.h, z: 210,
     cols: 5, rows: 5, pitch: PANEL_SLOT, padX: 8, padY: 28,
     slotW: 40, slotH: 40, bind: "inventory.pack",
@@ -124,19 +124,19 @@ export function defaultUiComponents() {
 
   // ---- 商店面板 ----
   comps.push({
-    id: "shop.panel", kind: "panel", anchor: "topLeft", visibleBind: "shop",
+    id: "shop.panel", kind: "panel", anchor: "topLeft", visibleBind: "shop", drawnBy: "none",
     x: SHOP_BOX.x, y: SHOP_BOX.y, w: SHOP_BOX.w, h: SHOP_BOX.h, z: 200,
     img: "assets/ui/packpanel.png",
   });
   comps.push({
-    id: "shop.grid", kind: "slotgrid", anchor: "topLeft", visibleBind: "shop",
+    id: "shop.grid", kind: "slotgrid", anchor: "topLeft", visibleBind: "shop", drawnBy: "none",
     x: SHOP_BOX.x, y: SHOP_BOX.y, w: SHOP_BOX.w, h: SHOP_BOX.h, z: 210,
     cols: SHOP_COLS, rows: SHOP_ROWS, pitch: PANEL_SLOT, padX: 8, padY: 28,
     slotW: 38, slotH: 38, bind: "shop.goods",
   });
   // 关闭按钮：packpanel 底部正中的空格（43×18）。
   comps.push({
-    id: "shop.close", kind: "button", anchor: "topLeft", visibleBind: "shop",
+    id: "shop.close", kind: "button", anchor: "topLeft", visibleBind: "shop", drawnBy: "none",
     x: SHOP_BOX.x + 78, y: SHOP_BOX.y + 274, w: 43, h: 18, z: 220,
     img: "assets/ui/closebtn.png",
   });
@@ -146,12 +146,12 @@ export function defaultUiComponents() {
   // 且 y=40）。收进配置后，用户在编辑器里就能移动/缩放它们，而绘制侧
   // 用 uiRect() 读取，改动立刻生效。
   comps.push({
-    id: "info.panel", kind: "panel", anchor: "center", visibleBind: "panel",
+    id: "info.panel", kind: "panel", anchor: "center", visibleBind: "panel", drawnBy: "none",
     x: 0, y: 40 - (VH - 300) / 2, w: 420, h: 300, z: 300,
     bg: "rgba(20,16,12,0.95)", color: "#b8a468",
   });
   comps.push({
-    id: "save.panel", kind: "panel", anchor: "center", visibleBind: "savePanel",
+    id: "save.panel", kind: "panel", anchor: "center", visibleBind: "savePanel", drawnBy: "none",
     x: 0, y: 40 - (VH - 340) / 2, w: 460, h: 340, z: 300,
     bg: "rgba(18,14,10,0.96)", color: "#b8a468",
   });

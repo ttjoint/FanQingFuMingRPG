@@ -10,7 +10,7 @@
 import { h, clear } from "./dom.js";
 import { createHistory } from "./history.js";
 import { renderForm } from "./fields.js";
-import { UI_KINDS, UI_ANCHORS, UI_BINDS, resolvePos, hitTop } from "../content/ui.js";
+import { UI_KINDS, UI_ANCHORS, UI_BINDS, VIS_BINDS, UI_DRAWN_BY, resolvePos, hitTop } from "../content/ui.js";
 import { getImg } from "../core/assets.js";
 
 const VW = 640, VH = 480;   // 逻辑分辨率（与 core/constants.js 一致，但此处不 import 以免取 DOM）
@@ -18,6 +18,14 @@ const VW = 640, VH = 480;   // 逻辑分辨率（与 core/constants.js 一致，
 const kindLabel = k => ({
   panel: "面板", bar: "状态条", slotgrid: "格子组", button: "按钮", label: "文字", image: "图片",
 }[k] || k);
+
+const visBindLabel = v => ({
+  "": "（恒显示）", packOpen: "背包打开", shop: "商店打开", stashPanel: "仓库",
+  waypointPanel: "传送点", smithPanel: "铁匠", mercPanel: "随从", savePanel: "存档",
+  settingsPanel: "设置", dialog: "对话中", panel: "信息面板",
+}[v] || v);
+
+const drawnByLabel = d => ({ hud: "HUD 通用循环", none: "专用函数独占" }[d] || d);
 const anchorLabel = a => ({
   topLeft: "左上", topRight: "右上", bottomLeft: "左下", bottomRight: "右下", center: "居中",
 }[a] || a);
@@ -28,6 +36,10 @@ const SCHEMA = [
   { k: "id", label: "标识 id", type: "text", hint: "唯一；hud.* / pack.* / shop.* 前缀影响运行时语义" },
   { k: "kind", label: "类型", type: "select", options: UI_KINDS.map(k => [k, kindLabel(k)]) },
   { k: "visible", label: "显示", type: "bool" },
+  { k: "visibleBind", label: "显隐条件", type: "select", options: VIS_BINDS.map(v => [v, visBindLabel(v)]),
+    hint: "组件何时显示：例如背包面板绑“背包打开”。留空则恒由上面的“显示”控制" },
+  { k: "drawnBy", label: "绘制归属", type: "select", options: UI_DRAWN_BY.map(d => [d, drawnByLabel(d)]),
+    hint: "“专用函数独占”= 不走通用循环（如背包/商店底图由各自绘制函数画），避免同一层画两遍" },
   { k: "z", label: "层级 z", type: "num", hint: "越大越靠上；命中测试同样按它排序" },
 
   { group: "位置与尺寸" },
@@ -66,7 +78,7 @@ function newComponent(ui) {
   return {
     id, kind: "panel", anchor: "topLeft", x: 40 + (n % 8) * 12, y: 40 + (n % 8) * 12,
     w: 120, h: 60, z: 100, img: "", color: "", bg: "rgba(24,28,36,0.85)", text: "", bind: "",
-    visible: true,
+    visible: true, visibleBind: "", drawnBy: "hud",
     // slotgrid 需要的字段一并给上，切换 kind 时不用再补
     cols: 4, rows: 4, pitch: 34, padX: 6, padY: 6, slotW: 30, slotH: 30,
   };
