@@ -14,6 +14,7 @@ import { drawEffect, drawRing, drawMoveMarker, drawGroundItemHighlight, drawIndi
 import { effectPos } from "../engine/effect.js";
 import { computeIndicators } from "../systems/indicators.js";
 import { getRuntime } from "../runtime/context.js";
+import { stepRain, drawRain } from "./weather.js";
 
 // 视图层取资产的统一入口。
 // P5：render/input 不再直接依赖全局 A —— 但这两层每次绘制都要读地形图/角色表，
@@ -66,6 +67,9 @@ export function anchorOf(im, name, rt) {
 export function entitySortY(e) {
   return e.y;
 }
+
+// 上一帧的 G.time，用于给天气推进算 dt。模块级而非挂在 render 函数上（后者不符合类型约定）。
+let prevTime = null;
 
 export function render(rt) {
   // 显式传入时用传入的，否则用当前运行时（启动/单测可传）。
@@ -157,6 +161,15 @@ export function render(rt) {
   // 浮动伤害数字：在所有单位与特效之上（不能被尸体/地面物盖住），
   // 但仍在 HUD 之下（不能盖住血条/技能栏）。
   drawFloats(rt, camX, camY);
+  // 天气（雨）：盖在单位与特效之上、HUD 之下。
+  // dt 由 G.time 差分得到（G.time 只在 update() 里按帧累加），
+  // 不在渲染层自己读 performance.now()：那样暂停/单步时雨会一直跑，
+  // 与游戏时间脱节。
+  const now = G.time;
+  const dt = prevTime == null ? 0 : Math.max(0, now - prevTime);
+  prevTime = now;
+  stepRain(dt, G, VW, VH);
+  drawRain(ctx, G, VW, VH);
   drawHUD(rt); drawDialog(rt); drawPanels(rt); drawPack(rt); drawShop(rt); drawSavePanel(rt);
   drawWaypointPanel(rt); drawStash(rt); drawSmith(rt); drawDifficulty(rt); drawMercPanel(rt);
   drawSettingsPanel(rt); drawTip(rt); drawCursorItem(rt); drawTooltip(rt);

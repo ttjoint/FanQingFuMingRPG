@@ -7,6 +7,7 @@ import { syncMissions } from "../systems/missions.js";
 import { playBGM, playSound } from "../systems/audio.js";
 import { applyBuff } from "../engine/buff.js";
 import { npcPickup, npcDrop, dropGround, groundAt } from "../systems/ground.js";
+import { warnScript, findNpcByName, warnMissingNpcTemplate } from "./diagnostics.js";
 
 // 脚本生成器遇到 end/exit 时抛出的哨兵。
 export const EXIT = { exit: true };
@@ -85,19 +86,62 @@ export function* execCall(ctx, name, args) {
     case "CheckMission": setVar(args[1], G.missions[s(0)] ? G.missions[s(0)].state : 4, G.vars); return;
     case "GetMissionObjCount": setVar(args[1], G.missions[s(0)] ? G.missions[s(0)].got : 0, G.vars); return;
 
-    case "AddNPC": spawnByName(ctx, s(0), v(1), v(2)); return;
-    case "DelNPC": G.npcs = G.npcs.filter(n => n.name !== s(0)); return;
+    case "AddNPC": {
+      // 模板不存在时 spawnByName 返回 null（旧行为：静默什么都没发生）。
+      // 这是最常见的一类数据错误（名字空白/拼写），必须报出来。
+      // 注意：这里直接查 ctx.assets.npcsData，不 import world/npc 的 npcDataByName
+      // —— 那会通过 world/map.js → core/constants.js 把 DOM 依赖带进纯逻辑层。
+      const nm = s(0);
+      const exists = !!(ctx.assets.npcsData || []).find(d => d.name === nm);
+      warnMissingNpcTemplate(G, nm, "AddNPC", exists);
+      spawnByName(ctx, nm, v(1), v(2));
+      return;
+    }
+    case "DelNPC": {
+      // 旧行为：filter 不命中就静默保留，于是漏删的单位会一直留在场上
+      // （典型场景：AddNPC 用了带空格的名字，DelNPC 用不带空格的）。
+      const nm = s(0);
+      const { warn } = findNpcByName(G, nm, "DelNPC");
+      if (warn) warnScript(G, warn);
+      G.npcs = G.npcs.filter(n => n.name !== nm);
+      return;
+    }
     case "DelAllNPCInMap": G.npcs = []; return;
-    case "ShowNPCTalk": { const n = G.npcs.find(x => x.name === s(0)); if (n) n.talkT = 2; return; }
-    case "SetNPCAttack": return;
+    case "ShowNPCTalk": {
+      const { npc, warn } = findNpcByName(G, s(0), "ShowNPCTalk");
+      if (warn) { warnScript(G, warn); return; }
+      npc.talkT = 2; return;
+    }
+    // SetNPCAttack(name, on?)：设置单位是否会主动攻击（对应实例字段 aggressive）。
+    //
+    // 原版文档只写了「设置 NPC 是否攻击」，参数个数/含义均未确认，且**全库 0 处调用**。
+    // 旧实现是 `case "SetNPCAttack": return;`——假装成功。现在两种情况都明确区分：
+    //   - 参数至少两个：按文档最自然的解释实现（on 非 0 即主动攻击）
+    //   - 参数不足：报诊断而不是装作没事
+    case "SetNPCAttack": {
+      const nm = s(0);
+      if (args.length < 2) {
+        warnScript(G, "SetNPCAttack 需要 2 个参数（单位名, 是否主动攻击），实际 " + args.length + " 个；已忽略");
+        return;
+      }
+      const { npc, warn } = findNpcByName(G, nm, "SetNPCAttack");
+      if (warn) { warnScript(G, warn); return; }
+      npc.aggressive = !!v(1);
+      return;
+    }
     // 动态修改某个实例的阵营（实例阵营可变；关系表内置不可改）。
     // SetFaction(name, factionId)：按名称找 NPC（兼容脚本旧习惯），改其 faction。
-    case "SetFaction": { const n = G.npcs.find(x => x.name === s(0)); if (n) n.faction = s(1); return; }
+    case "SetFaction": {
+      const { npc, warn } = findNpcByName(G, s(0), "SetFaction");
+      if (warn) { warnScript(G, warn); return; }
+      npc.faction = s(1); return;
+    }
 
     // ---- NPC 背包：拾取 / 丢弃（供剧本驱动，AI 自动拾取暂不实现）----
     // NPCPickItem(npcName, itemName?)：不传物品名则拾取脚下最近的掉落物。
     case "NPCPickItem": {
-      const n = G.npcs.find(x => x.name === s(0)); if (!n) return;
+      const { npc: n, warn } = findNpcByName(G, s(0), "NPCPickItem");
+      if (warn) { warnScript(G, warn); return; }
       const nm = s(1);
       let gr = null;
       for (let i = G.ground.length - 1; i >= 0; i--) {
@@ -106,21 +150,28 @@ export function* execCall(ctx, name, args) {
         if (Math.hypot(c.x - n.x, c.y - n.y) > 48) continue;
         gr = c; break;
       }
+      if (!gr) {
+        warnScript(G, "NPCPickItem：「" + n.name + "」脚下 48px 内没有" + (nm ? "物品「" + nm + "」" : "掉落物"));
+        return;
+      }
       npcPickup(ctx, n, gr);
       return;
     }
     // NPCDropItem(npcName, bagIndex?)：不传序号则丢弃背包中最后一格物品。
     case "NPCDropItem": {
-      const n = G.npcs.find(x => x.name === s(0)); if (!n) return;
+      const { npc: n, warn } = findNpcByName(G, s(0), "NPCDropItem");
+      if (warn) { warnScript(G, warn); return; }
       const bag = n.bag || [];
       let idx = v(1);
       if (idx == null || idx < 0 || !bag[idx]) { idx = -1; for (let i = bag.length - 1; i >= 0; i--) if (bag[i]) { idx = i; break; } }
       if (idx >= 0) npcDrop(ctx, n, idx);
+      else warnScript(G, "NPCDropItem：「" + n.name + "」背包是空的，没有东西可丢");
       return;
     }
     // NPCDropAt(npcName, itemName, count?)：直接把物品丢到 NPC 脚下（不经背包）。
     case "NPCDropAt": {
-      const n = G.npcs.find(x => x.name === s(0)); if (!n) return;
+      const { npc: n, warn } = findNpcByName(G, s(0), "NPCDropAt");
+      if (warn) { warnScript(G, warn); return; }
       dropGround(G, { name: s(1), count: v(2) || 1 }, n.x, n.y, { owner: n, from: "npc" });
       return;
     }
@@ -140,9 +191,17 @@ export function* execCall(ctx, name, args) {
     }
     // 给单位施加 Buff。SetBuff(target, buffId, [stacks])；target="player" 或 NPC 名称。
     case "SetBuff": {
-      const def = ctx.assets.buffTable && ctx.assets.buffTable.byId.get(s(1));
-      const tgt = s(0) === "player" ? G.player : G.npcs.find(x => x.name === s(0));
-      if (def && tgt) applyBuff(tgt, def, { stacks: v(2) || 1 });
+      const id = s(1);
+      const def = ctx.assets.buffTable && ctx.assets.buffTable.byId.get(id);
+      if (!def) { warnScript(G, "SetBuff 找不到 Buff「" + id + "」"); return; }
+      if (s(0) === "player") {
+        if (G.player) applyBuff(G.player, def, { stacks: v(2) || 1 });
+        else warnScript(G, "SetBuff：玩家尚未就位，无法施加「" + id + "」");
+        return;
+      }
+      const { npc, warn } = findNpcByName(G, s(0), "SetBuff");
+      if (warn) { warnScript(G, warn); return; }
+      applyBuff(npc, def, { stacks: v(2) || 1 });
       return;
     }
 
@@ -153,9 +212,15 @@ export function* execCall(ctx, name, args) {
     case "ShowEnding": G.pendingEnd = true; return;   // 剧本显式结束：切到结局场景（数据驱动，不靠文本关键字）
     case "PlaySound": playSound(G, s(0)); return;   // 音效（失败静默：缺文件不打断剧情）
     case "PlayMusic": playBGM(G, s(0)); return;
-    case "Rain": G.rain = !G.rain; return;
+    // 下雨。旧实现是 `G.rain = !G.rain;`（**翻转**而非设置），而且全库没有任何
+    // 读取 G.rain 的地方——等于一条空指令。脚本里 Rain() 的意图显然是「开始下雨」
+    // （战场到扬州.gsp / 龙家庄.gsp 都在「敌军已进城/清兵杀来」的紧张气氛处调用），
+    // 所以改成幂等的「设为开」，可带可选参数控制开关。渲染见 render/weather.js。
+    case "Rain": G.rain = args.length ? !!v(0) : true; return;
     case "GetRandomNum": setVar(args[0], Math.floor(Math.random() * (v(2) - v(1) + 1)) + v(1), G.vars); return;
-    default: return;             // 未实现的指令静默忽略
+    // 未知指令：旧行为是静默 return，于是「脚本写了但引擎没实现」永远没声音。
+    // 现在报诊断（原版 25 个脚本里的指令都已覆盖，正常游玩不会触发）。
+    default: warnScript(G, "未实现的指令「" + name + "」，已忽略"); return;
   }
 }
 
