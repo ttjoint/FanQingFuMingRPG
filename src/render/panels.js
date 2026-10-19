@@ -4,7 +4,7 @@ import { VW, VH, ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { wrapText } from "./text.js";
 import { drawItemSlot } from "./hud.js";
-import { SETTINGS_BOX, SETTINGS_BAR, SETTINGS_BTN, uiRect, uiSlotRect } from "../core/layout.js";
+import { settingsBox, settingsBar, settingsButtons, uiRect, uiSlotRect, uiBox } from "../core/layout.js";
 import { PACK_BOX } from "../core/layout.js";
 import { SAVE_SLOTS, saveSlotInfo } from "../systems/save.js";
 import { normalizeDifficulties } from "../engine/difficulty.js";
@@ -90,19 +90,23 @@ export function drawPack(rt) {
 export const STASH_BOX = { x: 12, y: 40, cols: 10, rows: 10, cell: 26, gap: 2 };
 const STASH_PAD = 32;
 
+// 仓库面板矩形：优先取 ui.json 的 stash.panel（编辑器可挪动/改尺寸），
+// 缺配置时回退 STASH_BOX 算出的默认值。
 export function stashRect() {
-  const { x, y, cols, rows, cell, gap } = STASH_BOX;
+  const { cols, rows, cell, gap } = STASH_BOX;
   const w = cols * cell + (cols - 1) * gap + STASH_PAD;
   const h = rows * cell + (rows - 1) * gap + STASH_PAD + 18;
-  return { x, y, w, h };
+  return uiBox("stash.panel", { x: STASH_BOX.x, y: STASH_BOX.y, w, h });
 }
 
 // 第 i 格的屏幕矩形（绘制与命中共用）。
+// 格子按面板左上角 + 内边距定位，所以面板被配置挪动后格子自动跟随。
 export function stashSlotRect(i) {
-  const { x, y, cols, cell, gap } = STASH_BOX;
+  const { cols, cell, gap } = STASH_BOX;
+  const B = stashRect();
   return {
-    x: x + 16 + (i % cols) * (cell + gap),
-    y: y + 30 + Math.floor(i / cols) * (cell + gap),
+    x: B.x + 16 + (i % cols) * (cell + gap),
+    y: B.y + 30 + Math.floor(i / cols) * (cell + gap),
     w: cell, h: cell,
   };
 }
@@ -147,11 +151,13 @@ export const SMITH_BOX = { x: 150, y: 110, w: 340, h: 250 };
 const SMITH_ROW_H = 38;
 const SMITH_BTN_Y0 = 74;
 
-export function smithRect() { return SMITH_BOX; }
+// 铁匠面板矩形：优先取 ui.json 的 smith.panel。
+export function smithRect() { return uiBox("smith.panel", SMITH_BOX); }
 
 // 三个动作的按钮矩形。返回 [{ id, x, y, w, h }]。
+// 相对面板左上角定位，面板被配置挪动后按钮自动跟随。
 export function smithButtons() {
-  const B = SMITH_BOX;
+  const B = smithRect();
   const ids = ["gamble", "identify", "repair"];
   return ids.map((id, i) => ({ id, x: B.x + 16, y: B.y + SMITH_BTN_Y0 + i * SMITH_ROW_H, w: B.w - 32, h: SMITH_ROW_H - 8 }));
 }
@@ -168,7 +174,7 @@ export function smithButtonAt(sx, sy, rt) {
 export function drawSmith(rt) {
   const G = stateOf(rt);
   if (!G.smithPanel) return;
-  const B = SMITH_BOX;
+  const B = smithRect();
   ctx.fillStyle = "rgba(16,12,8,0.96)"; ctx.fillRect(B.x, B.y, B.w, B.h);
   ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(B.x + 1, B.y + 1, B.w - 2, B.h - 2); ctx.lineWidth = 1;
   ctx.fillStyle = "#f0d060"; ctx.font = "bold 15px 'Microsoft YaHei',SimHei,sans-serif";
@@ -211,8 +217,11 @@ export function diffRows(rt) {
   return arr.map(d => ({ ...d, current: d.id === cur }));
 }
 
+// 难度面板矩形：优先取 ui.json 的 difficulty.panel。
+export function diffRect() { return uiBox("difficulty.panel", DIFF_BOX); }
+
 export function diffRowRect(i) {
-  const B = DIFF_BOX;
+  const B = diffRect();
   return { x: B.x + 12, y: B.y + 46 + i * DIFF_ROW_H, w: B.w - 24, h: DIFF_ROW_H - 8 };
 }
 
@@ -233,7 +242,7 @@ export function diffRowAt(sx, sy, rt) {
 export function drawDifficulty(rt) {
   const G = stateOf(rt);
   if (!G.diffPanel) return;
-  const B = DIFF_BOX;
+  const B = diffRect();
   ctx.fillStyle = "rgba(16,12,8,0.96)"; ctx.fillRect(B.x, B.y, B.w, B.h);
   ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(B.x + 1, B.y + 1, B.w - 2, B.h - 2); ctx.lineWidth = 1;
   ctx.fillStyle = "#f0d060"; ctx.font = "bold 14px 'Microsoft YaHei',SimHei,sans-serif";
@@ -257,8 +266,11 @@ export function drawDifficulty(rt) {
 export const MERC_BOX = { x: 170, y: 100, w: 300, h: 250 };
 const MERC_ROW_H = 52;
 
+// 随从面板矩形：优先取 ui.json 的 merc.panel。
+export function mercRect() { return uiBox("merc.panel", MERC_BOX); }
+
 export function mercRowRect(i) {
-  const B = MERC_BOX;
+  const B = mercRect();
   return { x: B.x + 12, y: B.y + 44 + i * MERC_ROW_H, w: B.w - 24, h: MERC_ROW_H - 8 };
 }
 
@@ -277,7 +289,7 @@ export function mercRowAt(sx, sy, rt) {
 export function drawMercPanel(rt) {
   const G = stateOf(rt);
   if (!G.mercPanel) return;
-  const B = MERC_BOX;
+  const B = mercRect();
   ctx.fillStyle = "rgba(16,12,8,0.96)"; ctx.fillRect(B.x, B.y, B.w, B.h);
   ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(B.x + 1, B.y + 1, B.w - 2, B.h - 2); ctx.lineWidth = 1;
   ctx.fillStyle = "#f0d060"; ctx.font = "bold 14px 'Microsoft YaHei',SimHei,sans-serif";
@@ -357,10 +369,13 @@ export function drawSavePanel(rt) {
 export const WP_BOX = { x: 150, y: 50, w: 340, h: 320 };
 const WP_ROW_H = 34;
 
+// 传送点面板矩形：优先取 ui.json 的 waypoint.panel。
+export function wpRect() { return uiBox("waypoint.panel", WP_BOX); }
+
 export function drawWaypointPanel(rt) {
   const G = stateOf(rt);
   if (!G.waypointPanel) return;
-  const { w, h, x, y } = WP_BOX;
+  const { w, h, x, y } = wpRect();
   ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(0, 0, VW, VH);
   ctx.fillStyle = "rgba(18,14,10,0.97)"; ctx.fillRect(x, y, w, h);
   ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2); ctx.lineWidth = 1;
@@ -394,7 +409,7 @@ export function drawWaypointPanel(rt) {
 export function waypointAt(sx, sy, rt) {
   const G = stateOf(rt);
   if (!G.waypointPanel) return null;
-  const { w, x, y, h } = WP_BOX;
+  const { w, x, y, h } = wpRect();
   if (sx < x || sx > x + w || sy < y || sy > y + h) return null;
   const targets = waypointRows(rt);
   for (let i = 0; i < targets.length; i++) {
@@ -423,7 +438,9 @@ function waypointRows(rt) {
 export function drawSettingsPanel(rt) {
   const G = stateOf(rt);
   if (!G.settingsPanel) return;
-  const { w, h, x, y } = SETTINGS_BOX, bx = SETTINGS_BAR.x, bw = SETTINGS_BAR.w;
+  const { w, h, x, y } = settingsBox();
+  const bx = settingsBar().x, bw = settingsBar().w;
+  const btns = settingsButtons();
   // 半透明遮罩：面板是模态的，压暗背后场景以突出焦点。
   ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(0, 0, VW, VH);
   ctx.fillStyle = "rgba(18,14,10,0.97)"; ctx.fillRect(x, y, w, h);
@@ -449,7 +466,7 @@ export function drawSettingsPanel(rt) {
   ctx.beginPath(); ctx.moveTo(x + 20, y + 222); ctx.lineTo(x + w - 20, y + 222); ctx.stroke();
 
   const mx = G.mouse.sx, my = G.mouse.sy;
-  for (const b of SETTINGS_BTN) {
+  for (const b of btns) {
     const hover = mx >= b.x && mx < b.x + b.w && my >= b.y && my < b.y + b.h;
     // 退出游戏用暖红，与其它操作区分（不可逆）。
     const base = b.k === "quit" ? (hover ? "#b8644c" : "#8a4a3a") : (hover ? "#c8b070" : "#8fbf6a");

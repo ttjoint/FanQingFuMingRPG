@@ -8,6 +8,8 @@ import {
   hitComponent, hitTop, slotRect, UI_KINDS, UI_ANCHORS,
 } from "../src/content/ui.js";
 import { defaultUi, defaultUiComponents, DEFAULT_UI_METRICS } from "../src/content/uiDefault.js";
+import { installUiLayout, uiBox, settingsBox, settingsBar, settingsButtons } from "../src/core/layout.js";
+import { stashSlotRect, smithButtons, mercRowRect, diffRowRect } from "../src/render/panels.js";
 
 const VW = 640, VH = 480;
 
@@ -304,5 +306,113 @@ export function defaultUiPanelsHaveVisibleBind() {
     const c = uiComponent(ui, id);
     assert.ok(c, id + " 存在");
     assert.ok(!c.visibleBind, id + " 不应绑可见性");
+  }
+}
+
+// ---- P1-1：六个硬编码面板已搬进 UI 配置 ----
+// 这些面板原先的坐标写死在 render/panels.js 的 XXX_BOX 常量里，绘制与命中各写一份。
+// 现在统一走 uiBox("xxx.panel", 默认值)，本组断言锁住三件事：
+//   1) ui.json 与 uiDefault.js 两份数据不漂移（手工同步，最易腐化）
+//   2) 配置里的坐标与旧硬编码一致（否则搬完画面会跳位）
+//   3) uiBox 真的优先读配置、缺配置时回退默认（不能把面板弄丢）
+
+const PANELS = [
+  { id: "stash.panel",      bind: "stashPanel",    box: { x: 12,  y: 40,  w: 316, h: 338 } },
+  { id: "smith.panel",      bind: "smithPanel",    box: { x: 150, y: 110, w: 340, h: 250 } },
+  { id: "difficulty.panel", bind: "diffPanel",     box: { x: 190, y: 130, w: 260, h: 190 } },
+  { id: "merc.panel",       bind: "mercPanel",     box: { x: 170, y: 100, w: 300, h: 250 } },
+  { id: "waypoint.panel",   bind: "waypointPanel", box: { x: 150, y: 50,  w: 340, h: 320 } },
+  { id: "settings.panel",   bind: "settingsPanel", box: { x: 130, y: 80,  w: 380, h: 320 } },
+];
+
+export function defaultUiHasMigratedPanels() {
+  const comps = defaultUiComponents();
+  for (const p of PANELS) {
+    const c = comps.find(x => x.id === p.id);
+    assert.ok(c, `默认 UI 缺少 ${p.id}`);
+    assert.equal(c.visibleBind, p.bind, `${p.id} 的 visibleBind 应为 ${p.bind}`);
+    assert.equal(c.drawnBy, "none", `${p.id} 由专用绘制函数独占，应标 drawnBy=none`);
+    assert.deepEqual({ x: c.x, y: c.y, w: c.w, h: c.h }, p.box, `${p.id} 坐标与旧硬编码不一致`);
+  }
+}
+
+export function uiJsonHasMigratedPanels() {
+  // ui.json 是磁盘数据（编辑器保存的形态），与 uiDefault.js 必须保持一致。
+  // 两份手工同步是已知的腐化风险，这里做逐字段比对。
+  const raw = fs.readFileSync(new URL("../versions/default/assets/ui.json", import.meta.url), "utf8");
+  const data = JSON.parse(raw);
+  const comps = data.components || data;
+  const defs = defaultUiComponents();
+  for (const p of PANELS) {
+    const disk = comps.find(x => x.id === p.id);
+    assert.ok(disk, `ui.json 缺少 ${p.id}`);
+    assert.deepEqual({ x: disk.x, y: disk.y, w: disk.w, h: disk.h }, p.box, `ui.json 的 ${p.id} 坐标不对`);
+    assert.equal(disk.visibleBind, p.bind, `ui.json 的 ${p.id} visibleBind 不对`);
+    assert.equal(disk.drawnBy, "none", `ui.json 的 ${p.id} drawnBy 不对`);
+    // 与默认值逐字段对照，防止两份数据静默分叉
+    const def = defs.find(x => x.id === p.id);
+    for (const k of ["kind", "anchor", "x", "y", "w", "h", "visibleBind", "drawnBy"]) {
+      assert.deepEqual(disk[k], def[k], `${p.id} 的 ${k} 在 ui.json 与 uiDefault.js 中不一致`);
+    }
+  }
+}
+
+export function uiBoxPrefersConfigAndFallsBack() {
+  const fallback = { x: 1, y: 2, w: 3, h: 4 };
+  // 未注入配置 → 回退默认（不能返回 null，否则面板会消失）
+  installUiLayout(null);
+  assert.deepEqual(uiBox("smith.panel", fallback), fallback, "未注入配置时应回退默认值");
+
+  // 注入配置 → 取配置值
+  installUiLayout(normalizeUi(defaultUi()));
+  const r = uiBox("smith.panel", fallback);
+  assert.deepEqual({ x: r.x, y: r.y, w: r.w, h: r.h }, PANELS[1].box, "注入配置后应取配置坐标");
+
+  // 配置里没有该元件 → 仍回退
+  assert.deepEqual(uiBox("no.such.panel", fallback), fallback, "配置缺该元件时应回退");
+
+  installUiLayout(null);
+}
+
+export function migratedPanelsFollowConfigInRows() {
+  // 面板挪动后，内部行/格/按钮必须跟着走（否则点不到）。
+  installUiLayout(null);
+  const beforeStash = stashSlotRect(0);
+  const beforeSmith = smithButtons()[0];
+  const beforeMerc = mercRowRect(0);
+  const beforeDiff = diffRowRect(0);
+
+  // 注入一个把所有面板整体右移 100、下移 50 的配置
+  const ui = normalizeUi(defaultUi());
+  for (const c of ui.components) {
+    if (c.id.endsWith(".panel") && PANELS.some(p => p.id === c.id)) { c.x += 100; c.y += 50; }
+  }
+  installUiLayout(ui);
+  try {
+    assert.equal(stashSlotRect(0).x - beforeStash.x, 100, "仓库格子应跟随面板横移");
+    assert.equal(stashSlotRect(0).y - beforeStash.y, 50, "仓库格子应跟随面板纵移");
+    assert.equal(smithButtons()[0].x - beforeSmith.x, 100, "铁匠按钮应跟随面板横移");
+    assert.equal(mercRowRect(0).x - beforeMerc.x, 100, "随从行应跟随面板横移");
+    assert.equal(diffRowRect(0).y - beforeDiff.y, 50, "难度行应跟随面板纵移");
+  } finally {
+    installUiLayout(null);
+  }
+}
+
+export function settingsUsesConfigurableBox() {
+  installUiLayout(null);
+  const d = settingsBox();
+  assert.deepEqual({ x: d.x, y: d.y, w: d.w, h: d.h }, PANELS[5].box, "未注入时设置面板用默认几何");
+
+  const ui = normalizeUi(defaultUi());
+  const c = ui.components.find(x => x.id === "settings.panel");
+  c.x += 40;
+  installUiLayout(ui);
+  try {
+    assert.equal(settingsBox().x, PANELS[5].box.x + 40, "设置面板矩形应跟随配置");
+    assert.equal(settingsBar().x, settingsBox().x + 110, "音量条应跟随面板偏移");
+    assert.equal(settingsButtons()[0].x, settingsBox().x + 30, "系统菜单按钮应跟随面板偏移");
+  } finally {
+    installUiLayout(null);
   }
 }

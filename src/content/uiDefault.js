@@ -156,6 +156,30 @@ export function defaultUiComponents() {
     bg: "rgba(18,14,10,0.96)", color: "#b8a468",
   });
 
+  // ---- 剩下的六个功能面板 ----
+  // 这些面板的坐标原先硬编码在 render/panels.js 的 XXX_BOX 常量里，绘制与命中测试
+  // 两端各写一份。收进配置后，render 侧统一用 uiBox("xxx.panel", 默认值) 读取，
+  // 编辑器里挪动/缩放立即生效；缺配置时仍用原常数值（向后兼容）。
+  // 坐标与默认常量的对应关系：
+  //   STASH_BOX{x:12,y:40} + 算出的 316×338
+  //   SMITH_BOX{150,110,340,250}、DIFF_BOX{190,130,260,190}、MERC_BOX{170,100,300,250}
+  //   WP_BOX{150,50,340,320}、SETTINGS_DEFAULT{130,80,380,320}
+  const panels = [
+    { id: "stash.panel",      visibleBind: "stashPanel",    x: 12,  y: 40,  w: 316, h: 338 },
+    { id: "smith.panel",      visibleBind: "smithPanel",    x: 150, y: 110, w: 340, h: 250 },
+    { id: "difficulty.panel", visibleBind: "diffPanel",     x: 190, y: 130, w: 260, h: 190 },
+    { id: "merc.panel",       visibleBind: "mercPanel",     x: 170, y: 100, w: 300, h: 250 },
+    { id: "waypoint.panel",   visibleBind: "waypointPanel", x: 150, y: 50,  w: 340, h: 320 },
+    { id: "settings.panel",   visibleBind: "settingsPanel", x: 130, y: 80,  w: 380, h: 320 },
+  ];
+  for (const p of panels) {
+    comps.push({
+      id: p.id, kind: "panel", anchor: "topLeft", visibleBind: p.visibleBind, drawnBy: "none",
+      x: p.x, y: p.y, w: p.w, h: p.h, z: 300,
+      bg: "rgba(18,14,10,0.97)", color: "#b8a468",
+    });
+  }
+
   return comps;
 }
 

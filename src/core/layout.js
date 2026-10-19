@@ -96,6 +96,23 @@ export function uiRect(id) {
   const p = compPos(c);
   return { x: p.x, y: p.y, w: c.w, h: c.h };
 }
+
+// 面板矩形：优先取可编辑 UI 配置（ui.json 里的 id），缺配置时回退硬编码默认。
+// 这是把“硬编码面板”逐步搬进 UI 配置的统一入口：搬一个面板只需在 ui.json 加一个
+// 元件 + 把调用处的常量换成 uiBox("xxx.panel", DEFAULT_BOX)。
+//
+// layout.js 在 core/ 下，不能 import content/ 的 ui 数据，所以这里只能读
+// installUiLayout() 注入的已规整配置（渲染层每帧注入）。
+export function uiBox(id, fallback) {
+  const r = uiRect(id);
+  return r || fallback;
+}
+
+// 面板内部的行/按钮矩形：它们相对面板左上角定位，所以面板被挪动时自动跟随。
+// rect 是行相对面板的偏移与尺寸 {dx, dy, w, h}。
+export function uiRow(box, def) {
+  return { x: box.x + def.dx, y: box.y + def.dy, w: def.w != null ? def.w : box.w - (def.dx * 2), h: def.h };
+}
 export function uiSlotRect(id, i) {
   const c = comp(id);
   if (!c) return null;
@@ -188,20 +205,38 @@ export function displayEntry(slot) {
 
 // ---- 系统设置面板（音量 + 系统菜单）----
 // 绘制（render/panels.js）与命中测试（本文件）共用这一份坐标，避免两处各写一遍对不上。
-export const SETTINGS_BOX = { w: 380, h: 320, x: (VW - 380) / 2, y: 80 };
-export const SETTINGS_BAR = { x: SETTINGS_BOX.x + 110, w: 220 };
+// 面板矩形优先取 ui.json 的 settings.panel；缺配置时用这套默认几何。
+// 注意：这是**函数**而不是常量——配置注入后坐标可能变，常量会把旧值定死。
+export const SETTINGS_DEFAULT = { w: 380, h: 320, x: (VW - 380) / 2, y: 80 };
+export function settingsBox() { return uiBox("settings.panel", SETTINGS_DEFAULT); }
+export function settingsBar() {
+  const B = settingsBox();
+  return { x: B.x + 110, w: 220 };
+}
+export function settingsButtons() {
+  const B = settingsBox();
+  return [
+    { k: "resume", label: "回到游戏", x: B.x + 30, y: B.y + 236, w: 150, h: 30 },
+    { k: "save", label: "读档 / 存档", x: B.x + 200, y: B.y + 236, w: 150, h: 30 },
+    { k: "quit", label: "退出游戏", x: B.x + 30, y: B.y + 274, w: B.w - 60, h: 30 },
+  ];
+}
+// 兼容旧引用（常量形式）：值来自默认几何，不随配置变化。
+// 新代码请用 settingsBox()/settingsBar()/settingsButtons()。
+export const SETTINGS_BAR = { x: SETTINGS_DEFAULT.x + 110, w: 220 };
 export const SETTINGS_BTN = [
-  { k: "resume", label: "回到游戏", x: SETTINGS_BOX.x + 30, y: SETTINGS_BOX.y + 236, w: 150, h: 30 },
-  { k: "save", label: "读档 / 存档", x: SETTINGS_BOX.x + 200, y: SETTINGS_BOX.y + 236, w: 150, h: 30 },
-  { k: "quit", label: "退出游戏", x: SETTINGS_BOX.x + 30, y: SETTINGS_BOX.y + 274, w: 320, h: 30 },
+  { k: "resume", label: "回到游戏", x: SETTINGS_DEFAULT.x + 30, y: SETTINGS_DEFAULT.y + 236, w: 150, h: 30 },
+  { k: "save", label: "读档 / 存档", x: SETTINGS_DEFAULT.x + 200, y: SETTINGS_DEFAULT.y + 236, w: 150, h: 30 },
+  { k: "quit", label: "退出游戏", x: SETTINGS_DEFAULT.x + 30, y: SETTINGS_DEFAULT.y + 274, w: 320, h: 30 },
 ];
 
 // 设置面板的命中测试：音量条 / 静音 / 系统菜单按钮。
 export function settingsHit(x, y) {
   if (!G.settingsPanel) return null;
-  const px = SETTINGS_BOX.x, py = SETTINGS_BOX.y, bx = SETTINGS_BAR.x, bw = SETTINGS_BAR.w;
+  const px = settingsBox().x, py = settingsBox().y;
+  const bx = settingsBar().x, bw = settingsBar().w;
   // 系统菜单按钮优先（它们在面板下方，与音量区不重叠，但顺序更明确）
-  for (const b of SETTINGS_BTN) {
+  for (const b of settingsButtons()) {
     if (x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h) return { k: b.k };
   }
   if (y >= py + 62 && y < py + 78 && x >= bx && x < bx + bw) return { k: "bgm" };

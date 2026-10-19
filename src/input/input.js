@@ -11,7 +11,7 @@ import { castSelf, playerCanAttack } from "../systems/combat.js";
 import { setPlayerRun } from "../systems/motion.js";
 import { hasGoods, openShop, closeShop, sellCursor } from "../systems/shop.js";
 import { advanceDialog, startScript, openSay } from "../script/vm.js";
-import { slotAt, insideShop, insideShopClose, insideDialog, settingsHit, menuHit, fnButtonAt, SETTINGS_BAR } from "../core/layout.js";
+import { slotAt, insideShop, insideShopClose, insideDialog, settingsHit, menuHit, fnButtonAt, settingsBar } from "../core/layout.js";
 import { handleSlotClick } from "./slots.js";
 import { waypointAt, WP_BOX, stashSlotAt, stashRect, STASH_BOX } from "../render/panels.js";
 import { storeFromPack, takeToPack, toggleStashPanel, stashOf } from "../systems/stash.js";
@@ -183,7 +183,7 @@ export function addInput(rt) {
   cv.addEventListener("mousemove", e => {
     if (!G.volDrag) return;
     const sp = screenPos(e.clientX, e.clientY);
-    const bw = SETTINGS_BAR.w, bx = SETTINGS_BAR.x;
+    const { w: bw, x: bx } = settingsBar();
     const v = Math.max(0, Math.min(1, (sp.x - bx) / bw));
     G.settings[G.volDrag] = v;
     applyVolumes(G);
@@ -197,7 +197,7 @@ export function addInput(rt) {
     if (G.bgm && G.bgm.paused && G.bgmSrc && G.settings.bgm > 0) G.bgm.play().catch(() => { });
     const sh = settingsHit(sp.x, sp.y);
     if (sh) {
-      const bw = SETTINGS_BAR.w, bx = SETTINGS_BAR.x;
+      const { w: bw, x: bx } = settingsBar();
       if (sh.k === "bgm") { G.settings.bgm = Math.max(0, Math.min(1, (sp.x - bx) / bw)); G.volDrag = "bgm"; }
       else if (sh.k === "sfx") { G.settings.sfx = Math.max(0, Math.min(1, (sp.x - bx) / bw)); G.volDrag = "sfx"; }
       else if (sh.k === "mutBgm") G.settings.bgm = G.settings.bgm > 0 ? 0 : 0.6;

@@ -251,6 +251,72 @@
       "color": "#b8a468",
       "visibleBind": "savePanel",
       "drawnBy": "none"
+    },
+    {
+      "id": "stash.panel",
+      "kind": "panel",
+      "anchor": "topLeft",
+      "x": 12,
+      "y": 40,
+      "w": 316,
+      "h": 338,
+      "visibleBind": "stashPanel",
+      "drawnBy": "none"
+    },
+    {
+      "id": "smith.panel",
+      "kind": "panel",
+      "anchor": "topLeft",
+      "x": 150,
+      "y": 110,
+      "w": 340,
+      "h": 250,
+      "visibleBind": "smithPanel",
+      "drawnBy": "none"
+    },
+    {
+      "id": "difficulty.panel",
+      "kind": "panel",
+      "anchor": "topLeft",
+      "x": 190,
+      "y": 130,
+      "w": 260,
+      "h": 190,
+      "visibleBind": "diffPanel",
+      "drawnBy": "none"
+    },
+    {
+      "id": "merc.panel",
+      "kind": "panel",
+      "anchor": "topLeft",
+      "x": 170,
+      "y": 100,
+      "w": 300,
+      "h": 250,
+      "visibleBind": "mercPanel",
+      "drawnBy": "none"
+    },
+    {
+      "id": "waypoint.panel",
+      "kind": "panel",
+      "anchor": "topLeft",
+      "x": 150,
+      "y": 50,
+      "w": 340,
+      "h": 320,
+      "visibleBind": "waypointPanel",
+      "drawnBy": "none"
+    },
+    {
+      "id": "settings.panel",
+      "kind": "panel",
+      "anchor": "topLeft",
+      "x": 130,
+      "y": 80,
+      "w": 380,
+      "h": 320,
+      "visibleBind": "settingsPanel",
+      "drawnBy": "none"
     }
   ]
 }
