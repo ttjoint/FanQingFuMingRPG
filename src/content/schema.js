@@ -276,11 +276,21 @@ export function normalizeConfig(c) {
 
 // ---- MapDoc ----
 // cells 数组（row/col 顺序任意）-> 以 idx=row*width+col 索引的图层化文档。
+//
+// width/height 是两个独立维度。历史上 MapDoc 只存 width，并在**所有**网格运算里
+// 假设 height === width（flags 一律 new Uint8Array(w*w)、边界判定一律 row < width）。
+// 现有 9 张原版地图恰好都是正方形，所以这个假设从未暴露；但它是一个**隐式不变量**，
+// 一旦编辑器新建非方形地图，碰撞/寻路会在无提示的情况下错乱：
+//   - 行数多于列数时，下半张图被判为越界（走不进去）；
+//   - 列数多于行数时，越界读取 flags 得到 undefined（读到「可走」）。
+// 现在把 height 显式建模：缺省时按方形（= width）补齐，保证旧数据与旧存档行为完全不变。
 export function normalizeMapDoc(doc) {
   const o = clone(doc) || {};
   o.schemaVersion = MAPDOC_VERSION;
   o.name = str(o.name, "");
   o.width = num(o.width, 0);
+  // height 缺省 = width（兼容：历史 MapDoc 只有 width，且隐含正方形）。
+  o.height = num(o.height, o.width);
   o.music = str(o.music, "");
   o.entry = Array.isArray(o.entry) && o.entry.length >= 2 ? [num(o.entry[0], 0), num(o.entry[1], 0)] : null;
   o.ground = Array.isArray(o.ground) ? o.ground : [];       // [{sx,sy}] 或 [sx,sy] 扁平数组
@@ -291,10 +301,164 @@ export function normalizeMapDoc(doc) {
   return o;
 }
 
+// ---- 内容 lint ----
+//
+// validateContent 只保证「结构合法」（id 一致、字段类型对），因此一类真正的数据错误
+// 能安静地活下去：名字里多一个空格、掉落表全空、脚本引用的 NPC 不存在、数值处在哨兵值。
+// 这些都不会报错，只会在运行时表现为「脚本静默 no-op」或「怪打不死」。
+//
+// lintContent 补充这类语义检查。它是纯函数（不读运行时状态、不读文件），
+// 因此能在编辑器保存时、CI 里、以及单测里直接跑。
+//
+// 返回的每条都是可读的中文描述，指到具体 id / 名字。
+const SENTINEL32 = 4294967295;   // 0xFFFFFFFF：原数据用这个当地“无值”哨兵
+
+// 名称里出现连续空白或首尾空白：几乎总是手滑，且会让脚本按名查找失效。
+export function lintNames(list, kind) {
+  const issues = [], seen = new Map();
+  for (const d of list || []) {
+    const name = d && d.name;
+    if (typeof name !== "string" || !name) continue;
+    if (/^\s|\s$/.test(name)) issues.push(kind + "「" + JSON.stringify(name) + "」首/尾有多余空白，按名查找会失效");
+    else if (/\s{2,}/.test(name)) issues.push(kind + "「" + JSON.stringify(name) + "」含连续空白，按名查找会失效（应写作「" + name.replace(/\s+/g, "") + "」）");
+    seen.set(name, (seen.get(name) || []).concat([d.id != null ? d.id : name]));
+  }
+  for (const [name, ids] of seen) if (ids.length > 1) issues.push(kind + "「" + name + "」重复出现（id: " + ids.join("/") + "），按名查找只能命中第一个");
+  return issues;
+}
+
+// 数值合理性：哨兵值 / 非数值 / 负数。
+export function lintNumbers(list, kind) {
+  const issues = [];
+  const check = ["level", "hp", "hpMax", "attack", "defence", "exp"];
+  for (const d of list || []) {
+    const label = kind + "「" + (d && d.name != null ? d.name : "?") + "」";
+    for (const k of check) {
+      const v = d && d[k];
+      if (v == null) continue;
+      if (typeof v !== "number" || !Number.isFinite(v)) { issues.push(label + " 的 " + k + " 不是有效数字（" + JSON.stringify(v) + "）"); continue; }
+      if (v === SENTINEL32) issues.push(label + " 的 " + k + " 为 0xFFFFFFFF 哨兵值（未初始化）");
+      else if (v < 0) issues.push(label + " 的 " + k + " 为负数（" + v + "）");
+    }
+  }
+  return issues;
+}
+
+// 引用的 AI 必须存在。AI 表里 id 是标识、name 是显示名，单位按 id 引用。
+export function lintAiRefs(npcs, ais) {
+  const ids = new Set((ais || []).map(a => a && a.id).filter(Boolean));
+  const issues = [];
+  for (const n of npcs || []) {
+    if (!n || !n.ai) continue;
+    if (!ids.has(n.ai)) issues.push("NPC「" + n.name + "」引用了不存在的 AI「" + n.ai + "」");
+  }
+  return issues;
+}
+
+// 掉落物品名必须能在物品表里找到。
+export function lintDropRefs(npcs, items) {
+  const names = new Set((items || []).map(i => i && i.name).filter(Boolean));
+  const issues = [];
+  for (const n of npcs || []) for (const d of (n && n.drops) || []) {
+    if (!d || !d.name) { issues.push("NPC「" + n.name + "」有一条掉落没写物品名"); continue; }
+    if (!names.has(d.name)) issues.push("NPC「" + n.name + "」掉落引用了不存在的物品「" + d.name + "」");
+  }
+  return issues;
+}
+
+// 可战斗 NPC 却没有掉落，几乎总是漏配（不是错误，所以单独标注为“提示”）。
+export function lintEmptyDrops(npcs) {
+  const issues = [];
+  for (const n of npcs || []) {
+    if (!n) continue;
+    // 只关心真的会打的单位：有攻击力或无 ai 的战斗模板；纯摆位的村民不算
+    if (!(n.attack > 0)) continue;
+    if (!n.drops || !n.drops.length) issues.push("NPC「" + n.name + "」（attack=" + n.attack + "）没有掉落表，击杀后无任何产出");
+  }
+  return issues;
+}
+
+// 脚本里按名字引用的单位，必须真能在内容里找到（否则运行时静默 no-op）。
+// 只检查**按名引用单位**的指令；其他指令（跳图/对话/变量）不在此列。
+const NAME_REF_FUNCS = new Set(["DelNPC", "AddNPC", "ShowNPCTalk", "SetNPCEvent", "SetNPCAttack", "NPCPickItem", "NPCDropAt", "SetFaction", "SetBuff"]);
+export function lintScriptRefs(scripts, npcs) {
+  const names = new Set((npcs || []).map(n => n && n.name).filter(Boolean));
+  const issues = [];
+  const seen = new Set();
+  const scan = (src, where) => {
+    if (typeof src !== "string") return;
+    // 指令调用形如 Name("参数"...)：只取第一个字符串参数当“单位名”
+    const re = /([A-Za-z_]\w*)\s*\(\s*"([^"]*)"/g;
+    let m;
+    while ((m = re.exec(src))) {
+      const fn = m[1], arg = m[2];
+      if (!NAME_REF_FUNCS.has(fn)) continue;
+      if (!npcs || !npcs.length) continue;          // 没提供 NPC 表就不做引用检查
+      if (names.has(arg)) continue;
+      // 名字带空白时单独提一句：这就是典型的“看起来一样其实不同”
+      const squeezed = arg.replace(/\s+/g, "");
+      const near = [...names].filter(x => x.replace(/\s+/g, "") === squeezed);
+      const hint = near.length ? "（内容里有名字相近的「" + near.join("/") + "」，空白不一致）" : "";
+      const key = fn + ":" + arg;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      issues.push(where + " 的 " + fn + "(\"" + arg + "\") 找不到同名单位，运行时会静默忽略" + hint);
+    }
+  };
+  for (const [name, src] of Object.entries(scripts || {})) scan(src, "脚本「" + name + "」");
+  return issues;
+}
+
+// 内容总 linter：把上面几项串起来。可以直接给编辑器/CI 用。
+// content 为 ContentDB 形状（Record 或旧数组都接受）。
+//
+// 每条问题分两级：
+//   error    —— 确定是 bug，运行时会有可见后果（名字不一致导致脚本失效、引用不存在）
+//   warning  —— 可疑但不是错误（哨兵值、空掉落表），可能是故意留的
+// 返回对象 { level, msg }，方便编辑器分流显示、CI 只卡 error。
+// lintContentList() 是只取文本的简化版（兼容旧调用）。
+export function lintContentDetailed(content) {
+  if (!content) return [{ level: "error", msg: "content 为空" }];
+  const npcList = Array.isArray(content.npcs) ? content.npcs
+    : Object.values(content.npcs || {});
+  const itemList = Array.isArray(content.items) ? content.items
+    : Object.values(content.items || {});
+  const aiList = Array.isArray(content.ais) ? content.ais
+    : Object.values(content.ais || {});
+  const out = [];
+  const push = (level, list) => { for (const msg of list) out.push({ level, msg }); };
+  // 名字空白/重名：error（直接导致按名查找失效）
+  push("error", lintNames(npcList, "NPC"));
+  push("error", lintNames(itemList, "物品"));
+  // 引用失效：error
+  push("error", lintAiRefs(npcList, aiList));
+  push("error", lintDropRefs(npcList, itemList));
+  push("error", lintScriptRefs(content.scripts, npcList));
+  // 数值哨兵 / 空掉落：warning（不影响当前玩法，但埋了雷）
+  push("warning", lintNumbers(npcList, "NPC"));
+  push("warning", lintEmptyDrops(npcList));
+  return out;
+}
+
+export function lintContent(content) {
+  return lintContentDetailed(content).map(x => (x.level === "error" ? "[错误] " : "[警告] ") + x.msg);
+}
+
 // ---- 校验 ----
 // 返回问题字符串数组（空数组 = 通过）。registry 可选，用于引用完整性检查。
-export function validateContent(content, registry) {
+export function validateContent(content, registry, opts) {
   const issues = [];
+  // 地图尺寸自洽：缺 height 会退回「方形」假设，但图层长度必须真的等于 w*h。
+  for (const [name, d] of Object.entries((content && content.mapDocs) || {})) {
+    if (!d) continue;
+    const w = d.width | 0, h = (d.height == null ? w : d.height) | 0;
+    if (w <= 0 || h <= 0) { issues.push("地图 " + name + " 尺寸非法（" + w + "×" + h + "）"); continue; }
+    const n = w * h;
+    for (const layer of ["ground", "collision", "cellLayer"]) {
+      const a = d[layer];
+      if (a && a.length !== n) issues.push("地图 " + name + " 的 " + layer + " 长度 " + a.length + " ≠ " + w + "×" + h + "（长宽不一致或数据残留）");
+    }
+  }
   if (!content) { issues.push("content 为空"); return issues; }
   if (content.schemaVersion !== CONTENT_VERSION) issues.push("content.schemaVersion 期望 " + CONTENT_VERSION + "，实际 " + content.schemaVersion);
   const npcIds = new Set();
@@ -307,6 +471,14 @@ export function validateContent(content, registry) {
   for (const [name, it] of Object.entries(content.items || {})) if (!name) issues.push("物品缺少名称键");
   for (const [name, sk] of Object.entries(content.skills || {})) if (!name) issues.push("技能缺少名称键");
   if (registry) issues.push(...registry.validate());
+  // 语义 lint 默认开启：结构合法但内容明显错了的情况（名字带空白、引用失效、
+  // 空掉落、哨兵数值）必须能在这里暴露。传 { lint: false } 可关掉。
+  // strict: 为 true 时把 warning 也当成问题（CI 用）。
+  if (!opts || opts.lint !== false) {
+    for (const x of lintContentDetailed(content)) {
+      if (x.level === "error" || (opts && opts.strict)) issues.push(x.msg);
+    }
+  }
   return issues;
 }
 
