@@ -2,7 +2,7 @@
 import { VW, VH } from "../core/constants.js";
 import { cellCenter } from "../core/utils.js";
 import { mapSize } from "../engine/iso.js";
-import { getImg, preloadChar } from "../core/assets.js";
+import { getImg, preloadChar, preloadAllChars } from "../core/assets.js";
 import { spawnNPC, placeFree } from "./npc.js";
 import { playBGM } from "../systems/audio.js";
 import { attachAll } from "../engine/ecs.js";
@@ -190,14 +190,24 @@ export function loadMap(ctx, name) {
     const npc = spawnNPC(ctx, s.npc, s.row, s.col, s.overrides);
     if (npc) G.npcs.push(npc);
   }
-  // 预载本图 NPC 的立绘帧。
+  // 预载本图单位的立绘帧（最高后台优先级 P1）。
   //
   // 为什么必须在这里做：NPC 的图本来是渲染时拿 getImg 懒加载的，而首帧
   // 只能返回 null（要等网络）——本地 127.0.0.1 快得看不出来，但静态部署
   // （GitHub Pages + CDN）下实测 NPC 图要 26 秒才就绪，开局画面就是
   // “只有主角、其余人全部隐形”。预载走的是低并发后台队列，不会阻塞进场，
   // 但能在玩家实际走到他们面前之前把图备好。
-  for (const n of G.npcs) if (n.model) preloadChar(n.model);
+  //
+  // 用 P1：进图后这几个单位马上就会出现在画面里，必须比“全局暖机”先走。
+  for (const n of G.npcs) if (n.model) preloadChar(n.model, { level: 1 });
+  if (G.player && G.player.model) preloadChar(G.player.model, { level: 1 });
+
+  // 全局暖机：把剩下的全部角色帧陆续拉完（P3 静止帧 / P4 其它动作帧）。
+  //
+  // 为什么放在这里而不是启动时：启动时排全量会把带宽抢在“当前地图的单位”
+  // 前面（实测开局先拉完主角的 walk/run/attack，而眼前的 NPC 反而排在后面）。
+  // 进图时本图单位已经以 P1 排在最前，这时再挂上全量暖机正好衔接上。
+  if (!G._warmStarted) { G._warmStarted = true; preloadAllChars(); }
 }
 
 export function setPlayer(ctx, row, col, dir) {

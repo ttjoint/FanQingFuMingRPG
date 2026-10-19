@@ -67,44 +67,63 @@ function withToken(url) {
 // 向后兼容别名（旧代码 / 编辑器可能引用 resolve）。
 export const resolve = assetURL;
 
-// ---- 后台预载队列（限制并发）----
-// 角色帧动辄上百张（role 就 360 帧），若一次性 new Image() 会占满浏览器每域名
-// 连接数（~6），使 UI 图片（背包/商店面板等）长期停在 pending。这里用低并发
-// 队列慢慢预热。
+// ---- 后台预载队列（分优先级、限并发、空闲时持续消化）----
+// 目标：素材在后台“陆续加载出来”，而不是等到用的时候才现拉。
 //
-// ⚠ 预载队列登记过的路径曾经被 getImg 当成“已在加载中”而直接返回 null，
-// 导致排队中的帧在真正轮到之前完全不可用（开局 NPC 全部隐形就是这个后果）。
-// 修复：用独立的 QUEUED 集合做去重，不再占用 PENDING；同时给预载让路——
-// 一旦某个路径被 getImg 即时请求，就从队列里作废（gen 计数），
-// 保证“玩家现在看得见的”总是比“提前热身”优先。
-const Q = [];
-const QUEUED = {};
+// 为什么不能一口气全排：角色帧共 2809 张 / 17MB，浏览器每域名连接数只有 ~6，
+// 一次性堆上去会挤占即时请求（见下方“开局 NPC 隐形”的历史坑）。
+//
+// 所以这里是一个带优先级的持续预载器：
+//   P0  即时（getImg 自己拉，不经过队列，永远最快）
+//   P1  当前地图/当前可见单位需要的帧（进图时排）
+//   P2  玩家自身的动作帧（走动/战斗时就会用到）
+//   P3  全局素材：物品图标、技能图标、UI、全部角色模型的静止帧
+//   P4  全部剩余角色帧（真正“闲时暖机”）
+// 低优先级永远排在高优先级后面；每张图加载完后自动续泵，直到队列排空。
+const LEVELS = 5;
+const Q = [[], [], [], [], []];   // Q[0] 不用于后台（即时请求不走队列）
+const QUEUED = {};                 // path -> 所在队列的 level（去重）
 let active = 0;
-const MAX_PRELOAD = 2;   // 从 3 降为 2：给即时请求留出至少一条连接
-let qGen = 0;
+// 即时请求要给至少留一条连接，所以后台并发上限设得很小。
+// 真实网络下这已经足够：2809 张 × 平均 6KB，限 2 并发也就几十秒。
+const MAX_PRELOAD = 2;
 
-export function preload(path) {
-  if (IMG[path] || PENDING[path] || QUEUED[path]) return;
-  QUEUED[path] = qGen;
-  Q.push(path);
+function nextPath() {
+  for (let lv = 1; lv < LEVELS; lv++) {
+    const q = Q[lv];
+    while (q.length) {
+      const p = q.shift();
+      if (QUEUED[p] === undefined) continue;   // 已被即时请求接管
+      delete QUEUED[p];
+      if (IMG[p]) continue;                    // 已经加载好了
+      return p;
+    }
+  }
+  return null;
+}
+
+// 排入后台预载。level 1..4，默认 4（最低优先级）。
+export function preload(path, level) {
+  const lv = level == null ? LEVELS - 1 : Math.max(1, Math.min(LEVELS - 1, level));
+  if (IMG[path] || PENDING[path] || QUEUED[path] !== undefined) return;
+  QUEUED[path] = lv;
+  Q[lv].push(path);
   pump();
 }
 // 即时请求已开始加载该路径 → 把队列里的同名任务作废。
 function cancelQueued(path) {
-  if (QUEUED[path] === undefined) return;
   delete QUEUED[path];
 }
+
 function pump() {
-  while (active < MAX_PRELOAD && Q.length) {
-    const path = Q.shift();
-    const gen = QUEUED[path];
-    if (gen === undefined) continue;          // 已被即时请求接管/作废
-    delete QUEUED[path];
-    if (IMG[path]) continue;                  // 已经加载好了，不用再来一次
+  while (active < MAX_PRELOAD) {
+    const path = nextPath();
+    if (!path) return;
     active++;
     const im = new Image();
-    im.onload = () => { IMG[path] = im; active--; pump(); };
-    im.onerror = () => { IMG[path] = null; active--; pump(); };
+    const done = () => { active--; pump(); };
+    im.onload = () => { IMG[path] = im; done(); };
+    im.onerror = () => { IMG[path] = null; done(); };
     im.src = assetURL(path);
   }
 }
@@ -169,27 +188,43 @@ export const loadJSON = p => {
 // 解析音频 / 任意资源路径（供 audio.js 等使用）。
 export const assetPath = assetURL;
 
-// 预载某角色模型的帧（走低并发队列，不阻塞、不挤占 UI 图片）。
+// 预载某角色模型的帧。
 //
-// 顺序很重要：**先排静止帧（stand），再排其它动作**。
-// role 模型有 360 个帧引用（去重后 300 个文件），如果只按 chars.json 的顺序
-// 一股脑往队列里塞，真实网络下（CDN 慢）玩家会先看完“隐形主角/隐形 NPC”好几十秒。
-// 而开局实际只需要每个单位的 stand 帧就能把画面画对。
+// level：后台队列优先级（1 最高，4 最低）。
+//   1 = 当前地图的单位（进图时排，最可能被看到）
+//   2 = 玩家自己的动作帧
+//   3 = 其它角色的静止帧
+//   4 = 其它角色的剩余帧（闲时暖机）
 //
-// onlyStand: 只排站立帧。开场预热主角用这个——走路/跑步/战斗帧等真正
-// 动起来时由 getImg 即时拉，没必要在标题画面就把 300 张全排上。
-export function preloadChar(model, onlyStand) {
+// onlyStand：只排站立帧。
+export function preloadChar(model, opts) {
+  const o = typeof opts === "boolean" ? { onlyStand: opts } : (opts || {});
+  const level = o.level == null ? 3 : o.level;
+  const onlyStand = !!o.onlyStand;
   const ch = A.chars && A.chars[model]; if (!ch) return;
+  const push = (a) => { for (const block of ch[a]) for (const f of block)
+    preload("assets/role/" + f.replace(/\.bmp$/, ".png"), a === "stand" ? level : level + 1); };
   const actions = Object.keys(ch);
-  if (onlyStand) {
-    if (ch.stand) for (const block of ch.stand) for (const f of block)
-      preload("assets/role/" + f.replace(/\.bmp$/, ".png"));
-    return;
-  }
-  // stand 优先；其余保持原有相对顺序。
+  // stand 先排：只要静止帧到位，单位就能正确显示（走动时再补动作帧）。
   actions.sort((a, b) => (a === "stand" ? -1 : b === "stand" ? 1 : 0));
-  for (const a of actions) for (const block of ch[a]) for (const f of block)
-    preload("assets/role/" + f.replace(/\.bmp$/, ".png"));
+  for (const a of actions) {
+    if (onlyStand && a !== "stand") continue;
+    push(a);
+  }
+}
+
+// 全部角色模型的帧（全量暖机，最低优先级）。
+//
+// 实机问题：以前只有主角的站立帧会被预载，其余素材全靠 getImg 临用现拉，
+// 表现为“走动时动作帧一张一张卡出来”“进新地图敌人立绘半天不出来”。
+// 现在把全部模型的帧排到最低优先级，玩家真正在看的东西依然优先，
+// 空闲连接会被用来把剩下的图陆续拉完。
+export function preloadAllChars(skipModel) {
+  if (!A.chars) return;
+  for (const m of Object.keys(A.chars)) {
+    if (skipModel && skipModel(m)) continue;
+    preloadChar(m, { level: 3 });
+  }
 }
 
 // ---- 仅测试用钩子 ----
@@ -201,7 +236,7 @@ export function __resetAssetsForTest() {
   for (const k in PENDING) delete PENDING[k];
   for (const k in FAILED) delete FAILED[k];
   for (const k in QUEUED) delete QUEUED[k];
-  Q.length = 0;
+  for (const q of Q) q.length = 0;
   active = 0;
 }
-export function __pendingQueueForTest() { return Q; }
+export function __pendingQueueForTest() { return Q.flat(); }

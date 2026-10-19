@@ -115,3 +115,76 @@ export async function assetsPreloadCharStandFirst() {
     globalThis.Image = saved;
   }
 }
+
+// ---------------------------------------------------------------------------
+// 回归：素材应在后台「陆续」加载，而不是用的时候才现拉
+//
+// 实机反馈：走动时动作帧一张张卡出来、进新地图敌人立绘半天不显。
+// 根因是启动只预载了主角的站立帧，其余素材全靠 getImg 临用现拉。
+// 现在应把全部角色帧分层排进后台队列，并且低优先级的排在后面。
+// ---------------------------------------------------------------------------
+export async function assetsPreloadAllCharsCoversEveryModel() {
+  const mod = await import("../src/core/assets.js");
+  const { preloadAllChars, __resetAssetsForTest, __pendingQueueForTest } = mod;
+  const stateMod = await import("../src/core/state.js");
+  const A = stateMod.A;
+  const saved = globalThis.Image;
+  const savedChars = A && A.chars;
+  const { FakeImage } = fakeImageClass();
+  globalThis.Image = FakeImage;
+  try {
+    __resetAssetsForTest && __resetAssetsForTest();
+    A.chars = {
+      role: { stand: [["r_st_0.bmp"]], walk: [["r_walk_0.bmp"]] },
+      npcA: { stand: [["a_st_0.bmp"]] },
+      npcB: { stand: [["b_st_0.bmp"]], fight: [["b_fight_0.bmp"]] },
+    };
+    preloadAllChars();
+    // pump 会同步把队首几张变成 Image，所以“全部被登记过”要同时看队列和已发出的请求。
+    const names = [...FakeImage.all.map(i => i.src || ""), ...__pendingQueueForTest()]
+      .filter(x => /\/role\//.test(x)).map(x => decodeURIComponent(x.split("/role/")[1]));
+    for (const need of ["r_st_0.png", "r_walk_0.png", "a_st_0.png", "b_st_0.png", "b_fight_0.png"]) {
+      if (!names.includes(need)) throw new Error("后台预载应覆盖 " + need + "，实际队列：" + names.join(","));
+    }
+    return;
+  } finally {
+    if (savedChars !== undefined && A) A.chars = savedChars;
+    globalThis.Image = saved;
+  }
+}
+
+export async function assetsPreloadPriorityOrder() {
+  const mod = await import("../src/core/assets.js");
+  const { preload, preloadChar, __resetAssetsForTest, __pendingQueueForTest } = mod;
+  const stateMod = await import("../src/core/state.js");
+  const A = stateMod.A;
+  const saved = globalThis.Image;
+  const savedChars = A && A.chars;
+  const { FakeImage } = fakeImageClass();
+  globalThis.Image = FakeImage;
+  try {
+    __resetAssetsForTest && __resetAssetsForTest();
+    A.chars = { far: { stand: [["far_st_0.bmp"]], walk: [["far_walk_0.bmp"]] } };
+    // 先把后台并发占满（占位的两张不会被撤回，这是有意为之：
+    // 已经发出去的请求没必要 abort）。之后排进来的都只能待在队列里，
+    // 这才是在比「调度顺序」。
+    preload("assets/role/__busy1.png", 1);
+    preload("assets/role/__busy2.png", 1);
+    const inflight = FakeImage.all.length;
+    if (inflight < 2) throw new Error("后台并发应已被占满，实际在途 " + inflight);
+    // 低优先级先排，高优先级后排：队列里高优先级必须在前。
+    preloadChar("far", { level: 3 });
+    preload("assets/role/near_0.png", 1);
+    const names = __pendingQueueForTest().map(x => x.split("/role/")[1]);
+    const nearAt = names.indexOf("near_0.png");
+    const farStAt = names.indexOf("far_st_0.png");
+    const farWalkAt = names.indexOf("far_walk_0.png");
+    if (nearAt < 0 || farStAt < 0) throw new Error("队列内容不符：" + names.join(","));
+    if (nearAt > farStAt) throw new Error("高优先级素材应排在低优先级之前（实际 " + names.join(",") + "）");
+    if (farWalkAt >= 0 && farWalkAt < farStAt) throw new Error("同一模型内 stand 帧应排在动作帧之前（实际 " + names.join(",") + "）");
+    return;
+  } finally {
+    if (savedChars !== undefined && A) A.chars = savedChars;
+    globalThis.Image = saved;
+  }
+}

@@ -94,7 +94,7 @@ export function deserializeGame(ctx, d) {
   const snaps = d.npcs || [];
   G.npcs = snaps.map(s => npcFromSave(ctx, s));
   G.ground = d.ground ? JSON.parse(JSON.stringify(d.ground)) : [];
-  for (const n of G.npcs) preloadChar(n.model);
+  for (const n of G.npcs) preloadChar(n.model, { level: 1 });   // 读档后马上就会看到这些单位
   // 从标题菜单读档时主角对象还不存在（本次会话未开局）：按存档坐标创建主角。
   // 否则没有玩家 → cameraSystem 不运行 → 相机停在 (0,0)，地图被画到屏幕外 → 画面全黑。
   if (d.player && !G.player) {

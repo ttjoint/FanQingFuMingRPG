@@ -2,7 +2,7 @@
 // 装配职责在 runtime/context.js；本文件只负责“加载 + 启动”。
 import { VW, VH, cv, ctx } from "./core/constants.js";
 import { G, A, MAPS } from "./core/state.js";
-import { loadJSON, loadImg, getImg, preloadChar, setAssetOverrides, assetURL, fetchOpts } from "./core/assets.js";
+import { loadJSON, loadImg, getImg, preload, preloadChar, setAssetOverrides, assetURL, fetchOpts } from "./core/assets.js";
 import { DEFAULT_CONFIG } from "./core/config.js";
 import { screenToWorld } from "./core/utils.js";
 import { buildContentDB, applyPatch } from "./content/contentdb.js";
@@ -186,13 +186,12 @@ async function bootInner() {
   const content = applyPatch(base, pack.patch || {});
   runtime.install(content, base, buildMapData);
 
-  for (const it of A.items) if (it.icon) getImg("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png"));
-  for (const sk of A.skills) if (sk.icon) getImg("assets/skill_icons/" + sk.icon.replace(/\.bmp$/, ".png"));
+  // 图标/UI：小体积，直接同步排入后台队列（高优先级，面板一打开就要用）。
+  for (const it of A.items) if (it.icon) preload("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png"), 1);
+  for (const sk of A.skills) if (sk.icon) preload("assets/skill_icons/" + sk.icon.replace(/\.bmp$/, ".png"), 1);
 
-  // 主角开场只预热站立帧（8 帧）。其余 三个多百帧走路/跑步/战斗图
-  // 等玩家真动起来时再由 getImg 即时拉 + 预载队列补——否则在真实网络
-  // （CDN 慢）下这 300 张会把连接占满十几秒，期间 NPC 全部隐形。
-  preloadChar("role", true);
+  // 主角站立帧最先排（玩家一开局就看得到自己）。
+  preloadChar("role", { onlyStand: true, level: 2 });
   preloadSceneArt();
   addInput(runtime);
   // 预热版本清单：标题栏「数据版本：X」读的是同步缓存，静态部署下
