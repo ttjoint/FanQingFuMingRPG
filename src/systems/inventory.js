@@ -8,6 +8,7 @@ import { itemByName } from "../core/registry.js";
 import { setBonusTotal } from "../engine/uniqueItem.js";
 import { getRuntime } from "../runtime/context.js";
 import { CFG } from "../core/config.js";
+import { normalizeCurve, levelSnapshot } from "../engine/balance.js";
 import { syncMissions } from "./missions.js";
 import { instanceStats, equipSlotOf, canStack as canStackEntries, normalizeInstance,
   socketGem as socketGemPure, unsocketGem as unsocketGemPure, canSocket,
@@ -114,19 +115,75 @@ export function removeItem(g, name, cnt) {
   reindex(g); syncMissions(g, name);
 }
 
+// 升级。两种模式并存：
+//
+//   legacy（默认）：按 config.levelUp 的**固定增量**升级（hpMax+40 / attack+5 …）。
+//   curve：按 engine/balance.js 的**指数曲线**重算（hpMax/attack/defence 都由等级决定）。
+//
+// 为什么要两套：旧模式是“低命中 + 固定攻击力”时代的产物，它的固定增量
+// 碰不上指数级的怪物血量——怪物 hp 每级 ×1.11，玩家 atk 每级 +5，
+// 两者必然在某个等级交叉后崩坏。但直接切会改变旧存档的手感，
+// 所以先用 config 开关，验证完毕再改默认。
+//
+// curve 模式的升级是**幂等重算**（而不是 +=），这样装备加成不会与
+// 等级加成叠加成双重计算——从装备层拿到的增量始终是“曲线值之外的额外部分”。
 export function addExp(g, n) {
   g.stats.exp += n;
+  const curveMode = isCurveMode();
   const L = CFG.levelUp;
-  while (g.stats.exp >= g.stats.expNext && g.stats.level < (L.maxLevel || 99)) {
+  const maxLv = (curveMode ? curveCfg().maxLevel : (L.maxLevel || 99));
+  while (g.stats.exp >= g.stats.expNext && g.stats.level < maxLv) {
     g.stats.exp -= g.stats.expNext;
     g.stats.level++;
-    g.stats.expNext = Math.round(g.stats.expNext * L.expMul + L.expAdd);
-    g.stats.hpMax += L.hpMax; g.stats.mpMax += L.mpMax;
-    if (L.healOnLevel !== false) { g.stats.hp = g.stats.hpMax; g.stats.mp = g.stats.mpMax; }
-    g.stats.attack += L.attack; g.stats.defence += L.defence;
-    g.stats.attackSpeed = (g.stats.attackSpeed || 0) + (L.attackSpeed || 0);
+    if (curveMode) levelUpByCurve(g);
+    else levelUpLegacy(g, L);
     g.tip = "升级！等级 " + g.stats.level; g.tipT = 4;
   }
+}
+
+// 是否启用曲线模式。config.balance.mode === "curve" 才启用，
+// 默认（缺省/其他值）走旧逻辑，保证旧存档与旧内容行为不变。
+function isCurveMode() {
+  const b = CFG && CFG.balance;
+  return !!(b && b.mode === "curve");
+}
+function curveCfg() {
+  return normalizeCurve(CFG.balance && CFG.balance.curve);
+}
+
+// 旧升级逻辑（固定增量），原样保留。
+function levelUpLegacy(g, L) {
+  g.stats.expNext = Math.round(g.stats.expNext * L.expMul + L.expAdd);
+  g.stats.hpMax += L.hpMax; g.stats.mpMax += L.mpMax;
+  if (L.healOnLevel !== false) { g.stats.hp = g.stats.hpMax; g.stats.mp = g.stats.mpMax; }
+  g.stats.attack += L.attack; g.stats.defence += L.defence;
+  g.stats.attackSpeed = (g.stats.attackSpeed || 0) + (L.attackSpeed || 0);
+}
+
+// 曲线升级：按等级重算基准值，再叠回“装备/词缀贡献的那部分”。
+//
+// 关键：不能直接 `g.stats.attack = snapshot.attack`——那样会把装备加成抹掉。
+// 做法是先算“当前值 - 上一级基准值”得到外部增量（装备/脚本/词缀），
+// 再把它加到新一级的基准上。这样装备的贡献不会因升级而丢失。
+function levelUpByCurve(g) {
+  const c = curveCfg();
+  const lv = g.stats.level;
+  const prev = levelSnapshot(lv - 1, c);
+  const next = levelSnapshot(lv, c);
+  const delta = (cur, prevBase, nextBase) => {
+    const extra = (Number(cur) || 0) - (Number(prevBase) || 0);
+    return Math.round(nextBase + extra);
+  };
+  g.stats.hpMax = Math.max(1, delta(g.stats.hpMax, prev.hpMax, next.hpMax));
+  g.stats.mpMax = Math.max(1, delta(g.stats.mpMax, prev.mpMax, next.mpMax));
+  g.stats.attack = Math.max(0, delta(g.stats.attack, prev.attack, next.attack));
+  g.stats.defence = Math.max(0, delta(g.stats.defence, prev.defence, next.defence));
+  g.stats.expNext = next.expNext;
+  // 升级回满（与旧模式 healOnLevel 默认行为一致）。
+  const L = CFG.levelUp || {};
+  if (L.healOnLevel !== false) { g.stats.hp = g.stats.hpMax; g.stats.mp = g.stats.mpMax; }
+  // 攻速是旧模型遗留的“命中属性转投”，曲线模式不改它（保持玩家已有投入）。
+  if (L.attackSpeed) g.stats.attackSpeed = (g.stats.attackSpeed || 0) + L.attackSpeed;
 }
 
 // ---- 装备加成 ----

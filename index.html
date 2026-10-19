@@ -5,6 +5,9 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <title>国殇之血色狼烟 · 网页移植版</title>
+<!-- 内联空 favicon：避免浏览器自动请求 /favicon.ico 拿到 404，
+     在控制台留下与游戏无关的错误（E2E 里会污染 console.error 断言）。 -->
+<link rel="icon" href="data:,">
 <style>
   html,body{margin:0;background:#111;overflow:hidden;font-family:"Microsoft YaHei",sans-serif}
   #wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}

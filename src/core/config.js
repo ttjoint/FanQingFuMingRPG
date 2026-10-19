@@ -13,7 +13,16 @@ export const DEFAULT_CONFIG = {
             hitBuffer: 40, damageVariance: 0.25,
             // 抗性上限（百分数）：超过此值的抗性不再生效，除非内容显式抬高。
             // 抗性 >=100 仍为完全免疫（优先级高于此上限，见 engine/damage.js）。
-            maxResist: 75 },
+            maxResist: 75,
+            // 护甲模型：
+            //   linear      ：atk + power - def/2，旧行为。
+            //   mitigation  ：攻击 × (1 - armor/(armor+K))，见 docs/BALANCE.md。
+            //
+            // 默认 mitigation：线性减法在 def 接近 atk 时会让伤害塌到下限 1，
+            // 中后期数值根本无法调（旧配置下 lv26 打小怪 1 击、打 boss 76 击）。
+            // 它与 balance.mode="curve" 是一对——新公式必须配曲线生成的数值。
+            // 旧手感可通过 config.combat.armorModel="linear" + balance.mode="legacy" 完整回退。
+            armorModel: "mitigation" },
   // 经济与掉落旋钮。
   // - sellRate：卖价系数。
   // - dropRate：全局掉落率倍率（1=原样，0.5=减半，2=翻倍）。
@@ -21,6 +30,16 @@ export const DEFAULT_CONFIG = {
   // - rarityLevelStep / rarityStrength：怪物等级每 N 级把稀有度权重往上挪一档，
   //   每次挪「当前权重 × strength」。曲线见 engine/lootScale.js。
   economy: { sellRate: 0.5, dropRate: 1, players: 1, rarityLevelStep: 5, rarityStrength: 0.5, gambleBase: 120, gambleLevelStep: 8 },
+  // 数值曲线（见 docs/BALANCE.md）。
+  // mode：
+  //   curve  （默认）：用 engine/balance.js 的指数曲线（配合 combat.armorModel=mitigation）。
+  //   legacy          ：用 config.player / config.levelUp 的固定增量（旧行为）。
+  // curve 缺省字段一律回退到 engine/balance.js 的 DEFAULT_CURVE。
+  //
+  // 为什么默认换成 curve：旧固定增量（attack +5/级）碰上指数级怪物血量（×1.11/级），
+  // 必然在某个等级交叉后崩坏；同时旧经验曲线（×1.5+200）到 26 级需要 2270 万经验，
+  // 而同级怪只给 22 点（需击杀 103 万只）——游戏中后期实际不可玩。
+  balance: { mode: "curve", curve: null },
   // 难度表（P4）：玩家侧乘数，与内容数据正交。
   // 只放大怪物侧（血/伤/经验/掉落），不削弱玩家——削弱会让同一套装备
   // 在不同难度下手感割裂。掉 drop 倍率故意**小于** hp/damage 倍率，

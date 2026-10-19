@@ -9,7 +9,7 @@ import { startScript } from "../script/vm.js";
 import { canAttack } from "../engine/faction.js";
 import { rollDrops } from "../engine/lootTable.js";
 import { monsterMults, scaleBy, difficultyById } from "../engine/difficulty.js";
-import { skillRange as skRange, rollAttackHit, damage as dmgFormula } from "../engine/skill.js";
+import { skillRange as skRange, rollAttackHit, damage as dmgFormula, damageRangeMitigation as dmgRangeMitigation } from "../engine/skill.js";
 import { normalizeTargeting, selectTargets, needsPrimary, isSelfOnly, tickCooldowns, isReady, startCooldown, knockbackTarget, hasCharge, spendCharge } from "../engine/targeting.js";
 import { applySynergy } from "../engine/skill.js";
 import { spawnProjectile } from "./projectiles.js";
@@ -17,6 +17,7 @@ import { spawnFx } from "./effects.js";
 import { playBuffFx } from "./buffs.js";
 import { statMods, applyBuff } from "../engine/buff.js";
 import { resolveDamage, applyDamageBonus, DEFAULT_DAMAGE_TYPE, isImmune } from "../engine/damage.js";
+import { armorKAt } from "../engine/balance.js";
 import { pushFloat, makeDamageFloat } from "../engine/floatText.js";
 
 // 阵营关系表（内容内置，只读）；缺失时 canAttack 退化为“有攻击力即可”。
@@ -33,7 +34,20 @@ export function skillRange(ctx) {
   return sk ? skRange(sk, ctx.config.combat.rangeMin) : ctx.config.combat.rangeMin;
 }
 
-export function dealDamage(atk, power, def, variance) {
+export function dealDamage(atk, power, def, variance, opts) {
+  const o = opts || {};
+  // 两种护甲模型共存，由 config.combat.armorModel 选（默认 linear = 旧行为）：
+  //   linear      ：atk + power - def/2（旧公式，def 接近 atk 时伤害塌到 1）
+  //   mitigation  ：攻击 × (1 - armor/(armor+K))（单调、无断崖）
+  // 切换模型会改变所有战斗数值手感，所以用开关而不是直接替换：
+  // 旧存档/旧内容不改配置就能完全保持原样。
+  if (o.armorModel === "mitigation") {
+    const [lo, hi] = dmgRangeMitigation(atk, power, def, variance, { armorK: o.armorK });
+    // 与旧公式一致：variance 省略时退化为固定值（取中位数）。
+    if (!isFinite(variance) || variance <= 0) return Math.round((lo + hi) / 2);
+    const rnd = o.randomFn || Math.random;
+    return lo + Math.floor(rnd() * (hi - lo + 1));
+  }
   return dmgFormula(atk, power, def, variance);   // variance 省略则退化为固定值
 }
 
@@ -215,8 +229,21 @@ export function resolveHit(ctx, attacker, target, sk, opts) {
   const am = statMods(attacker), dm = statMods(target);
   const def = (target.defence || target.def || 0) + dm.def;
   // 伤害在 [min,max] 内浮动（不再"没打中 0 伤害"）。
-  const variance = ctx.config.combat && ctx.config.combat.damageVariance;
-  const raw = dealDamage((o.atk || 0) + am.atk, power, def, variance);
+  const cbt = ctx.config.combat || {};
+  const variance = cbt.damageVariance;
+  // 护甲 K 按**被攻击者（target）**的等级取，而不是攻击者的。
+  //
+  // 护甲减免是“这身护甲在当前位置有多护人”的属性，它随 **穿护甲的人** 的等级
+  // 缩放；用攻击者的等级算 K 会在跨级战斗时完全失真（lv1 玩家打 lv25 怪，
+  // 却拿 lv1 的 K 去削怪的高等级护甲，护甲几乎无效）。
+  const targetLv = (target && target.level) || (ctx.state.stats && ctx.state.stats.level) || 1;
+  const armorK = (ctx.config.balance && ctx.config.balance.curve)
+    ? armorKAt(targetLv, ctx.config.balance.curve)
+    : undefined;
+  const raw = dealDamage((o.atk || 0) + am.atk, power, def, variance, {
+    armorModel: cbt.armorModel,
+    armorK,
+  });
   // 元素/抗性结算：先应用攻方的伤害加成（词缀），再按守方抗性减免。
   // 未标注类型的技能一律按物理处理，行为与旧版一致。
   const dtype = (sk && sk.damageType) || DEFAULT_DAMAGE_TYPE;

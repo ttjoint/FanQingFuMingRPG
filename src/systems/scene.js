@@ -1,5 +1,6 @@
 // 非游玩场景的流程控制：片头闪屏 → 标题菜单 → 结局 / 关于。ctx 由调用方注入。
 // 原版 game.ini 的 [music]/[FlashWindow*]/[background]/[result] 配置由 build_assets.py 导出为 assets/game.json。
+import { levelSnapshot } from "../engine/balance.js";
 import { playBGM } from "./audio.js";
 import { startScript } from "../script/vm.js";
 
@@ -46,10 +47,22 @@ export function enterMenu(ctx, opts) {
 }
 
 // 开始新游戏前：按当前配置重置主角与进度（这样编辑器改的初始数值会生效）。
+//
+// 开启 config.balance.mode = "curve" 时，起始数值与 expNext 都改由
+// engine/balance.js 的曲线给出——否则会出现“初始 expNext 是旧值 500，
+// 而升一级后 expNext 突变成曲线值”的断点（玩家看到一条莫名的经验跳跃）。
 export function resetNewGame(ctx) {
   const G = ctx.state, p = ctx.config.player;
-  G.stats = { hp: p.hpMax, hpMax: p.hpMax, mp: p.mpMax, mpMax: p.mpMax, exp: 0, expNext: p.expNext,
-    level: p.level, money: p.money, moral: p.moral, honor: p.honor, attack: p.attack, defence: p.defence, attackSpeed: p.attackSpeed };
+  const curveMode = !!(ctx.config.balance && ctx.config.balance.mode === "curve");
+  // hpMax/mpMax/attack/defence 在 curve 模式下也按曲线取（lv1 基准）。
+  const snap = curveMode ? levelSnapshot(Number(p.level) || 1, ctx.config.balance.curve) : null;
+  const hpMax = snap ? snap.hpMax : p.hpMax;
+  const mpMax = snap ? snap.mpMax : p.mpMax;
+  const attack = snap ? snap.attack : p.attack;
+  const defence = snap ? snap.defence : p.defence;
+  const expNext = snap ? snap.expNext : p.expNext;
+  G.stats = { hp: hpMax, hpMax, mp: mpMax, mpMax, exp: 0, expNext,
+    level: p.level, money: p.money, moral: p.moral, honor: p.honor, attack, defence, attackSpeed: p.attackSpeed };
   G.skills = (p.startSkills || []).slice(); G.skill = p.startSkill || G.skills[0];
   G.hotbar = new Array(9).fill(null); G.pack = []; G.packOpen = false;
   G.equip = { Wu: null, Jia: null, Shi1: null, Shi2: null }; G.cursor = null; G.shop = null;
