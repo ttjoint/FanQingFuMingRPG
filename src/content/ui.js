@@ -21,6 +21,23 @@ export const UI_KINDS = ["panel", "bar", "slotgrid", "button", "label", "image"]
 export const UI_ANCHORS = ["topLeft", "topRight", "bottomLeft", "bottomRight", "center"];
 
 /** 绑定：元件显示什么运行时数据。 */
+// 可见性绑定表：组件的显隐来源。
+// 空串 = 恒可见（配合 visible 开关）。
+// 新增绑定需在 render/hud.js 的 visibleOf 里同步实现求值。
+export const VIS_BINDS = [
+  "",             // 恒可见（由 visible 开关控制）
+  "packOpen",     // 背包是否打开（G.packOpen）
+  "shop",         // 商店是否打开（G.shop 非空）
+  "stashPanel",   // 共享仓库（G.stashPanel）
+  "waypointPanel",// 传送点面板
+  "smithPanel",   // 铁匠铺
+  "mercPanel",    // 随从面板
+  "savePanel",    // 存档面板
+  "settingsPanel",// 设置面板
+  "dialog",       // 对话进行中
+  "panel",        // 通用面板（任务/记事/属性/荣辱，G.panel 非空）
+];
+
 export const UI_BINDS = [
   "",              // 不绑定（纯装饰）
   "stats.hp", "stats.mp", "stats.exp",
@@ -52,6 +69,11 @@ export function normalizeUiComponent(c) {
   o.img = str(o.img, "");
   o.text = str(o.text, "");
   o.bind = UI_BINDS.includes(o.bind) ? o.bind : "";
+  // 可见性绑定：组件显隐由游戏状态驱动（hud.js 的 visibleOf 求值）。
+  // 这是 P1 改造遗漏的一环：pack.panel / shop.panel 被搬进 ui.json 后，
+  // 原来存在于 drawPack/drawShop 里的 packOpen / shop 守卫没有跟过来，
+  // 导致背包与商店面板从 P1 起常驻屏幕（“进游戏多出一个关不掉的 UI 框”）。
+  o.visibleBind = VIS_BINDS.includes(o.visibleBind) ? o.visibleBind : "";
   o.visible = bool(o.visible, true);
   // slotgrid 专用：格子布局。
   if (o.kind === "slotgrid") {

@@ -49,6 +49,25 @@ function bindValue(bind, st) {
   }
 }
 
+// 可见性绑定的求值：返回 true = 组件应该显示。
+// 与 content/ui.js 的 VIS_BINDS 一一对应。
+function visibleOf(vbind, G) {
+  if (!vbind) return true;
+  switch (vbind) {
+    case "packOpen": return !!G.packOpen;
+    case "shop": return !!G.shop;
+    case "stashPanel": return !!G.stashPanel;
+    case "waypointPanel": return !!G.waypointPanel;
+    case "smithPanel": return !!G.smithPanel;
+    case "mercPanel": return !!G.mercPanel;
+    case "savePanel": return !!G.savePanel;
+    case "settingsPanel": return !!G.settingsPanel;
+    case "dialog": return !!G.dialog;
+    case "panel": return !!G.panel;
+    default: return true;   // 未知绑定不隐藏（避免配置写错把 UI 整个弄没）
+  }
+}
+
 export function drawHUD(rt) {
   const G = stateOf(rt);
   const ui = uiOf(rt);
@@ -57,6 +76,9 @@ export function drawHUD(rt) {
   installUiLayout(ui);
   const comps = sortedComps(ui);
   for (const c of comps) {
+    // visibleBind 优先于 visible：两者都满足才绘制。
+    // 命中测试（layout.js）同样按此过滤，见 installUiLayout 的入口。
+    if (!visibleOf(c.visibleBind, G)) continue;
     const p = resolvePos(c, VW, VH);
     if (c.kind === "panel") drawPanel(c, p);
     else if (c.kind === "bar") drawBar(c, p);

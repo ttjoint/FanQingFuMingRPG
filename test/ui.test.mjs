@@ -275,3 +275,34 @@ export function centeredPanelsMatchOldHardcode() {
   assert.equal(info.anchor, "center");
   assert.equal(save.anchor, "center");
 }
+
+// ---- visibleBind：组件显隐由游戏状态驱动 ----
+// 回归背景（P1 遗留 bug）：pack.panel / shop.panel / info.panel / save.panel
+// 被搬进 ui.json 后丢掉了原来的 packOpen / shop / panel / savePanel 守卫，
+// drawHUD 无条件绘制它们 → 进游戏就有一个关不掉的背包框和全屏暗块。
+export function normalizeVisibleBind() {
+  // 合法值保留
+  assert.equal(normalizeUiComponent({ visibleBind: "packOpen" }).visibleBind, "packOpen");
+  assert.equal(normalizeUiComponent({ visibleBind: "shop" }).visibleBind, "shop");
+  assert.equal(normalizeUiComponent({ visibleBind: "panel" }).visibleBind, "panel");
+  // 缺省 / 非法值回退为空串（恒可见）
+  assert.equal(normalizeUiComponent({}).visibleBind, "");
+  assert.equal(normalizeUiComponent({ visibleBind: "nope" }).visibleBind, "");
+}
+
+export function defaultUiPanelsHaveVisibleBind() {
+  // 默认数据里这四个面板必须带 visibleBind，否则会常驻屏幕。
+  const ui = defaultUi();
+  const must = { "pack.panel": "packOpen", "pack.grid": "packOpen", "shop.panel": "shop", "shop.grid": "shop", "shop.close": "shop", "info.panel": "panel", "save.panel": "savePanel" };
+  for (const [id, vb] of Object.entries(must)) {
+    const c = uiComponent(ui, id);
+    assert.ok(c, id + " 存在");
+    assert.equal(c.visibleBind, vb, id + " 的 visibleBind 应为 " + vb);
+  }
+  // HUD 常驻元件不得带 visibleBind（否则会消失）
+  for (const id of ["hud.panel", "hud.hotbar", "hud.equip", "hud.fn"]) {
+    const c = uiComponent(ui, id);
+    assert.ok(c, id + " 存在");
+    assert.ok(!c.visibleBind, id + " 不应绑可见性");
+  }
+}
