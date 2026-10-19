@@ -244,7 +244,7 @@ export function addInput(rt) {
       // 系统菜单按钮
       else if (sh.k === "resume") { applyVolumes(G); G.settingsPanel = false; return; }
       else if (sh.k === "save") { applyVolumes(G); G.settingsPanel = false; G.savePanel = true; return; }
-      else if (sh.k === "quit") { applyVolumes(G); G.settingsPanel = false; quitToMenu(); return; }
+      else if (sh.k === "quit") { applyVolumes(G); G.settingsPanel = false; quitToEngine(); return; }
       // 注意：applyVolumes 的参数是**游戏状态 G**（它读 g.settings），不是 runtime。
       // 早先误传 getRuntime() 导致 g.settings 为 undefined，赋值 bgm.volume=undefined 抛错，
       // 音量完全不生效、设置也不落盘。
@@ -353,17 +353,30 @@ export function addInput(rt) {
   // 鼠标离开画布只停悬停提示，**不取消锁定**（锁定只由死亡/离开视野/切图解除）。
   cv.addEventListener("mouseleave", () => { G.mouse.onCanvas = false; });
   cv.addEventListener("mouseenter", () => { G.mouse.onCanvas = true; });
-  // 退出游戏 → 回到首页（标题菜单）。与「主角死亡回菜单」走同一条路，
-  // 但额外清理运行时状态，避免存档/地图残留到下一局。
-  function quitToMenu() {
-    const rt = getRuntime();
-    enterMenu(rt, { music: true });
+  // 退出游戏 → 回引擎入口页（选版本 / 进编辑器），不是游戏内标题菜单。
+  //
+  // 旧实现回的是游戏自己的标题菜单（enterMenu），于是玩家点「退出游戏」
+  // 后仍在游戏里打转，出不去。入口页是模块级 DOM 浮层，而且游戏已经
+  // boot 过（资源/定时器/AI 帧全部在跑），就地重新打开入口页会残留
+  // 上一局的状态。最干净的做法是重新加载页面。
+  //
+  // 关键：必须去掉 URL 上的 ?ver=<id>。wantedVersion() 见到 ?ver= 就会
+  // 直接进该版本、跳过入口页 —— 重新加载后会原样再进一次游戏，
+  // 玩家会觉得“退出按钮没用”。
+  function quitToEngine() {
+    const G = getRuntime().state;
     closeAll(G);
     G.cursor = null;
     G.script = null;
     G.player = null; G.currentMap = null; G.map = null;
     G.npcs = []; G.ground = []; G.effects = []; G.fx = []; G.projectiles = [];
     G.lockTarget = null; G.uiFx = null; G.moveMarker = null;
+    try {
+      const url = new URL(location.href);
+      url.searchParams.delete("ver");
+      location.replace(url.toString());
+    } catch (e) { /* 非浏览器环境（测试）忽略 */ }
+    return true;
   }
 
   // 打开设置面板（Esc 主入口；会收起其它面板，避免层层叠叠）。

@@ -206,21 +206,24 @@ async function bootInner() {
 //
 // 跳过入口页的条件：
 //   · URL 带 ?ver=<id>：直接进该版本（调试与 e2e 用，也方便分享链接）
-//   · sessionStorage 里记住了本次会话已选过版本：从编辑器返回时不重复弹入口页
-// 入口页自身不读任何游戏数据，只读版本索引（见 launcher/launcher.js 的约束说明）。
-const VER_KEY = "gsxy_session_version";
+//   · 本次页面生命周期内已选过版本：从编辑器返回时不必重复弹入口页。
+//
+// 这条记忆曾经放在会话级存储（session storage）里，导致**同一标签页刷新 /
+// 重新打开时直接跳进上次选过的游戏**，看不到引擎入口页。用户看到的就是
+// “一进来就自动进游戏了”。会话级存储的粒度是整个标签页会话，远超这里需要
+// “本次加载”的粒度；编辑器返回根本不会重载页面（openEditor 只是切模块），
+// 所以用模块级变量就够，不需要任何持久化。
+let sessionVersion = "";
 
 function wantedVersion() {
   try {
     const q = new URLSearchParams(location.search).get("ver");
     if (q) return q;
   } catch (e) { }
-  try { return sessionStorage.getItem(VER_KEY) || ""; } catch (e) { return ""; }
+  return sessionVersion;
 }
 
-function rememberVersion(id) {
-  try { sessionStorage.setItem(VER_KEY, id || ""); } catch (e) { }
-}
+function rememberVersion(id) { sessionVersion = id || ""; }
 
 async function start() {
   const el = document.getElementById("load");
