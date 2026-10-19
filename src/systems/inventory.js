@@ -10,6 +10,7 @@ import { getRuntime } from "../runtime/context.js";
 import { CFG } from "../core/config.js";
 import { normalizeCurve, levelSnapshot } from "../engine/balance.js";
 import { syncMissions } from "./missions.js";
+import { toggleSurface } from "./surfaces.js";
 import { instanceStats, equipSlotOf, canStack as canStackEntries, normalizeInstance,
   socketGem as socketGemPure, unsocketGem as unsocketGemPure, canSocket,
   enhance as enhancePure, canEnhance, enhanceCost, wearDurability, isBroken,
@@ -331,7 +332,9 @@ export function useEntry(g, entry, kind, key) {
     entry.count--; if (entry.count <= 0) setSlot(g, kind, key, null);
     reindex(g); g.tip = "学会 " + learn; g.tipT = 2;
   } else if (kindTag === "pack") {
-    g.packOpen = !g.packOpen; g.pack = g.pack.length ? g.pack : new Array((CFG.inventory && CFG.inventory.packSize) || 25).fill(null);
+    // 背包指令同样走 UI 管理器（与打开面板的快捷键共享互斥规则）。
+    if (!g.packOpen) g.pack = g.pack.length ? g.pack : new Array((CFG.inventory && CFG.inventory.packSize) || 25).fill(null);
+    toggleSurface(g, "pack");
   } else {
     g.tip = entry.name + " 无法使用"; g.tipT = 2;
   }

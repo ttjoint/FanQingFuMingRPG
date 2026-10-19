@@ -26,6 +26,7 @@ import { applyVolumes, playSound, saveSettings } from "../systems/audio.js";
 import { enterMenu, startGame, flashPics } from "../systems/scene.js";
 import { getRuntime } from "../runtime/context.js";
 import { isEditorAvailable } from "../content/store.js";
+import { openSurface, closeSurface, closeAll, topSurface, toggleSurface } from "../systems/surfaces.js";
 
 // P5：输入层的状态绑定。
 //
@@ -52,12 +53,14 @@ const G = new Proxy(/** @type {any} */ ({}), {
 });
 
 // 五个功能窗口（属性/记事/荣辱/任务/菜单/设置）互斥：开一个就关掉其余，避免互相遮挡。
+// 互斥本身交给 UI 管理器（systems/surfaces.js）："menu" 与 "info" 在同一个
+// screen/panel 体系里各自只允许一个打开。
 function setPanel(kind) {
   const cur = G.savePanel ? "menu" : G.panel;
   const next = cur === kind ? null : kind;   // 再点同一个 = 关闭
-  G.panel = (next && next !== "menu") ? next : null;
-  G.savePanel = next === "menu";
-  if (next) G.settingsPanel = false;
+  if (!next) { closeSurface(G, "menu"); closeSurface(G, "info"); return; }
+  if (next === "menu") openSurface(G, "menu");
+  else openSurface(G, "info", next);
 }
 
 export function npcAt(wx, wy) {
@@ -316,32 +319,34 @@ export function addInput(rt) {
   function quitToMenu() {
     const rt = getRuntime();
     enterMenu(rt, { music: true });
-    G.panel = null; G.savePanel = false; G.packOpen = false; G.cursor = null;
-    G.dialog = null; G.script = null; G.shop = null;
+    closeAll(G);
+    G.cursor = null;
+    G.script = null;
     G.player = null; G.currentMap = null; G.map = null;
     G.npcs = []; G.ground = []; G.effects = []; G.fx = []; G.projectiles = [];
-    G.lockTarget = null; G.uiFx = null; G.moveMarker = null; G.tip = null; G.tipT = 0;
+    G.lockTarget = null; G.uiFx = null; G.moveMarker = null;
   }
 
   // 打开设置面板（Esc 主入口；会收起其它面板，避免层层叠叠）。
   function openSettings() {
-    G.settingsPanel = !G.settingsPanel;
-    if (G.settingsPanel) { G.panel = null; G.savePanel = false; G.packOpen = false; }
+    toggleSurface(G, "settings");
   }
 
   // Esc 的统一语义：**从最上层往下逐层关闭；全部关完时打开设置面板**。
   // 这样 Esc 既能关掉当前窗口，也能在游戏里唤出设置，不再需要单独记 F10。
   function escapeKey() {
-    if (G.settingsPanel) { G.settingsPanel = false; saveSettings(G); return; }
-    if (G.waypointPanel) { togglePanel(getRuntime(), false); return; }
-    if (G.stashPanel) { toggleStashPanel(getRuntime(), false); return; }
-    if (G.smithPanel) { G.smithPanel = false; return; }
-    if (G.diffPanel) { G.diffPanel = false; return; }
-    if (G.mercPanel) { G.mercPanel = false; return; }
-    if (G.shop) { closeShop(getRuntime()); return; }
-    if (G.savePanel) { G.savePanel = false; return; }
-    if (G.packOpen) { G.packOpen = false; G.cursor = null; return; }
-    if (G.panel) { G.panel = null; return; }
+    // 从最上层往下逐层关闭：顺序完全由 UI 注册表的 layer 决定，不再手写 if 链。
+    // 例外：对话中的 Esc 不关闭对话（交给 advanceDialog 流程）、info 面板底于对话。
+    const top = topSurface(G);
+    if (top && top !== "dialog" && top !== "tip") {
+      if (top === "settings") { closeSurface(G, "settings"); saveSettings(G); return; }
+      if (top === "waypoint") { togglePanel(getRuntime(), false); return; }
+      if (top === "stash") { toggleStashPanel(getRuntime(), false); return; }
+      if (top === "shop") { closeShop(getRuntime()); return; }
+      if (top === "pack") { closeSurface(G, "pack"); G.cursor = null; return; }
+      closeSurface(G, top);
+      return;
+    }
     if (G.cursor) { G.cursor = null; return; }
     if (G.dialog) { return; }        // 对话中的 Esc 不处理，交给 advanceDialog 流程
     openSettings();                  // 无任何面板 → 唤出设置
@@ -369,16 +374,23 @@ export function addInput(rt) {
       return;
     }
     if (e.key >= "1" && e.key <= "9") { useItemSlot(G, +e.key - 1); return; }
-    if (e.key === "p" || e.key === "P") { window.__POLY_DEBUG__ = !window.__POLY_DEBUG__; G.tip = "多边形调试：" + (window.__POLY_DEBUG__ ? "开" : "关"); G.tipT = 1.5; e.preventDefault(); return; }
+    // 多边形调试：原绑 P，但下方随从面板也用 P，且这里较早 return 导致随从永远打不开。
+    // 改用 Shift+P，P 留给游戏功能。
+    if ((e.key === "p" || e.key === "P") && e.shiftKey) { window.__POLY_DEBUG__ = !window.__POLY_DEBUG__; G.tip = "多边形调试：" + (window.__POLY_DEBUG__ ? "开" : "关"); G.tipT = 1.5; e.preventDefault(); return; }
     if (e.key === "F5" || e.key === "F8") { setPanel("menu"); e.preventDefault(); return; }
     // 设置面板：Esc 开关（F10 保留为兼容快捷键）。
     if (e.key === "F10") { openSettings(); e.preventDefault(); return; }
-    if (e.key === "Tab") { G.packOpen = !G.packOpen; if (G.packOpen && !G.pack.length) G.pack = new Array(25).fill(null); e.preventDefault(); return; }
+    if (e.key === "Tab") {
+      // 首次打开背包时惰性建格子（旧行为）；打开本身走 UI 管理器以参与互斥。
+      if (!G.packOpen && !G.pack.length) G.pack = new Array(25).fill(null);
+      toggleSurface(G, "pack");
+      e.preventDefault(); return;
+    }
     if (e.key === "m" || e.key === "M") { togglePanel(getRuntime()); e.preventDefault(); return; }
     if (e.key === "b" || e.key === "B") { toggleStashPanel(getRuntime()); e.preventDefault(); return; }
     if (e.key === "n" || e.key === "N") { toggleSmith(getRuntime()); e.preventDefault(); return; }
     if (e.key === "p" || e.key === "P") { toggleMercPanel(getRuntime()); e.preventDefault(); return; }
-    if (e.key === "F2") { const G2 = getRuntime().state; G2.diffPanel = !G2.diffPanel; if (G2.diffPanel) { G2.shop = null; G2.savePanel = false; G2.waypointPanel = false; G2.stashPanel = false; G2.smithPanel = false; } e.preventDefault(); return; }
+    if (e.key === "F2") { toggleSurface(getRuntime().state, "difficulty"); e.preventDefault(); return; }
     if (e.key === "F4") { setPanel("mission"); return; }
     if (e.key === "F1") { setPanel("note"); return; }
     if (e.key === "q" || e.key === "Q") cycleSkill(-1);

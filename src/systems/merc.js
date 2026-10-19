@@ -8,6 +8,7 @@ import {
   normalizeMercs, mercById, feesDue, reviveCost, reviveState, followStep,
   canHire, FOLLOW_LEAD, FOLLOW_STOP, REVIVE_DELAY,
 } from "../engine/merc.js";
+import { openSurface, closeSurface } from "./surfaces.js";
 
 // 配置里的随从表（编辑器可覆盖），缺省用内置。
 export function mercList(ctx) {
@@ -146,9 +147,9 @@ export function mercSystem(ctx, dt) {
 export function toggleMercPanel(ctx, force) {
   const G = ctx.state;
   const want = force == null ? !G.mercPanel : !!force;
-  G.mercPanel = want;
-  if (want) { G.shop = null; G.savePanel = false; G.waypointPanel = false; G.stashPanel = false; G.smithPanel = false; G.diffPanel = false; }
-  return want;
+  if (!want) { closeSurface(G, "merc"); return false; }
+  openSurface(G, "merc");
+  return true;
 }
 
 // 当前随从信息（UI 用）。

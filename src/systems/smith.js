@@ -8,14 +8,15 @@ import {
 } from "../engine/smith.js";
 import { addItem, reindex, freeSlot } from "./inventory.js";
 import { playSound } from "./audio.js";
+import { openSurface, closeSurface } from "./surfaces.js";
 
 // 打开/关闭铁匠面板（与商店、存档、仓库、传送点互斥）。
 export function toggleSmith(ctx, force) {
   const G = ctx.state;
   const want = force == null ? !G.smithPanel : !!force;
-  G.smithPanel = want;
-  if (want) { G.shop = null; G.savePanel = false; G.waypointPanel = false; G.stashPanel = false; }
-  return want;
+  if (!want) { closeSurface(G, "smith"); return false; }
+  openSurface(G, "smith");
+  return true;
 }
 
 // 物品模板（ctx.assets.items 是数组）。

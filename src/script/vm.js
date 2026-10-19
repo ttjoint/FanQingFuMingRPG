@@ -8,6 +8,7 @@ import { playBGM, playSound } from "../systems/audio.js";
 import { applyBuff } from "../engine/buff.js";
 import { npcPickup, npcDrop, dropGround, groundAt } from "../systems/ground.js";
 import { warnScript, findNpcByName, warnMissingNpcTemplate } from "./diagnostics.js";
+import { openSurface, closeSurface } from "../systems/surfaces.js";
 
 // 脚本生成器遇到 end/exit 时抛出的哨兵。
 export const EXIT = { exit: true };
@@ -237,21 +238,21 @@ export function openSay(ctx, speaker, text, portrait) {
   const G = ctx.state;
   G.tip = null; G.tipT = 0;
   for (const n of G.npcs) n.talkT = 0;
-  G.dialog = { kind: "say", speaker, text, portrait };
+  openSurface(G, "dialog", { kind: "say", speaker, text, portrait });
   // 结局触发改为剧本显式命令 ShowEnding（数据驱动），不再扫描文本。
 }
 export function openAsk(ctx, speaker, text, portrait) {
   const G = ctx.state;
   G.tip = null; G.tipT = 0;
-  G.dialog = { kind: "ask", speaker, text, portrait };
+  openSurface(G, "dialog", { kind: "ask", speaker, text, portrait });
 }
 export function stepScript(ctx, val) {
   const G = ctx.state;
   if (!G.script) return;
   let r;
   try { r = G.script.next(val); }
-  catch (e) { if (e !== EXIT) console.error(e); G.script = null; G.dialog = null; return; }
-  if (r.done) { G.script = null; G.dialog = null; return; }
+  catch (e) { if (e !== EXIT) console.error(e); G.script = null; closeSurface(G, "dialog"); return; }
+  if (r.done) { G.script = null; closeSurface(G, "dialog"); return; }
   const a = r.value;
   if (a.type === "say") openSay(ctx, a.speaker, a.text, a.portrait);
   else if (a.type === "ask") openAsk(ctx, a.speaker, a.text, a.portrait);
@@ -262,6 +263,6 @@ export function advanceDialog(ctx, ans) {
   if (!G.dialog) return;
   if (G.dialog.kind === "ask" && ans === undefined) return;
   const a = G.dialog.kind === "ask" ? ans : undefined;
-  G.dialog = null;
+  closeSurface(G, "dialog");
   stepScript(ctx, a);
 }

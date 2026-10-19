@@ -8,6 +8,7 @@ import { playBGM } from "../systems/audio.js";
 import { attachAll } from "../engine/ecs.js";
 import { buildObjectDrawables, baseLineFromBottom, lineToArray } from "../engine/depth.js";
 import { UNIT_COMPONENTS } from "../runtime/components.js";
+import { closeAll } from "../systems/surfaces.js";
 
 // 对象精灵的 alpha 底边（逐列取最低不透明像素，返回源本地 y；-1=该列无像素）。
 const _alphaBottomCache = new WeakMap();
@@ -158,19 +159,14 @@ export function loadMap(ctx, name) {
   G.effects = [];                  // 旧版帧动画特效数组（与 G.fx 并存，两者都要清）
   G.moveMarker = null;             // 点击落点光圈
   G.uiFx = null;                   // 指示圈缓存
-  G.shop = null;                   // 商店面板
-  G.savePanel = false;
-  G.waypointPanel = false;         // 传送面板（P4）
-  G.stashPanel = false;            // 仓库面板（P4）；G.stash 数据本身不随切图清空
-  G.smithPanel = false;            // 铁匠面板（P4）
-  G.mercPanel = false;             // 随从面板（P4）；G.mercenary 实体在下面重新 spawn
+  // 切图关掉所有 UI 表面（商店/存档/传送/仓库/铁匠/随从/对话/提示），
+  // 由 UI 管理器统一处理，避免新增面板时漏清（历史上就漏过）。
+  closeAll(G);
   // 随从跨图跟随：旧图的实体已随 G.npcs 清空，这里指个空指针，
   // 由 mercSystem 下一帧补建（否则旧实体成了野指针）。
   if (G.mercenary) G.mercenary.unit = null;
   G._wpCell = null;                // 传送点踩点缓存（新图重新判定）
-  G.dialog = null;                 // 对话
   G.script = null;                 // 脚本执行栈（脚本上下文绑定旧图单位）
-  G.tip = ""; G.tipT = 0;
   G.lastCell = null;               // 防止落地格与旧图重复
   G.triggerCD = 0;
   G.deathT = 0;

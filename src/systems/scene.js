@@ -3,6 +3,7 @@
 import { levelSnapshot } from "../engine/balance.js";
 import { playBGM } from "./audio.js";
 import { startScript } from "../script/vm.js";
+import { closeAll } from "./surfaces.js";
 
 export function titleMusic(ctx) { const A = ctx.assets; return (A.game && A.game.music && A.game.music.start) || ""; }
 export function endMusic(ctx) { const A = ctx.assets; return (A.game && A.game.music && A.game.music.end) || titleMusic(ctx); }
@@ -42,7 +43,7 @@ export function enterBoot(ctx, opts) {
 // opts.music=true 时强制切回标题音乐（主角死亡后回到菜单时用）。
 export function enterMenu(ctx, opts) {
   const G = ctx.state;
-  G.scene = "menu"; G.flashT = 0; G.savePanel = false; G.deathT = 0;
+  G.scene = "menu"; G.flashT = 0; G.deathT = 0; closeAll(G);
   if ((opts && opts.music) || !G.bgm || !G.bgmSrc) playBGM(G, titleMusic(ctx));
 }
 
@@ -70,9 +71,9 @@ export function resetNewGame(ctx) {
   G.ground = []; G.effects = []; G.fx = []; G.uiFx = null; G.moveMarker = null; G.gameOver = false; G.currentMap = null; G.map = null;
   // 场景级瞬时状态全清：不只在切图时清，重新开局时也必然清一遍。
   // npcs 置空后由 startScript 的 LoadInitialMap 重新 spawn（归位 + 满血）。
-  G.npcs = []; G.projectiles = []; G.lockTarget = null; G.shop = null; G.savePanel = false;
+  G.npcs = []; G.projectiles = []; G.lockTarget = null; closeAll(G);
   G.player = null;   // 丢弃旧主角对象，避免上一次阵亡的 dead/动画状态被带进新游戏
-  G.tip = null; G.panel = null; G.dialog = null; G.script = null; G.triggerCD = 0; G.lastCell = null;
+  G.script = null; G.triggerCD = 0; G.lastCell = null;
   G.deathT = 0;
   // 传送点解锁进度（P4）：属于"永久进度"，随存档走；新游戏从空开始。
   // 起始地图的传送点会在玩家踩上去时自动解锁（见 systems/waypoint.js）。
@@ -85,7 +86,7 @@ export function resetNewGame(ctx) {
 // 开始新游戏：真正启动 main.gsp（其第一条就是 LoadInitialMap）。
 export function startGame(ctx) {
   const G = ctx.state;
-  G.scene = "game"; G.savePanel = false; G.pendingEnd = false; G.dialog = null; G.script = null;
+  G.scene = "game"; G.pendingEnd = false; G.script = null; closeAll(G);
   resetNewGame(ctx);
   startScript(ctx, "main.gsp");
 }
@@ -93,7 +94,7 @@ export function startGame(ctx) {
 // 结局：end.png + 结局音乐 + 结局评价称号。
 export function showEnding(ctx) {
   const G = ctx.state;
-  G.scene = "ending"; G.savePanel = false; G.dialog = null; G.script = null;
+  G.scene = "ending"; G.script = null; closeAll(G);
   G.resultTitle = resultTitle(ctx);
   playBGM(G, endMusic(ctx));
 }

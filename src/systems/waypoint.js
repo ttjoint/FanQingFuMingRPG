@@ -11,6 +11,7 @@ import { touchWaypoint, travelTargets, waypointTable, canTravel } from "../engin
 import { loadMap, setPlayer } from "../world/map.js";
 import { worldToCell } from "../engine/iso.js";
 import { restartAnim } from "./motion.js";
+import { openSurface, closeSurface } from "./surfaces.js";
 
 // 取当前玩家所在格的传送点定义列表（ctx.assets.waypoints）。
 function listOf(ctx) {
@@ -58,7 +59,7 @@ export function travelTo(ctx, id) {
   const w = waypointTable(listOf(ctx)).get(id);
   if (!w) return false;
   // 清掉传送界面自身的状态；场景级状态由 loadMap 统一重置。
-  G.waypointPanel = false;
+  closeSurface(G, "waypoint");
   G._wpCell = null;         // 传送到与当前相同的格时也能重新判定（如原地刷新）
   loadMap(ctx, w.map);
   setPlayer(ctx, w.row, w.col, 4);
@@ -80,8 +81,7 @@ export function togglePanel(ctx, force) {
     G.tip = "尚未发现任何传送点"; G.tipT = 2;
     return false;
   }
-  G.waypointPanel = want;
-  G.shop = null;          // 与商店面板互斥，避免两层遮罩叠在一起
-  G.savePanel = false;
-  return want;
+  if (!want) { closeSurface(G, "waypoint"); return false; }
+  openSurface(G, "waypoint");
+  return true;
 }

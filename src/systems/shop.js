@@ -6,6 +6,7 @@ import { playSound } from "./audio.js";
 import { entryOf } from "../core/layout.js";
 import { goodsList } from "../engine/inventory.js";
 import { CFG } from "../core/config.js";
+import { openSurface, closeSurface } from "./surfaces.js";
 
 // 货物背包 / 货源逻辑见 engine/inventory.js（纯函数，可独立测试）。
 export { hasGoods, goodsList } from "../engine/inventory.js";
@@ -20,13 +21,15 @@ export function shopGoods(ctx, n) {
 
 export function openShop(ctx, n) {
   const G = ctx.state;
-  G.shop = { npc: n, goods: shopGoods(ctx, n) }; G.packOpen = false; G.panel = null; G.tip = null; G.tipT = 0;
+  // 商店面板由 UI 管理器统一处理互斥（不再逐个字段置 false）。
+  openSurface(G, "shop", { npc: n, goods: shopGoods(ctx, n) });
+  G.tip = null; G.tipT = 0;
 }
 
 export function closeShop(ctx) {
   const G = ctx.state;
   if (G.cursor) { if (G.cursor.fromShop) G.cursor = null; else { addItem(G, G.cursor.name, G.cursor.count || 1); G.cursor = null; } }
-  G.shop = null;
+  closeSurface(G, "shop");
 }
 
 export function buyItem(ctx, name, cnt) {

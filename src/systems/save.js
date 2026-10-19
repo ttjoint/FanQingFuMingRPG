@@ -15,6 +15,7 @@ import { diffNpcAgainst, npcFieldsFromSave, configureSerializer } from "../engin
 import { NPC_SCHEMA } from "../content/npcFields.js";
 import { attachAll } from "../engine/ecs.js";
 import { UNIT_COMPONENTS } from "../runtime/components.js";
+import { openSurface, closeSurface, closeAll } from "./surfaces.js";
 
 // 把游戏具体的 NPC 字段方案注入通用序列化引擎（引擎本身不认识这些字段）。
 configureSerializer(NPC_SCHEMA);
@@ -74,7 +75,7 @@ export function deserializeGame(ctx, d) {
   const G = ctx.state;
   d = normalizeSave(d);
   closeShop(ctx);
-  G.dialog = null; G.script = null; G.panel = null; G.packOpen = false; G.cursor = null; G.effects = []; G.fx = []; G.uiFx = null; G.moveMarker = null; G.hold = null;
+  closeAll(G); G.script = null; G.cursor = null; G.effects = []; G.fx = []; G.uiFx = null; G.moveMarker = null; G.hold = null;
   G.stats = { ...d.stats };
   G.hotbar = JSON.parse(JSON.stringify(d.hotbar || new Array(9).fill(null)));
   G.hotbar.length = 9; while (G.hotbar.length < 9) G.hotbar.push(null);

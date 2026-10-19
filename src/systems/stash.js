@@ -6,6 +6,7 @@
 //
 // 仓库数据格式：{ version, slots: [null | { name, count } | { name, count:1, inst }] }
 import { normalizeStash, addToStash, canFit, countInStash, takeFromStash, STASH_SIZE } from "../engine/stash.js";
+import { openSurface, closeSurface } from "./surfaces.js";
 
 const KEY = "gsxy_stash";
 const VERSION = 1;
@@ -90,7 +91,8 @@ export function maxStackOf(ctx, name) {
 export function toggleStashPanel(ctx, force) {
   const G = ctx.state;
   const want = force == null ? !G.stashPanel : !!force;
-  G.stashPanel = want;
-  if (want) { G.shop = null; G.savePanel = false; G.waypointPanel = false; G.packOpen = true; }
-  return want;
+  if (!want) { closeSurface(G, "stash"); return false; }
+  // 连带打开左侧背包由 surfaces.js 的 COMPANIONS 声明（仓库 = 左背包 + 右仓库）。
+  openSurface(G, "stash");
+  return true;
 }
