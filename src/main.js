@@ -1,6 +1,6 @@
 // 入口：加载资源 → 构建规范内容模型（ContentDB + MapDoc）→ 经运行时上下文派生视图 → 启动主循环。
 // 装配职责在 runtime/context.js；本文件只负责“加载 + 启动”。
-import { VW, VH, cv } from "./core/constants.js";
+import { VW, VH, cv, ctx } from "./core/constants.js";
 import { G, A, MAPS } from "./core/state.js";
 import { loadJSON, loadImg, getImg, preloadChar, setAssetOverrides, assetURL, fetchOpts } from "./core/assets.js";
 import { DEFAULT_CONFIG } from "./core/config.js";
@@ -80,6 +80,14 @@ function fit() {
   const raw = Math.min(window.innerWidth / VW, window.innerHeight / VH);
   const s = Math.max(0.5, Math.floor(raw * 2) / 2);
   cv.style.width = (VW * s) + "px"; cv.style.height = (VH * s) + "px";
+  // 高 DPI：backing store 按 CSS 尺寸 × devicePixelRatio 建，渲染仍用逻辑坐标
+  // （整帧坐标系经 setTransform 缩放），消除高分屏下的模糊。
+  // 命中测试不受影响：screenPos/screenToWorld 按 CSS 尺寸归一化，与 backing 无关。
+  const dpr = window.devicePixelRatio || 1;
+  const bw = Math.round(VW * s * dpr), bh = Math.round(VH * s * dpr);
+  if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+  ctx.setTransform(bw / VW, 0, 0, bh / VH, 0, 0);
+  ctx.imageSmoothingEnabled = false;
 }
 window.addEventListener("resize", fit); fit();
 
