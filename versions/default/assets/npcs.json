@@ -147,8 +147,20 @@
     "talks": [],
     "drops": [
       {
-        "name": "金创药",
+        "name": "猴皮",
+        "chance": 55,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "name": "猴肉",
         "chance": 45,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "name": "金创药",
+        "chance": 20,
         "min": 1,
         "max": 1
       }
@@ -168,7 +180,21 @@
     "exp": 140,
     "ai": "beast",
     "skills": "*/*",
-    "talks": []
+    "talks": [],
+    "drops": [
+      {
+        "name": "豹牙",
+        "chance": 65,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "name": "豹肉",
+        "chance": 50,
+        "min": 1,
+        "max": 1
+      }
+    ]
   },
   {
     "id": 10,
@@ -186,6 +212,26 @@
     "skills": "此路是我开，此树是我栽，",
     "talks": [
       "此路是我开，此树是我栽，要想把路过，留下买路财！"
+    ],
+    "drops": [
+      {
+        "name": "金创药",
+        "chance": 45,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "name": "乌木剑",
+        "chance": 8,
+        "min": 1,
+        "max": 1
+      },
+      {
+        "name": "武者之戒",
+        "chance": 10,
+        "min": 1,
+        "max": 1
+      }
     ]
   },
   {

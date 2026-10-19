@@ -84,7 +84,30 @@ export function* execCall(ctx, name, args) {
       if (v(2) === 0) syncMissions(G, s(3));
       return;
     }
-    case "CheckMission": setVar(args[1], G.missions[s(0)] ? G.missions[s(0)].state : 4, G.vars); return;
+    case "CheckMission": {
+      // 击杀类任务（type=1）的交付钩子。
+      //
+      // 为什么需要：任务状态机里 type=0（收集）靠 syncMissions 推进——
+      //   4→1（物品够）→2（脚本 RemovePlayerItem 扣掉后自动刷新）。
+      // 但 type=1（击杀）没有物品可扣，combat.js 只做 4→1，
+      // 之后**没有任何代码能把它推到 2**（实测：构造 state=1 的击杀任务
+      // 再杀一只同类怪，state 仍是 1）。后果是脚本 CheckMission 永远读到
+      // i==1，走"已交差"分支却不变状态，凡是「前置任务完成才解锁」的
+      // 链条全部卡死 —— 学艺2 交不掉 → 学艺3 永不出现 → 主线断在第一章。
+      //
+      // 原版 GSP 里根本没有 SetMissionDone 之类的命令，所有交付都写在
+      // i==1 分支里（Say 对话 + AddPlayerItem 奖励 + exit）。所以"脚本读到
+      // i==1 并进入交付分支"本身就是交付完成的信号。这里在读到的这一刻
+      // 记下 2，下一次对话就能看到 i==2，与收集类交付后的表现一致。
+      const m = G.missions[s(0)];
+      if (m) {
+        setVar(args[1], m.state, G.vars);
+        if (m.type === 1 && m.state === 1) m.state = 2;
+      } else {
+        setVar(args[1], 4, G.vars);
+      }
+      return;
+    }
     case "GetMissionObjCount": setVar(args[1], G.missions[s(0)] ? G.missions[s(0)].got : 0, G.vars); return;
 
     case "AddNPC": {
