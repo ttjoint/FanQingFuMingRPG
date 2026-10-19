@@ -1,6 +1,6 @@
 // 输入：鼠标 / 键盘，包含世界点击（移动、攻击、对话）、物品拖拽、UI 交互分发。
 import { G as GLOBAL_STATE } from "../core/state.js";
-import { VW, cv } from "../core/constants.js";
+import { VW, VH, cv } from "../core/constants.js";
 import { screenPos, worldToCell, walkable, cellCenter } from "../core/utils.js";
 import { nearestWalkable, nearestWalkablePixel, findPathPoints } from "../world/pathfinding.js";
 import { groundAt, dropGround } from "../systems/ground.js";
@@ -11,7 +11,7 @@ import { castSelf, playerCanAttack } from "../systems/combat.js";
 import { setPlayerRun } from "../systems/motion.js";
 import { hasGoods, openShop, closeShop, sellCursor } from "../systems/shop.js";
 import { advanceDialog, startScript, openSay } from "../script/vm.js";
-import { slotAt, insideShop, insideShopClose, insideDialog, settingsHit, menuHit, fnButtonAt, settingsBar } from "../core/layout.js";
+import { slotAt, insideShop, insideShopClose, insideDialog, settingsHit, fnButtonAt, settingsBar } from "../core/layout.js";
 import { handleSlotClick } from "./slots.js";
 import { waypointAt, WP_BOX, stashSlotAt, stashRect, STASH_BOX } from "../render/panels.js";
 import { storeFromPack, takeToPack, toggleStashPanel, stashOf } from "../systems/stash.js";
@@ -23,7 +23,9 @@ import { repairAll, identifyAll, gamble, toggleSmith } from "../systems/smith.js
 import { togglePanel, travelTo } from "../systems/waypoint.js";
 import { saveBtnAt, saveSlot, loadSlot } from "../systems/save.js";
 import { applyVolumes, playSound, saveSettings } from "../systems/audio.js";
-import { enterMenu, startGame, flashPics } from "../systems/scene.js";
+import { enterMenu, startGame, flashPics, pageIdOf } from "../systems/scene.js";
+import { pageHit } from "../content/page.js";
+import { pageFor } from "../render/scene-ui.js";
 import { getRuntime } from "../runtime/context.js";
 import { isEditorAvailable } from "../content/store.js";
 import { openSurface, closeSurface, closeAll, topSurface, toggleSurface } from "../systems/surfaces.js";
@@ -71,21 +73,58 @@ export function npcAt(wx, wy) {
   return null;
 }
 
-// 标题菜单 / 片头 / 结局等非游玩场景的点击分发。
+// 全屏页面（标题 / 片头 / 关于 / 结算 / 告别）的点击分发。
+//
+// 页面是数据（PageDoc），所以这里不再按 scene 名字硬编码行为，而是统一：
+//   1) 点中元件 → 执行它的 action
+//   2) 没点中元件但页面声明 clickAnywhere → 返回标题
+//   3) 闪屏页 → 点任意处跳到下一张 / 结束
+//
+// 改造前的分支（scene==="menu" 里逐 k 判断）已删除：菜单按钮现在是
+// page.items，各自带 action，加一个按钮不再需要改这个文件。
 export function handleSceneClick(sx, sy) {
-  if (G.scene === "flash") {
-    if (G.flashStep < flashPics(getRuntime()).length - 1) { G.flashStep++; G.flashT = 0; } else enterMenu(getRuntime());
+  const rt = getRuntime();
+  const id = pageIdOf(G.scene);
+  const page = pageFor(rt, id);
+
+  // 闪屏页：优先"推进一张"，语义与改造前一致（data 里的图片序列由页面给出）。
+  if (id === "flash") {
+    const n = flashPics(rt).length;
+    if (G.flashStep < n - 1) { G.flashStep++; G.flashT = 0; } else enterMenu(rt);
     return;
   }
-  if (G.scene === "about" || G.scene === "ending" || G.scene === "farewell") { enterMenu(getRuntime()); return; }
-  if (G.scene === "menu") {
-    const k = menuHit(sx, sy);
-    if (k === "start") startGame(getRuntime());
-    else if (k === "load") G.savePanel = true;
-    else if (k === "about") G.scene = "about";
-    else if (k === "exit") { G.scene = "farewell"; if (G.bgm) G.bgm.pause(); }
-    else if (k === "version") import("../content/versions-ui.js").then(m => m.openVersionManager());
-    else if (k === "editor") { if (!isEditorAvailable()) return; import("../editor/index.js").then(m => m.openEditor()).catch(e => { console.error(e); G.tip = "编辑器加载失败"; G.tipT = 3; }); }
+
+  // 1) 命中元件
+  const comp = page ? pageHit(page, sx, sy, VW, VH) : null;
+  if (comp && comp.action) { runPageAction(comp.action, rt); return; }
+
+  // 2) 页面声明了"点任意处返回"
+  if (page && page.clickAnywhere) { enterMenu(rt); return; }
+
+  // 3) 没有页面数据时的兜底：非 title 页一律返回标题（不卡死）。
+  if (!page && id !== "title") { enterMenu(rt); return; }
+}
+
+/**
+ * 执行页面元件的动作。action 的类型表见 content/page.js 的 PAGE_ACTIONS。
+ * 未知类型一律忽略（只诊断，不猜）。
+ */
+export function runPageAction(action, rt) {
+  const r = rt || getRuntime();
+  const type = action && action.type;
+  if (!type || type === "none") return;
+  if (type === "start") { startGame(r); return; }
+  if (type === "load") { openSurface(G, "save"); return; }
+  if (type === "scene") { const to = action.to; if (to) G.scene = to; return; }
+  if (type === "surface") { const to = action.to; if (to) openSurface(G, to); return; }
+  if (type === "exit") { G.scene = "farewell"; if (G.bgm) G.bgm.pause(); return; }
+  if (type === "version") { import("../content/versions-ui.js").then(m => m.openVersionManager()); return; }
+  if (type === "editor") {
+    if (!isEditorAvailable()) return;
+    import("../editor/index.js").then(m => m.openEditor()).catch(e => {
+      console.error(e); G.tip = "编辑器加载失败"; G.tipT = 3;
+    });
+    return;
   }
 }
 
@@ -226,7 +265,7 @@ export function addInput(rt) {
       if (sp.x < WP_BOX.x || sp.x > WP_BOX.x + WP_BOX.w || sp.y < WP_BOX.y || sp.y > WP_BOX.y + WP_BOX.h) togglePanel(getRuntime(), false);
       return;
     }
-    if (G.savePanel) { if (G.scene === "menu") G.savePanel = false; return; }
+    if (G.savePanel) { if (pageIdOf(G.scene) === "title") G.savePanel = false; return; }
     if (G.scene !== "game") { handleSceneClick(sp.x, sp.y); return; }
     if (G.dialog) {
       // 点中对话窗体内部 = 继续；点窗体以外的地板 = 中断对话
@@ -359,13 +398,13 @@ export function addInput(rt) {
       if (e.key === "Escape") {
         e.preventDefault();
         if (G.settingsPanel) { G.settingsPanel = false; saveSettings(G); return; }
-        if (G.scene === "menu") { G.settingsPanel = true; return; }
+        if (pageIdOf(G.scene) === "title") { G.settingsPanel = true; return; }
         // 片头/关于/结局：Esc 回标题
         enterMenu(getRuntime()); return;
       }
       if (G.settingsPanel) return;              // 面板打开时吞掉其它按键
       if (G.scene === "flash" && (e.key === "Enter" || e.key === " ")) handleSceneClick(0, 0);
-      else if (G.scene === "menu" && (e.key === "Enter" || e.key === " ")) startGame(getRuntime());
+      else if (pageIdOf(G.scene) === "title" && (e.key === "Enter" || e.key === " ")) startGame(getRuntime());
       return;
     }
     if (G.dialog) {

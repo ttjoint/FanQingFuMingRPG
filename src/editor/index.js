@@ -138,7 +138,7 @@ export async function closeEditor(force) {
     if (confirm("有未保存的修改，是否保存到版本「" + ED.name + "」？")) { if (!(await doSave())) return; }
   }
   if (mapEditor) { mapEditor.destroy(); mapEditor = null; }
-  root.remove(); root = null; G.scene = "menu";
+  root.remove(); root = null; G.scene = "title";
 }
 
 // ---------- 保存 ----------

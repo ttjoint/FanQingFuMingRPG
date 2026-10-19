@@ -5,6 +5,8 @@ import { normalizeUi } from "./ui.js";
 import { normalizeWaypoints } from "../engine/waypoint.js";
 import { normalizeUniques, normalizeSets } from "../engine/uniqueItem.js";
 import { defaultUi } from "./uiDefault.js";
+import { normalizePages } from "./page.js";
+import { defaultPageTable } from "./pageDefault.js";
 
 const deep = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
 export const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -32,6 +34,10 @@ export function buildContentDB(assets, mapDocs) {
     decorTemplates: normalizeDecorTemplates(assets.decorTemplates || {}),   // 跨地图共享的装饰物模板
     // 界面布局：可编辑的 UI 元件表。缺省 = 改造前的硬编码布局（逐像素一致）。
     ui: normalizeUi(assets.ui || defaultUi()),
+    // 全屏页面：标题/片头/关于/结算/告别。缺省 = 改造前写死在 scene-ui.js 的那 5 个。
+    pages: normalizePages(assets.pages || defaultPageTable().pages),
+    // 版本指定的"启动后进入哪个页面"。缺省从片头开始（与改造前一致）。
+    initialPage: String(assets.initialPage || defaultPageTable().initial),
     // 传送点表（P4）：踩点解锁 + 图间传送。缺省为空 = 退回纯脚本跳图。
     waypoints: normalizeWaypoints(assets.waypoints),
     uniques: normalizeUniques(assets.uniques),        // 暗金物品（P4）：按物品名绑定的固定词缀
@@ -57,6 +63,13 @@ export function contentToLegacy(content) {
     waypoints: content.waypoints || [],
     uniques: content.uniques || [],
     sets: content.sets || [],
+    // 内容域（非"实体表"但系统/渲染层要读）：
+    //   ui   —— 界面元件表；pages —— 全屏页面表；initialPage —— 版本指定的启动页。
+    // 之前这些只挂在 runtime.content 上，导致 render/scene-ui.js 读 A.pages 永远 undefined
+    // （实测：页面对话框点了没反应，因为页面查不到 → 元件命中恒为空）。
+    ui: content.ui || null,
+    pages: content.pages || [],
+    initialPage: content.initialPage || "",
   };
 }
 

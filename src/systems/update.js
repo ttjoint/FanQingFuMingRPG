@@ -3,7 +3,7 @@ import { createPipeline } from "../engine/pipeline.js";
 import { gameplaySystems } from "./gameplay.js";
 import { updateAnim } from "./motion.js";
 import { getRuntime } from "../runtime/context.js";
-import { enterMenu, showEnding, flashPics, flashItem } from "./scene.js";
+import { enterMenu, showEnding, flashPics, flashDurations, pageIdOf } from "./scene.js";
 
 // 主角倒下后停留多久（秒）再回到主菜单，留出倒地动画与提示的显示时间。
 const DEATH_RETURN_DELAY = 1.8;
@@ -16,15 +16,14 @@ const G = runtime.state;   // 场景级流程仍读状态；经上下文获取�
 export function update(dt) {
   G.time += dt;
   if (G.tipT > 0) G.tipT -= dt;
-  // 片头闪屏：每张停留约 2s，然后进入标题菜单
-  if (G.scene === "flash") {
+  // 片头闪屏：逐张推进，时长来自页面文档（缺省回退 game.json，再缺省 2 秒）。
+  if (pageIdOf(G.scene) === "flash") {
     G.flashT += dt;
-    const pics = flashPics(runtime);
-    const n = pics.length;
-    // 每张的停留时长由数据决定（旧数据是纯字符串 → 默认 2 秒）
-    const raw = (runtime.assets && runtime.assets.game && runtime.assets.game.flash) || [];
-    const cur = flashItem(raw[Math.min(G.flashStep, raw.length - 1)], 2);
-    if (G.flashT > cur.duration) { if (G.flashStep < n - 1) { G.flashStep++; G.flashT = 0; } else enterMenu(runtime); }
+    const n = flashPics(runtime).length;
+    if (!n) { enterMenu(runtime); return; }   // 没有任何图片：直接进标题，不卡在黑屏
+    const durs = flashDurations(runtime);
+    const dur = durs[Math.min(G.flashStep, durs.length - 1)] || 2;
+    if (G.flashT > dur) { if (G.flashStep < n - 1) { G.flashStep++; G.flashT = 0; } else enterMenu(runtime); }
     return;
   }
   if (G.scene !== "game") return;

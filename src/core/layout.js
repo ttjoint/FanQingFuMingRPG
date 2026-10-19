@@ -42,22 +42,14 @@ function compSlot(c, i) {
 }
 
 // ---- 标题菜单 ----
-// 原版 mainmenu.ini 的按钮坐标（按钮图 80×18）。
-export const MENU_BUTTONS = [
-  { k: "start", img: "start", x: 43, y: 439 },
-  { k: "load", img: "load", x: 197, y: 439 },
-  { k: "about", img: "about", x: 351, y: 439 },
-  { k: "exit", img: "exit", x: 506, y: 439 },
-  { k: "version", text: "数据版本", x: 8, y: 8, w: 200, h: 22 },
-  { k: "editor", text: "编辑内容", x: 534, y: 8, w: 96, h: 22, local: true },
-];
-export function menuHit(sx, sy) {
-  for (const b of MENU_BUTTONS) {
-    const w = b.w || 80, h = b.h || 18;
-    if (sx >= b.x && sx < b.x + w && sy >= b.y && sy < b.y + h) return b.k;
-  }
-  return null;
-}
+// 菜单按钮已搬进页面文档（content/pageDefault.js 的 defaultPages() →
+// versions/<id>/assets/pages.json），坐标/图片/动作全部可配置。
+// 原先这里的 MENU_BUTTONS 常量与 menuHit() 已删除：
+//   · 绘制走 render/scene-ui.js 的 drawPage（复用 ui.js 的 resolvePos）
+//   · 命中走 content/page.js 的 pageHit（复用 ui.js 的 hitTop）
+//   · 两个入口按钮「数据版本」「编辑内容」已上移到引擎入口页（launcher/）
+// 旧值仍由 content/pageDefault.js 保留（作为默认页面数据），
+// 一致性由 test/page.test.mjs 守着。
 
 // ---- 商店 / 背包面板（共用 packpanel.png，200×300，5 列格）----
 // 商店置于屏幕左侧，背包在其右侧，二者并排（各 200 宽，中间 12px 间隔）。

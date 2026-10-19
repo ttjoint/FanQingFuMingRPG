@@ -22,7 +22,7 @@ export function openVersionManager() {
   render();
 }
 
-function close() { if (root) { root.remove(); root = null; G.scene = "menu"; } }
+function close() { if (root) { root.remove(); root = null; G.scene = "title"; } }
 
 function choose(id) {
   setActive(id);

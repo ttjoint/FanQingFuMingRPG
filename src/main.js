@@ -11,7 +11,7 @@ import { castSkill } from "./systems/combat.js";
 import { restartAnim } from "./systems/motion.js";
 import { spawnProjectile } from "./systems/projectiles.js";
 import { fromLegacyMap } from "./content/mapDoc.js";
-import { loadPack, defaultPack, loadIndex, ensureVersionNames } from "./content/store.js";
+import { loadPack, defaultPack, loadIndex, ensureVersionNames, setActive } from "./content/store.js";
 import { getRuntime } from "./runtime/context.js";
 import { loadSettings } from "./systems/audio.js";
 import { addInput } from "./input/input.js";
@@ -98,6 +98,7 @@ const DATA_FILES = [
   "scripts.json", "factions.json", "ais.json", "buffs.json", "config.json", "game.json",
   "effects.json", "affixes.json", "transitions.json", "maps_index.json", "maps_manifest.json",
   "ui.json", "waypoints.json", "uniques.json", "sets.json",
+  "pages.json",
 ];
 
 // 从指定版本文件夹读取数据文件：先取原版，再（若存在）用版本自身 assets/ 覆盖。
@@ -121,7 +122,16 @@ async function loadVersionData(versionId) {
   return base;
 }
 
+/** 入口页 → 游戏：由 launcher 调用，避免重复 boot。 */
+let booting = false;
+
 export async function boot() {
+  if (booting) return;
+  booting = true;
+  try { await bootInner(); } finally { booting = false; }
+}
+
+async function bootInner() {
   // 1) 选定内容包（v2：补丁式）。
   const idx = loadIndex();
   const pack = (await loadPack(idx.active)) || defaultPack();
@@ -151,6 +161,10 @@ export async function boot() {
     affixes: data["affixes.json"] || [],
     // 界面布局（可选）：不存在时用 defaultUi()（= 改造前的硬编码布局）。
     ui: data["ui.json"] || null,
+    // 全屏页面表（可选）：不存在时用 defaultPages()（= 改造前写死的 5 个页面）。
+    pages: (data["pages.json"] && data["pages.json"].pages) || data["pages.json"] || null,
+    // 版本指定的启动页面（可选）：不存在时从片头闪屏开始。
+    initialPage: (data["pages.json"] && data["pages.json"].initial) || null,
     waypoints: data["waypoints.json"] || [],
     uniques: data["uniques.json"] || [],
     sets: data["sets.json"] || [],
@@ -186,4 +200,45 @@ export async function boot() {
   requestAnimationFrame(loop);
 }
 
-boot().catch(e => { const el = document.getElementById("load"); if (el) el.textContent = "加载失败：" + e + "（请用本地服务器打开）"; console.error(e); });
+// 启动：先展示引擎入口页（选版本 / 进编辑器），选定后再 boot 游戏。
+//
+// 跳过入口页的条件：
+//   · URL 带 ?ver=<id>：直接进该版本（调试与 e2e 用，也方便分享链接）
+//   · sessionStorage 里记住了本次会话已选过版本：从编辑器返回时不重复弹入口页
+// 入口页自身不读任何游戏数据，只读版本索引（见 launcher/launcher.js 的约束说明）。
+const VER_KEY = "gsxy_session_version";
+
+function wantedVersion() {
+  try {
+    const q = new URLSearchParams(location.search).get("ver");
+    if (q) return q;
+  } catch (e) { }
+  try { return sessionStorage.getItem(VER_KEY) || ""; } catch (e) { return ""; }
+}
+
+function rememberVersion(id) {
+  try { sessionStorage.setItem(VER_KEY, id || ""); } catch (e) { }
+}
+
+async function start() {
+  const el = document.getElementById("load");
+  if (el) el.textContent = "加载引擎…";
+  const want = wantedVersion();
+  if (want) { setActive(want); rememberVersion(want); await boot(); return; }
+
+  // 先弹引擎入口页。入口页是 DOM 浮层，它遮挡画布，不需要先加载游戏资源。
+  const { openLauncher } = await import("./launcher/launcher.js");
+  if (el) el.remove();
+  openLauncher({
+    onEnter: async id => { rememberVersion(id); await boot(); },
+    onEdit: id => {
+      rememberVersion(id);
+      import("./editor/index.js").then(m => m.openEditor()).catch(e => {
+        console.error(e);
+        if (el) { el.textContent = "编辑器加载失败：" + e.message; el.style.display = ""; }
+      });
+    },
+  });
+}
+
+start().catch(e => { const el = document.getElementById("load"); if (el) el.textContent = "加载失败：" + e + "（请用本地服务器打开）"; console.error(e); });

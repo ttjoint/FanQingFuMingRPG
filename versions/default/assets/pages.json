@@ -1,0 +1,146 @@
+{
+  "initial": "flash",
+  "pages": [
+    {
+      "id": "title",
+      "kind": "menu",
+      "background": "assets/ui/mainmenu.png",
+      "items": [
+        {
+          "id": "title.start",
+          "kind": "button",
+          "anchor": "topLeft",
+          "x": 43,
+          "y": 439,
+          "w": 80,
+          "h": 18,
+          "img": "assets/ui/start.png",
+          "action": {
+            "type": "start"
+          }
+        },
+        {
+          "id": "title.load",
+          "kind": "button",
+          "anchor": "topLeft",
+          "x": 197,
+          "y": 439,
+          "w": 80,
+          "h": 18,
+          "img": "assets/ui/load.png",
+          "action": {
+            "type": "load"
+          }
+        },
+        {
+          "id": "title.about",
+          "kind": "button",
+          "anchor": "topLeft",
+          "x": 351,
+          "y": 439,
+          "w": 80,
+          "h": 18,
+          "img": "assets/ui/about.png",
+          "action": {
+            "type": "scene",
+            "to": "about"
+          }
+        },
+        {
+          "id": "title.exit",
+          "kind": "button",
+          "anchor": "topLeft",
+          "x": 506,
+          "y": 439,
+          "w": 80,
+          "h": 18,
+          "img": "assets/ui/exit.png",
+          "action": {
+            "type": "exit"
+          }
+        }
+      ]
+    },
+    {
+      "id": "flash",
+      "kind": "flash",
+      "background": "",
+      "clickAnywhere": true,
+      "flashDuration": 2
+    },
+    {
+      "id": "about",
+      "kind": "board",
+      "background": "assets/ui/content.png",
+      "clickAnywhere": true,
+      "lines": [
+        {
+          "text": "点击返回标题",
+          "x": 8,
+          "y": 470,
+          "size": 12,
+          "color": "rgba(255,255,255,0.8)"
+        }
+      ]
+    },
+    {
+      "id": "ending",
+      "kind": "score",
+      "background": "assets/ui/end.png",
+      "clickAnywhere": true,
+      "lines": [
+        {
+          "text": "游戏结束",
+          "x": 0,
+          "y": 60,
+          "size": 30,
+          "color": "#ffd75e",
+          "align": "center"
+        },
+        {
+          "text": "点击返回标题",
+          "x": 0,
+          "y": 180,
+          "size": 12,
+          "color": "rgba(255,255,255,0.75)",
+          "align": "center"
+        }
+      ],
+      "slots": [
+        {
+          "bind": "result.title",
+          "label": "你的江湖称号：",
+          "x": 0,
+          "y": 110,
+          "size": 18,
+          "color": "#f2ead0"
+        },
+        {
+          "bind": "stats.summary",
+          "label": "",
+          "x": 0,
+          "y": 145,
+          "size": 14,
+          "color": "#9fe08f"
+        }
+      ],
+      "items": []
+    },
+    {
+      "id": "farewell",
+      "kind": "board",
+      "background": "",
+      "clickAnywhere": true,
+      "lines": [
+        {
+          "text": "",
+          "x": 0,
+          "y": 0,
+          "size": 13,
+          "color": "#fff",
+          "align": "center"
+        }
+      ]
+    }
+  ]
+}
