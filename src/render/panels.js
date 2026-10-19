@@ -10,14 +10,8 @@ import { SAVE_SLOTS, saveSlotInfo } from "../systems/save.js";
 import { normalizeDifficulties } from "../engine/difficulty.js";
 import { mercList, mercInfo } from "../systems/merc.js";
 import { getRuntime } from "../runtime/context.js";
+import { stateOf } from "./frame.js";
 
-
-// P5：视图层的状态入口。允许传入运行时（rt）或游戏状态（g），不传回退全局。
-function stateOf(x) {
-  if (!x) return G;
-  if (x.state) return x.state;      // runtime ctx
-  return x;                          // 直接是游戏状态
-}
 
 export function drawTip(rt) {
   const G = stateOf(rt);
@@ -86,7 +80,7 @@ export function drawPack(rt) {
     const r = uiSlotRect("pack.grid", i);
     const gx = r ? r.x : px + 8 + (i % 5) * 40;
     const gy = r ? r.y : py + 28 + Math.floor(i / 5) * 40;
-    drawItemSlot(G.pack[i], gx, gy, r ? r.w : 38, r ? r.h : 38);
+    drawItemSlot(G.pack[i], gx, gy, r ? r.w : 38, r ? r.h : 38, rt);
   }
   ctx.fillStyle = "#6a4a20"; ctx.font = "10px 'Microsoft YaHei',SimHei,sans-serif"; ctx.fillText("左键拿起 / 右键使用", px + 12, py + 292);
 }
@@ -114,7 +108,9 @@ export function stashSlotRect(i) {
 }
 
 // 命中测试：返回格子下标或 -1。
-export function stashSlotAt(sx, sy) {
+// 仓库格命中。rt 可选（不传回退全局，与旧行为一致）。
+export function stashSlotAt(sx, sy, rt) {
+  const G = stateOf(rt);
   if (!G.stashPanel) return -1;
   const n = (G.stash || []).length;
   for (let i = 0; i < n; i++) {
@@ -140,7 +136,7 @@ export function drawStash(rt) {
   ctx.fillText("背包右键 → 存入　仓库左键 → 取出", B.x + 14, B.y + B.h - 8);
   for (let i = 0; i < slots.length; i++) {
     const r = stashSlotRect(i);
-    drawItemSlot(slots[i], r.x, r.y, r.w, r.h);
+    drawItemSlot(slots[i], r.x, r.y, r.w, r.h, rt);
   }
 }
 
@@ -161,7 +157,9 @@ export function smithButtons() {
 }
 
 // 命中测试：返回按钮 id 或 null。
-export function smithButtonAt(sx, sy) {
+// 铁匠按钮命中。rt 可选（不传回退全局）。
+export function smithButtonAt(sx, sy, rt) {
+  const G = stateOf(rt);
   if (!G.smithPanel) return null;
   for (const b of smithButtons()) if (sx >= b.x && sx <= b.x + b.w && sy >= b.y && sy <= b.y + b.h) return b.id;
   return null;
@@ -196,11 +194,20 @@ export function drawSmith(rt) {
 export const DIFF_BOX = { x: 190, y: 130, w: 260, h: 190 };
 const DIFF_ROW_H = 44;
 
-export function diffRows(ctx) {
+// 难度列表。
+//
+// 参数名改成 rt 更准确：原来的名字叫 ctx，但它并不是 canvas 2d 上下文，
+// 而是运行时上下文（取 config.difficulties）——叫 ctx 极易误读成画布。
+// 同时补上第三种入参形态：直接传 g 也能拿到 difficulty（旧的 ctx && ctx.config 写法
+// 对 g 无能为力），由 stateOf 统一解析。
+export function diffRows(rt) {
   // 渲染层不直接拿列表，走配置（编辑器可改难度表）。
-  const list = (ctx && ctx.config && ctx.config.difficulties) || null;
+  const st = stateOf(rt);
+  const cfg = (rt && rt.config) || (rt && rt.assets && rt.assets.config) ||
+              (st && st.config) || null;
+  const list = (cfg && cfg.difficulties) || null;
   const arr = normalizeDifficulties(list);
-  const cur = (G && G.difficulty) || "normal";
+  const cur = (st && st.difficulty) || "normal";
   return arr.map(d => ({ ...d, current: d.id === cur }));
 }
 
@@ -209,9 +216,13 @@ export function diffRowRect(i) {
   return { x: B.x + 12, y: B.y + 46 + i * DIFF_ROW_H, w: B.w - 24, h: DIFF_ROW_H - 8 };
 }
 
-export function diffRowAt(sx, sy) {
+// 难度行命中。rt 可选（不传回退全局）。
+// 注意：这里把 rt 透传给 diffRows，而不是让它内部再去 getRuntime()——
+// 否则即使调用方注入了状态，行列表仍取自全局运行时，两半数据来源不一致。
+export function diffRowAt(sx, sy, rt) {
+  const G = stateOf(rt);
   if (!G.diffPanel) return -1;
-  const rows = diffRows(getRuntime());
+  const rows = diffRows(rt || getRuntime());
   for (let i = 0; i < rows.length; i++) {
     const r = diffRowRect(i);
     if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return i;
@@ -227,7 +238,7 @@ export function drawDifficulty(rt) {
   ctx.strokeStyle = "#b8a468"; ctx.lineWidth = 2; ctx.strokeRect(B.x + 1, B.y + 1, B.w - 2, B.h - 2); ctx.lineWidth = 1;
   ctx.fillStyle = "#f0d060"; ctx.font = "bold 14px 'Microsoft YaHei',SimHei,sans-serif";
   ctx.fillText("难度", B.x + 14, B.y + 26);
-  const rows = diffRows(getRuntime());
+  const rows = diffRows(rt || getRuntime());
   rows.forEach((d, i) => {
     const r = diffRowRect(i);
     ctx.fillStyle = d.current ? "rgba(120,90,30,0.9)" : "rgba(50,40,24,0.85)";
@@ -252,7 +263,9 @@ export function mercRowRect(i) {
 }
 
 // 当前面板的可点击行：未招募 = 可招募列表；已招募 = [遣散]。
-export function mercRowAt(sx, sy) {
+// 随从行命中。rt 可选（不传回退全局）。
+export function mercRowAt(sx, sy, rt) {
+  const G = stateOf(rt);
   if (!G.mercPanel) return -1;
   for (let i = 0; i < 4; i++) {
     const r = mercRowRect(i);
@@ -356,7 +369,7 @@ export function drawWaypointPanel(rt) {
   ctx.fillStyle = "#aaa"; ctx.font = "11px 'Microsoft YaHei',SimHei,sans-serif";
   ctx.fillText("点击地名传送　Esc / M 关闭", x + 120, y + 28);
 
-  const targets = waypointRows();
+  const targets = waypointRows(rt);
   if (!targets.length) {
     ctx.fillStyle = "#888"; ctx.font = "13px sans-serif";
     ctx.fillText("尚未发现任何传送点。走到传送点所在格即可解锁。", x + 20, y + 70);
@@ -377,11 +390,13 @@ export function drawWaypointPanel(rt) {
 }
 
 // 面板命中：返回被点击的传送点（无则 null）。
-export function waypointAt(sx, sy) {
+// 传送点行命中。rt 可选（不传回退全局）。
+export function waypointAt(sx, sy, rt) {
+  const G = stateOf(rt);
   if (!G.waypointPanel) return null;
   const { w, x, y, h } = WP_BOX;
   if (sx < x || sx > x + w || sy < y || sy > y + h) return null;
-  const targets = waypointRows();
+  const targets = waypointRows(rt);
   for (let i = 0; i < targets.length; i++) {
     const ry = y + 48 + i * WP_ROW_H;
     if (ry + WP_ROW_H > y + h - 12) break;
@@ -392,10 +407,13 @@ export function waypointAt(sx, sy) {
 
 // 已解锁目标（绘制与命中共用同一份顺序，避免两处漂移）。
 // 从运行时内容读取；拿不到时返回空（面板显示"尚未发现"）。
-function waypointRows() {
+// rt 可选：此前它一边 getRuntime() 取列表、一边读全局 G.waypoints，
+// 两半数据来自不同来源；传入 rt 后统一（不传则维持旧行为）。
+function waypointRows(rt) {
   // 与 hud.js 同一取值路径：运行时内容里已规整过的传送点表。
-  const rt = getRuntime();
-  const list = (rt && ((rt.content && rt.content.waypoints) || (rt.assets && rt.assets.waypoints))) || [];
+  const r = rt || getRuntime();
+  const G = stateOf(rt);
+  const list = (r && ((r.content && r.content.waypoints) || (r.assets && r.assets.waypoints))) || [];
   const un = G.waypoints || {};
   return list.filter(w => un[w.id]);
 }

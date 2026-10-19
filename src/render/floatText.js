@@ -4,6 +4,7 @@
 // 这里只负责把 {text,x,y,alpha,color} 画到画布上，不做任何决策。
 import { ctx, VW, VH } from "../core/constants.js";
 import { floatVisual } from "../engine/floatText.js";
+import { stateOfStrict } from "./frame.js";
 
 // 每个数字画两遍：先画黑色描边（偏移 8 个方向各 1px），再画本体。
 // 这是像素游戏里让文字在任意背景上都可读的最省事办法 —— 不用测量文本边界，
@@ -33,7 +34,11 @@ function drawOutlined(label, x, y, color, font) {
  * @param {number} camY
  */
 export function drawFloats(rt, camX, camY) {
-  const G = (rt && rt.state) || null;
+  // 这里用 stateOfStrict：浮动数字是「必须由调用方注入」的绘制，
+  // 旧写法 `(rt && rt.state) || null` 在漏传 rt 时静默啥都不画，
+  // 与其他 8 处 stateOf 副本「回退全局」的行为不一致，排查时极易误判。
+  // 语义无关改变（依旧不回退全局），但规则现在只有一份（见 render/frame.js）。
+  const G = stateOfStrict(rt);
   if (!G) return;
   // 单位和玩家都可能带 floats；统一收集后一次画完，
   // 避免「玩家数字被后画的敌人数字盖住」这种层序问题。

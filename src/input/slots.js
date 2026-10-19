@@ -1,5 +1,6 @@
 // 物品栏 / 装备栏 / 背包 / 商店格子的点击处理。
 import { G } from "../core/state.js";
+import { stateOf } from "../render/frame.js";
 import { storeFromPack } from "../systems/stash.js";
 import { getRuntime } from "../runtime/context.js";
 import { itemByName } from "../core/registry.js";
@@ -11,12 +12,6 @@ import { entryOf } from "../core/layout.js";
 
 // P5：视图层的状态入口。
 // 允许调用方显式传入运行时（rt）或游戏状态（g），不传则回退到当前全局实例。
-// 这样离屏渲染/单测可以喂一份独立状态，而不必改全局单例。
-function stateOf(x) {
-  if (!x) return G;
-  if (x.state) return x.state;      // runtime ctx
-  return x;                          // 直接是游戏状态
-}
 
 export function handleSlotClick(slot, button, shift, rt, ctrl) {
   rt = rt || getRuntime();

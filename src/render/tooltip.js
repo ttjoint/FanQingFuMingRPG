@@ -1,5 +1,6 @@
 // 鼠标旁的物品信息提示框。
 import { G } from "../core/state.js";
+import { stateOf } from "./frame.js";
 import { VW, VH, ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { itemByName } from "../core/registry.js";
@@ -9,12 +10,6 @@ import { displayName, instanceStats, rarityColor } from "../engine/item.js";
 
 // P5：视图层的状态入口。
 // 允许调用方显式传入运行时（rt）或游戏状态（g），不传则回退到当前全局实例。
-// 这样离屏渲染/单测可以喂一份独立状态，而不必改全局单例。
-function stateOf(x) {
-  if (!x) return G;
-  if (x.state) return x.state;      // runtime ctx
-  return x;                          // 直接是游戏状态
-}
 
 export function itemInfoLines(it, entry) {
   const st = entry && entry.inst ? instanceStats(entry, it) : null;

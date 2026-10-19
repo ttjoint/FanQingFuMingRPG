@@ -31,6 +31,8 @@ function createGameState() {
     currentMap: null, map: null, cam: { x: 0, y: 0 }, time: 0,
     panel: null, effects: [], projectiles: [], ground: [], triggerCD: 0, lastCell: null, hold: null, holdCell: null, holdTarget: null,
     fx: [], uiFx: null, moveMarker: null,
+    // 天气（脚本 Rain() 指令）：false = 晴。仅影响渲染，不影响任何玩法数值。
+    rain: false,
     scene: "boot", flashStep: 0, flashT: 0, resultTitle: null, pendingEnd: false,
     mouse: { x: 0, y: 0, sx: 0, sy: 0, wx: 0, wy: 0 },
   };

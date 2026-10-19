@@ -5,6 +5,7 @@
 // 默认配置（versions/default/assets/ui.json）与改造前的硬编码逐像素一致，
 // 由 test/ui.test.mjs 守着——所以这次改造不改变任何视觉结果。
 import { G } from "../core/state.js";
+import { stateOf } from "./frame.js";
 import { VW, VH, ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { itemByName, skillByName } from "../core/registry.js";
@@ -15,12 +16,6 @@ import { installUiLayout } from "../core/layout.js";
 
 // P5：视图层的状态入口。
 // 允许调用方显式传入运行时（rt）或游戏状态（g），不传则回退到当前全局实例。
-// 这样离屏渲染/单测可以喂一份独立状态，而不必改全局单例。
-function stateOf(x) {
-  if (!x) return G;
-  if (x.state) return x.state;      // runtime ctx
-  return x;                          // 直接是游戏状态
-}
 
 // 取当前 UI 配置。内容缺失时返回 null（不画任何元件），
 // 这比“退回一份硬编码”更容易发现装配问题。
@@ -68,7 +63,7 @@ export function drawHUD(rt) {
     else if (c.kind === "label") drawLabel(c, p);
     else if (c.kind === "button") drawButton(c, p);
     else if (c.kind === "image") drawImage(c, p);
-    else if (c.kind === "slotgrid") drawSlotGrid(c);
+    else if (c.kind === "slotgrid") drawSlotGrid(c, rt);
   }
 }
 
@@ -135,18 +130,19 @@ function drawImage(c, p) {
   if (im) ctx.drawImage(im, p.x, p.y, c.w || im.width, c.h || im.height);
 }
 
-function drawSlotGrid(c) {
+function drawSlotGrid(c, rt) {
+  const G = stateOf(rt);
   if (c.bind === "inventory.hotbar") {
     for (let i = 0; i < c.cols * c.rows; i++) {
       const r = slotRect(c, i, VW, VH);
-      drawItemSlot(G.hotbar && G.hotbar[i], r.x, r.y, r.w, r.h);
+      drawItemSlot(G.hotbar && G.hotbar[i], r.x, r.y, r.w, r.h, rt);
     }
     return;
   }
   if (c.bind === "equipment") {
     for (let i = 0; i < EQUIP_KEYS.length; i++) {
       const r = slotRect(c, i, VW, VH);
-      drawItemSlot(G.equip && G.equip[EQUIP_KEYS[i]], r.x, r.y, r.w, r.h);
+      drawItemSlot(G.equip && G.equip[EQUIP_KEYS[i]], r.x, r.y, r.w, r.h, rt);
     }
     return;
   }
@@ -155,7 +151,7 @@ function drawSlotGrid(c) {
     for (let i = 0; i < (G.pack ? G.pack.length : 0); i++) {
       const r = slotRect(c, i, VW, VH);
       if (i >= c.cols * c.rows) break;
-      drawItemSlot(G.pack[i], r.x, r.y, r.w, r.h);
+      drawItemSlot(G.pack[i], r.x, r.y, r.w, r.h, rt);
     }
     return;
   }
@@ -171,8 +167,14 @@ function drawSlotGrid(c) {
 }
 
 // 商店格由 shop-ui.js 画（它需要处理售罄/悬停等状态），这里不重复。
-export function drawItemSlot(entry, x, y, w, h) {
+// 画一个物品格（图标 + 数量）。
+//
+// rt 为可选注入参数（P5 补充）：此前它直接读全局 G，是 P5 改造的漏网之鱼——
+// 在注入状态（例如离屏渲染 / 单测 / 编辑器预览）下会画成当前全局状态的物品。
+// 不传 rt 时保持旧行为（回退全局），旧调用点因此无需同步改动。
+export function drawItemSlot(entry, x, y, w, h, rt) {
   if (!entry) return;
+  const G = stateOf(rt);
   const it = itemByName(G, entry.name);
   const im = it && it.icon ? getImg("assets/items_icons/" + it.icon.replace(/\.bmp$/, ".png")) : null;
   if (im) ctx.drawImage(im, x + 3, y + 3, w - 6, h - 6);

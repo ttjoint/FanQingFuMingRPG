@@ -1,5 +1,6 @@
 // 标题菜单 / 片头闪屏 / 关于 / 结局 的绘制。
 import { G } from "../core/state.js";
+import { stateOf } from "./frame.js";
 import { VW, VH, ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { getRuntime } from "../runtime/context.js";
@@ -10,12 +11,6 @@ import { isEditorAvailable, activeId, versionName } from "../content/store.js";
 
 // P5：视图层的状态入口。
 // 允许调用方显式传入运行时（rt）或游戏状态（g），不传则回退到当前全局实例。
-// 这样离屏渲染/单测可以喂一份独立状态，而不必改全局单例。
-function stateOf(x) {
-  if (!x) return G;
-  if (x.state) return x.state;      // runtime ctx
-  return x;                          // 直接是游戏状态
-}
 
 // 把资源名规范成 assets/ui/*.png：允许 "mainmenu"、"end.bmp"、"end.png" 三种写法。
 function ui(name) {
@@ -35,18 +30,22 @@ export function preloadSceneArt() {
 export function drawScene(rt) {
   const G = stateOf(rt);
   switch (G.scene) {
-    case "flash": return drawFlash();
-    case "menu": return drawMenu();
+    case "flash": return drawFlash(rt);
+    case "menu": return drawMenu(rt);
     case "about": return drawAbout();
-    case "ending": return drawEnding();
+    case "ending": return drawEnding(rt);
     case "farewell": return drawFarewell();
     default: ctx.fillStyle = "#000"; ctx.fillRect(0, 0, VW, VH);
   }
 }
 
-function drawFlash() {
+// 下面几个内部函数靠外层 drawScene 遮蔽的 G 读取状态（词法作用域，注入已生效），
+// 但它们各自还会 getRuntime() 去取资源（图片名等）。补上 rt 透传，
+// 让"状态"与"资源"两份数据跟随同一个来源；不传时仍回退全局，保持旧行为。
+function drawFlash(rt) {
+  const G = stateOf(rt);
   ctx.fillStyle = "#000"; ctx.fillRect(0, 0, VW, VH);
-  const pics = flashPics(getRuntime());
+  const pics = flashPics(rt || getRuntime());
   const name = pics[Math.min(G.flashStep, pics.length - 1)];
   const im = ui(name);
   if (im) {
@@ -60,7 +59,8 @@ function drawFlash() {
   ctx.fillText("点击跳过…", 8, VH - 10);
 }
 
-function drawMenu() {
+function drawMenu(rt) {
+  const G = stateOf(rt);
   const bg = ui("mainmenu");
   if (bg) ctx.drawImage(bg, 0, 0, VW, VH);
   else { ctx.fillStyle = "#101418"; ctx.fillRect(0, 0, VW, VH); }
@@ -94,8 +94,9 @@ function drawAbout() {
   ctx.fillText("点击返回标题", 8, VH - 10);
 }
 
-function drawEnding() {
-  const bg = ui(endPic(getRuntime()));
+function drawEnding(rt) {
+  const G = stateOf(rt);
+  const bg = ui(endPic(rt || getRuntime()));
   if (bg) ctx.drawImage(bg, 0, 0, VW, VH);
   else { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, VW, VH); }
   ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(80, 150, VW - 160, 200);

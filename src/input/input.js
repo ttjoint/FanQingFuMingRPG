@@ -218,7 +218,7 @@ export function addInput(rt) {
     }
     // 传送面板是模态的：点列表项传送，点面板外关闭。
     if (G.waypointPanel) {
-      const wp = waypointAt(sp.x, sp.y);
+      const wp = waypointAt(sp.x, sp.y, getRuntime());
       if (wp) { travelTo(getRuntime(), wp.id); return; }
       if (sp.x < WP_BOX.x || sp.x > WP_BOX.x + WP_BOX.w || sp.y < WP_BOX.y || sp.y > WP_BOX.y + WP_BOX.h) togglePanel(getRuntime(), false);
       return;
@@ -234,7 +234,7 @@ export function addInput(rt) {
     if (G.gameOver) return;
     // 随从面板：未招募点行 = 招募；已招募点第二行 = 遣散。
     if (G.mercPanel) {
-      const mi = mercRowAt(sp.x, sp.y);
+      const mi = mercRowAt(sp.x, sp.y, getRuntime());
       if (mi >= 0) {
         const rt = getRuntime();
         const info = mercInfo(rt);
@@ -246,7 +246,7 @@ export function addInput(rt) {
     }
     // 难度面板：点一行即切换（立即生效；已出场的怪不改，新出场的按新倍率）。
     if (G.diffPanel) {
-      const di = diffRowAt(sp.x, sp.y);
+      const di = diffRowAt(sp.x, sp.y, getRuntime());
       if (di >= 0) {
         const arr = normalizeDifficulties(getRuntime().config && getRuntime().config.difficulties);
         if (arr[di]) {
@@ -259,7 +259,7 @@ export function addInput(rt) {
     }
     // 铁匠面板：三个按钮分别对应赌博 / 鉴定全部 / 修理全部。
     if (G.smithPanel) {
-      const btn = smithButtonAt(sp.x, sp.y);
+      const btn = smithButtonAt(sp.x, sp.y, getRuntime());
       if (btn) {
         const rt = getRuntime();
         if (btn === "gamble") gamble(rt);
@@ -273,7 +273,7 @@ export function addInput(rt) {
     // 仓库面板：左键取出到背包。面板在背包左侧，先判定避免穿透到下面。
     if (G.stashPanel) {
       stashOf(getRuntime());                       // 确保 G.stash 已载入（首帧可能还没渲染过）
-      const si = stashSlotAt(sp.x, sp.y);
+      const si = stashSlotAt(sp.x, sp.y, getRuntime());
       if (si >= 0) { if (e.button === 0) takeToPack(getRuntime(), si); return; }
       const B = stashRect();
       if (sp.x >= B.x && sp.x <= B.x + B.w && sp.y >= B.y && sp.y <= B.y + B.h) return;   // 点在面板空白处：吞掉

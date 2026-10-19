@@ -1,5 +1,6 @@
 // 商店面板绘制：与背包共用 packpanel.png 布局，位于屏幕左侧，底部正中为关闭按钮。
 import { G } from "../core/state.js";
+import { stateOf } from "./frame.js";
 import { ctx } from "../core/constants.js";
 import { getImg } from "../core/assets.js";
 import { itemByName } from "../core/registry.js";
@@ -9,12 +10,6 @@ import { drawItemSlot } from "./hud.js";
 
 // P5：视图层的状态入口。
 // 允许调用方显式传入运行时（rt）或游戏状态（g），不传则回退到当前全局实例。
-// 这样离屏渲染/单测可以喂一份独立状态，而不必改全局单例。
-function stateOf(x) {
-  if (!x) return G;
-  if (x.state) return x.state;      // runtime ctx
-  return x;                          // 直接是游戏状态
-}
 
 export function drawShop(rt) {
   const G = stateOf(rt);
@@ -43,7 +38,7 @@ export function drawShop(rt) {
     if (i >= G.shop.goods.length) continue;
     const name = G.shop.goods[i];
     const it = itemByName(G, name);
-    drawItemSlot({ name }, p.x, p.y, 38, 38);
+    drawItemSlot({ name }, p.x, p.y, 38, 38, rt);
     if (it && it.price > 0) {
       ctx.fillStyle = "#5a3a10"; ctx.font = "9px 'Microsoft YaHei',SimHei,sans-serif";
       // 价格靠右下角，带描边保证叠在图标上仍可读
