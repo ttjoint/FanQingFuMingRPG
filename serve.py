@@ -101,7 +101,12 @@ def _write_json(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
+        # 与 tools/gen-versions-index.mjs 保持一致：2 空格缩进 + 末尾换行。
+        # 曾经这里用 separators=(",", ":") 写成单行，而 gen 脚本写缩进格式，
+        # 两者交替运行就会在 index.json 上产生“删 3000 行又加 1 行”的噪声 diff，
+        # 根本没法 review。反正只有两个生成者，统一成一个形状。
+        json.dump(obj, f, ensure_ascii=False, indent=2)
+        f.write("\n")
     os.replace(tmp, path)
 
 
@@ -126,6 +131,56 @@ def _list_versions():
             "updatedAt": meta.get("updatedAt", 0),
         })
     return out
+
+
+def _list_asset_keys(version_dir):
+    """列出某版本 assets/ 下的覆盖文件（逻辑键，形如 "assets/role/x.png"）。"""
+    out = []
+    adir = os.path.join(version_dir, "assets")
+    if not os.path.isdir(adir):
+        return out
+    for root, dirs, files in os.walk(adir):
+        dirs.sort()
+        for fn in sorted(files):
+            rel = os.path.relpath(os.path.join(root, fn), adir).replace(os.sep, "/")
+            out.append("assets/" + rel)
+    return out
+
+
+def _rebuild_versions_index():
+    """重建 versions/index.json —— 静态部署（GitHub Pages 等）发现磁盘版本的唯一途径。
+
+    为什么必须在这里做：serve.py 能扫描目录列出所有版本，但静态服务器列不出目录，
+    前端只能靠这份显式清单。历史上建/删/重命名/保存版本后从没更新过它，
+    于是编辑器里新建的版本在线上根本不可见（本地能玩、部署后消失）。
+    规则与 tools/gen-versions-index.mjs **保持一致**，两者产物应完全相同。
+    """
+    out = []
+    if os.path.isdir(VERSIONS_DIR):
+        for name in sorted(os.listdir(VERSIONS_DIR)):
+            d = _version_dir(name)
+            vj = os.path.join(d, "version.json")
+            if not os.path.isfile(vj):
+                continue
+            try:
+                meta = _read_json(vj)
+            except Exception:
+                continue
+            out.append({
+                "id": meta.get("id", name),
+                "name": meta.get("name", name),
+                "builtin": bool(meta.get("builtin")),
+                "readonly": bool(meta.get("readonly")),
+                "updatedAt": meta.get("updatedAt", 0),
+                "assets": _list_asset_keys(d),
+                # patch.json 是否真实存在。前端据此决定要不要请求它：
+                # 原版 default 没有 patch（它本身就是基准），无条件 fetch 只会白打一个 404。
+                "hasPatch": os.path.isfile(os.path.join(d, "patch.json")),
+            })
+    try:
+        _write_json(os.path.join(VERSIONS_DIR, "index.json"), {"versions": out})
+    except Exception as e:
+        print("警告：重建 versions/index.json 失败：%s" % e)
 
 
 def _assets_stamp(adir):
@@ -379,6 +434,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         }
         _write_json(os.path.join(d, "version.json"), meta)
         _write_json(os.path.join(d, "patch.json"), body.get("patch") or {})
+        _rebuild_versions_index()          # 新版本要能被静态部署发现
         return self._json({"ok": True, "version": meta})
 
     def _meta_of(self, vid, default=None):
@@ -411,6 +467,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         meta["updatedAt"] = int(time.time() * 1000)
         _write_json(os.path.join(d, "version.json"), meta)
         _invalidate_assets_cache(vid)          # 存过版本后素材清单要重算
+        _rebuild_versions_index()              # 素材覆盖清单也要同步进 index.json
         return self._json({"ok": True, "version": meta})
 
     def _write_asset(self, version_dir, logical, data):
@@ -458,6 +515,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if meta.get("readonly") or meta.get("builtin"):
             return self._err("该版本为只读（原版），不能删除", 403)
         shutil.rmtree(d)
+        _rebuild_versions_index()
         return self._json({"ok": True})
 
     def _rename(self, vid):
@@ -473,6 +531,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         meta["name"] = str(body["name"])
         meta["updatedAt"] = int(time.time() * 1000)
         _write_json(os.path.join(d, "version.json"), meta)
+        _rebuild_versions_index()
         return self._json({"ok": True, "version": meta})
 
     # ---- HTTP 方法 ----

@@ -194,11 +194,19 @@ async function loadStaticPack(id) {
   const vs = await listStaticVersions();
   const meta = vs.find(v => v.id === id);
   if (!meta) return null;
+  // 只请求真实存在的 patch.json。
+  // 原版 default 没有 patch（它本身就是基准），旧代码无条件 fetch 再 `if (r.ok)` 吃掉 404 ——
+  // 等于拿一个必然失败的请求当“文件存不存在”的探测器，每次启动白打一个 404。
+  // 现在由 index.json 的 hasPatch 预先告知（旧清单没有该字段时退化为尝一次）。
   let patch = {};
-  try {
-    const r = await fetch("versions/" + encodeURIComponent(id) + "/patch.json", { cache: "no-cache" });
-    if (r.ok) patch = await r.json();
-  } catch (e) { }
+  // 旧清单没有 hasPatch 字段时：原版 default 一定没有 patch，其余版本保险起见试一次。
+  const needPatch = meta.hasPatch !== undefined ? !!meta.hasPatch : id !== "default";
+  if (needPatch) {
+    try {
+      const r = await fetch("versions/" + encodeURIComponent(id) + "/patch.json", { cache: "no-cache" });
+      if (r.ok) patch = await r.json();
+    } catch (e) { }
+  }
   const p = normalizePack({
     format: "gsxy.pack", version: 2, id: meta.id, name: meta.name,
     base: "default", patch: patch || {}, images: {},

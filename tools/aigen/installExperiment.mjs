@@ -1,7 +1,7 @@
-// 把 AI 生成的素材装进 versions/aitest/ 实验版本。
+// 把 AI 生成的素材装进 versions/d2-expansion/ 版本。
 //
 // 素材来源：_aigen/exp/cand/*.png（由 cli.mjs batch 生成，已视觉复核 9/9 合格）
-// 目标：versions/aitest/assets/ 下，按游戏约定的路径与命名落盘。
+// 目标：versions/d2-expansion/assets/ 下，按游戏约定的路径与命名落盘。
 //
 // 命名约定（与 default 版本一致）：
 //   assets/role/<名>.png        单位精灵，由 chars.json 引用
@@ -20,7 +20,7 @@ import { decodePNG, encodePNG } from "./png.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const CAND = path.join(ROOT, "_aigen/exp/cand");
-const VER = path.join(ROOT, "versions/aitest");
+const VER = path.join(ROOT, "versions/d2-expansion");
 const DEF = path.join(ROOT, "versions/default/assets");   // 原版资源（合并基底）
 const ASSETS = path.join(VER, "assets");
 

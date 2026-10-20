@@ -48,7 +48,8 @@ function close() { if (root) { root.remove(); root = null; } }
 
 async function render(opts) {
   clear(root);
-  const seq = ++fillSeq;   // 使旧 render 的异步回调全部失效
+  // 发出一个新令牌：本函数发起的后续 fillTable 只有最新一个能写 DOM。
+  const token = ++fillToken;
   // 先立即渲染骨架（含内置版本行），再异步拉磁盘版本列表填表。
   //
   // 旧实现先 await refreshDiskVersions() 再建 DOM —— 静态部署下
@@ -78,15 +79,14 @@ async function render(opts) {
     h("br"),
     "·「编辑」会以该版本为基准打开内容编辑器（只读版本也能编辑，保存时自动复制为可写版本）。"));
   root.append(bar, body);
-  fillTable(tblWrap, disk, opts);
+  fillTable(tblWrap, disk, opts, token);
 
   // 异步探测磁盘/浏览器版本，完成后重填（快时无感，慢时用户已能看到内置版本）。
-  // fillTable 是 async 的：两个调用会在 await listAllVersions() 处交错 ——
-  // 慢网下初始渲染还没填完、探测完成又发起一次，旧结果后到就会把列表
-  // 追加/保留成两份。用序号丢弃过期结果。
-  const seq2 = fillSeq;
+  // fillTable 两次调用可能并发（上面没 await），靠 token 保证只有最新一次写 DOM。
+  // 另：refreshDiskVersions() 完成且入口页仍在时，才传同 token 重填 ——
+  // 若这期间发生过 render（新 token），旧回调会因 token 过期而不写 DOM。
   refreshDiskVersions().then(() => {
-    if (seq2 !== fillSeq || !root) return;   // 已有更新的渲染在途/入口页已关闭
+    if (token !== fillToken || !root) return;   // 已有更新的渲染在途/入口页已关闭
     const d = diskVersionsReady();
     const modeHint = root.querySelector("[data-role=mode-hint]");
     if (modeHint && d && !disk) modeHint.textContent = "本地模式：版本可直接写入 versions/ 文件夹";
@@ -94,27 +94,40 @@ async function render(opts) {
     if (footHint && d) {
       footHint.append(h("br"), "· 本地模式下：新建/复制的版本直接写入项目 versions/ 文件夹。");
     }
-    fillTable(tblWrap, d, opts);
+    fillTable(tblWrap, d, opts, token);
   }).catch(() => { });
 }
 
-/** fillTable 竞态保护：只有最新一次渲染允许写 DOM。 */
-let fillSeq = 0;
+/** fillTable 竞态保护：只有最新一次调用允许写 DOM。 */
+//
+// 曾经的 bug（菜单里版本列表重复显示两遍）：
+//   render() 里 `fillTable(tblWrap, disk, opts)` 没有 await，紧接着又发起一次
+//   `fillTable(tblWrap, d, opts)` —— 两次调用并发。而旧实现是在 await **之前**
+//   就 `clear(wrap)` 并建好了自己的 <table>/<tbody>，两个调用各持一个 tbody，
+//   恢复后都往同一个 wrap 里 append → 表格变成两份。
+//   旧守卫 `if (seq !== fillSeq) return` 也形同虚设：render 里 `++fillSeq` 后
+//   立即调 fillTable，后者读到的是同一个值，永远相等。
+//
+// 正确做法：把“占位令牌”在**调用时**发出去（而不是在函数体里读），
+//   await 回来只有令牌仍是最新的那次才建 DOM、写 DOM；否则直接放弃。
+//   这样无论多少次并发，DOM 只会被写一次。
+let fillToken = 0;
 
 /** 渲染版本列表（含内置版本，探测中也不至于空白）。 */
-async function fillTable(wrap, disk, opts) {
-  const seq = fillSeq;
-  clear(wrap);
-  const tbl = h("table", { class: "ed-table" });
-  tbl.append(h("thead", null, h("tr", null,
-    h("th", null, "版本"), h("th", null, "来源"), h("th", null, "更新时间"), h("th", null, "操作"))));
-  const tb = h("tbody");
+async function fillTable(wrap, disk, opts, token) {
+  const my = token === undefined ? ++fillToken : token;
   const act = activeId();
   const all = [
     { id: DEFAULT_VERSION, name: "默认版本（原版）", builtin: true, readonly: true, source: disk ? "disk" : "builtin", updatedAt: 0 },
     ...(await listAllVersions()),
   ];
-  if (seq !== fillSeq) return;   // await 期间已有更新的渲染，丢弃本次结果
+  // await 期间可能已有更新的 fillTable 发起（或入口页已关闭）：本次作废，不碰 DOM。
+  if (my !== fillToken || !root || !wrap.isConnected) return;
+
+  const tbl = h("table", { class: "ed-table" });
+  tbl.append(h("thead", null, h("tr", null,
+    h("th", null, "版本"), h("th", null, "来源"), h("th", null, "更新时间"), h("th", null, "操作"))));
+  const tb = h("tbody");
   for (const v of all) {
     const upd = v.updatedAt ? new Date(v.updatedAt).toLocaleString() : "—";
     const src = v.source === "disk" ? "磁盘" : (v.source === "browser" ? "浏览器" : "内置");
@@ -140,6 +153,9 @@ async function fillTable(wrap, disk, opts) {
     tb.append(h("tr", null, h("td", null, v.name), h("td", null, src), h("td", null, upd), ops));
   }
   tbl.append(tb);
+  // 显式清空再插入：确保同一个 wrap 被多次复用时也只是“替换”而不是“追加”
+  // （重复显示两遍那条 bug 的直接防线）。
+  clear(wrap);
   wrap.append(tbl);
 }
 

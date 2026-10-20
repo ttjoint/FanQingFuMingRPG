@@ -16,10 +16,25 @@ blob-report/
 # versions/default/assets/maps/
 # versions/default/assets/role/
 
-# 用户/编辑器创建的版本文件夹（默认版本 versions/default 仍纳入版本库）。
-# 如需把某个自制版本也提交，请用 `git add -f versions/<id>`。
+# 用户/编辑器创建的版本文件夹。
+#
+# 背景（踩过的坑）：以前这里只有 `versions/*/` + `!versions/default/`，注释里建议
+# 「要发布自制版本就用 git add -f」。实际结果是：提交了 versions/index.json，
+# 却在提交目录时漏掉大半文件，线上版本点开直接黑屏（aitest 事故）。
+# 用 -f 靠人记住「每个新文件都要 -f」，漏一次就是线上坏一次，不可靠。
+#
+# 现在改成白名单：默认忽略全部自制版本，但**显式在下面列出的版本整目录放行**。
+# 放行后可以正常 `git add versions/<id>`，新加的文件自然会被跟踪到。
+#
+# 要发布一个新版本：把 `!versions/<id>/` 追加到下面的放行清单里，
+# 然后 `node tools/gen-versions-index.mjs && node tools/check-release.mjs`。
 versions/*/
 !versions/default/
+
+# ---- 发布白名单（会随仓库部署到 GitHub Pages）----
+# 每一项都必须有真实目录，否则静态部署会出现「列表里有、点开黑屏」的悬空版本。
+# tools/check-release.mjs 会校验这一点。
+!versions/d2-expansion/
 
 # 临时测试产物（无头 Chrome / CDP 脚本 / 截图）
 _*.mjs

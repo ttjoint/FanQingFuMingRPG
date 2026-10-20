@@ -1,4 +1,4 @@
-// 给 aitest 版本添加「孙家庄 ↔ 试验场」的传送入口。
+// 给 d2-expansion 版本添加「孙家庄 ↔ 试验场」的传送入口。
 //
 // 机制：地图格（cell）的 events[i] = {trigger, map}，
 // 玩家踩上去时 world/triggers.js 会把 map 当作 mapsIndex 的 id 解析并 loadMap。
@@ -13,7 +13,7 @@ import { fromLegacyMap, toLegacyMap } from "../../src/content/mapDoc.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DEF = path.join(ROOT, "versions/default/assets");
-const PATCH = path.join(ROOT, "versions/aitest/patch.json");
+const PATCH = path.join(ROOT, "versions/d2-expansion/patch.json");
 const readJSON = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
 
 const HOME = "孙家庄";      // 开局地图（main.gsp 的 LoadInitialMap）

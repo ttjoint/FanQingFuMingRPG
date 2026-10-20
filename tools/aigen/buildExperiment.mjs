@@ -5,8 +5,13 @@
 // 因此素材选型遵循「能用/不能指望」表：圆形、块状、对称徽记可用；
 // 精细武器/人形/文字不可指望。
 //
-// 用法：node tools/aigen/buildExperiment.mjs [--dry]
-// 产出：versions/aitest/（version.json + patch.json + assets/）
+// 用法：node tools/aigen/buildExperiment.mjs [--dry] [--out=<版本id>]
+// 产出：versions/<版本id>/（version.json + patch.json + assets/）
+//
+// 关于 --out：本脚本会**整个重写**目标版本的 version.json / patch.json
+// （包括 name），所以不要指向 d2-expansion 这种“手工在用的版本”做日常试验，
+// 否则会把它的名字和补丁覆盖成「AI 素材试验场」。
+// 默认输出到 aigen-lab（临时试验场，不入库）；确认素材可用后再手工挑进正式版本。
 
 import fs from "node:fs";
 import path from "node:path";
@@ -15,7 +20,9 @@ import { fromLegacyMap } from "../../src/content/mapDoc.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DEF = path.join(ROOT, "versions/default/assets");
-const OUT = path.join(ROOT, "versions/aitest");
+// 输出目录：默认 aigen-lab（就地试验，不污染正式版本，见文件头说明）。
+const OUT_ID = (process.argv.find((a) => a.startsWith("--out=")) || "").slice(6) || "aigen-lab";
+const OUT = path.join(ROOT, "versions", OUT_ID);
 const DRY = process.argv.includes("--dry");
 
 const readJSON = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
@@ -206,7 +213,7 @@ if (DRY) {
 }
 
 writeJSON(path.join(OUT, "version.json"), {
-  format: "gsxy.version", version: 1, id: "aitest",
+  format: "gsxy.version", version: 1, id: OUT_ID,
   name: "AI 素材试验场", builtin: false, readonly: false,
   assets: "assets", base: "default", createdAt: Date.now(),
 });

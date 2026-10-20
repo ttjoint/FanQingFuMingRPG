@@ -45,6 +45,9 @@ export function writeVersionsIndex() {
         readonly: !!meta.readonly,
         updatedAt: meta.updatedAt || 0,
         assets: listAssetKeys(path.join(VDIR, name)),
+        // patch.json 是否真实存在：原版 default 没有 patch（它本身就是基准），
+        // 前端无条件 fetch 只会白打一个 404。与 serve.py 的 _rebuild_versions_index 保持一致。
+        hasPatch: fs.existsSync(path.join(VDIR, name, "patch.json")),
       });
     }
   }

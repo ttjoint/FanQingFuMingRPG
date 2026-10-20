@@ -102,7 +102,15 @@ const DATA_FILES = [
 ];
 
 // 从指定版本文件夹读取数据文件：先取原版，再（若存在）用版本自身 assets/ 覆盖。
-async function loadVersionData(versionId) {
+//
+// overrides：当前版本真实拥有的覆盖文件（逻辑键 "assets/xxx.json" → URL）。
+// 由 loadPack 的 pack.images 传入（磁盘版即 versions/<id>/assets 下实际存在的文件）。
+//
+// 为什么必须传：旧实现对 DATA_FILES 无条件发请求探测覆盖，而空白版本目录里一个文件都没有
+// → 每次启动白打 22 个必然 404 的请求（实测 d2-expansion：default 0 个 >=400，它 22 个）。
+// 这违反了“只诊断、不兜底”：用必然失败的请求当“文件存不存在”的探测器。
+// 现在只在清单里确实有该文件时才请求。
+async function loadVersionData(versionId, overrides) {
   // 原版基准（版本文件夹中的 default/assets）
   // 注意：走 assetURL 而不是手拼路径——手拼会绕过资源指纹（?v=），
   // 导致这批 JSON 每次刷新都要重传（实测 21 个请求）。
@@ -111,11 +119,12 @@ async function loadVersionData(versionId) {
     const u = assetURL("assets/" + f);
     base[f] = await fetch(u, fetchOpts(u)).then(r => (r.ok ? r.json() : null)).catch(() => null);
   }));
-  // 若当前是磁盘版本，尝试用版本自己的 assets/ 覆盖（不存在则沿用原版）。
+  // 若当前是磁盘版本，用版本自己的 assets/ 覆盖（不存在则沿用原版）。
   if (versionId && versionId !== "default" && versionId !== "__default__") {
-    const dir = "versions/" + encodeURIComponent(versionId) + "/assets/";
-    await Promise.all(DATA_FILES.map(async f => {
-      const v = await fetch(dir + f).then(r => (r.ok ? r.json() : null)).catch(() => null);
+    const only = DATA_FILES.filter(f => overrides && overrides["assets/" + f]);
+    await Promise.all(only.map(async f => {
+      const u = overrides["assets/" + f];
+      const v = await fetch(u).then(r => (r.ok ? r.json() : null)).catch(() => null);
       if (v != null) base[f] = v;
     }));
   }
@@ -139,7 +148,8 @@ async function bootInner() {
   setAssetOverrides(pack.images || {});
 
   // 1b) 数据按版本文件夹读取：原版 versions/default/assets，磁盘版本可用自身 assets/ 覆盖。
-  const data = await loadVersionData(pack.id);
+  //     传入 pack.images 作为“该版本真实拥有哪些覆盖文件”的清单，避免盲探测 404。
+  const data = await loadVersionData(pack.id, pack.images);
 
   // 2) 基础素材 / 表。
   A.atlasJson = data["atlas.json"];
