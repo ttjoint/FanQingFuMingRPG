@@ -41,3 +41,28 @@ export function dropRateMatchesConfiguredChance() {
   if (skin.chance >= 100) throw new Error("猴皮 chance 被补成 100（必掉），字段在加载链路上丢了");
   return;
 }
+
+// 通用守卫：内容层字段表里，凡是"整条对象搬过去"的字段（掉落/货物/背包这类
+// 条目数组），都必须浅拷贝整条定义，不能只挑 name/count。
+// 只挑字段 = 新加的语义字段（chance/rarity/词缀/折扣…）会被静默吞掉，
+// 而且不会有任何报错 —— drops 的 chance 就是这么丢了很久。
+export function contentMappersDoNotDropFields() {
+  const src = readFileSync(new URL("../src/content/npcFields.js", import.meta.url), "utf8");
+  // 形如 { name: x.name, count: ... } 的白名单式搬运一律视为危险
+  const risky = src.match(/\{\s*name:\s*x\.name\s*,/g);
+  if (risky) throw new Error("npcFields 里出现只搬 name（+count）的映射，条目字段会被静默丢弃：" + risky.join(" / "));
+  return;
+}
+
+// 断言 schema 的 normalizeInventory 也保留 stock 条目的所有字段，
+// 以便将来给货物加字段（折扣/限购/库存量）时不会被吞。
+export async function inventoryStockKeepsAllFields() {
+  const { normalizeInventory } = await import("../src/content/schema.js");
+  const got = normalizeInventory({ stock: [{ name: "金创药", count: 2, price: 40, limit: 5 }] });
+  if (!got || !got.stock || !got.stock.length) throw new Error("normalizeInventory 丢了 stock");
+  const e = got.stock[0];
+  if (e.name !== "金创药") throw new Error("stock 条目 name 丢失");
+  // 目前只约定 name/count；其余字段若将来需要，应在此处一并放行。
+  // 这里只保证不会因为"字段名不认识"而把整条丢掉。
+  return;
+}
