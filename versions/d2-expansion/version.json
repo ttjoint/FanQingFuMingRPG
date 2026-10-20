@@ -1,0 +1,12 @@
+{
+  "format": "gsxy.version",
+  "version": 1,
+  "id": "d2-expansion",
+  "name": "D2 拓展开发版",
+  "builtin": false,
+  "readonly": false,
+  "base": "default",
+  "assets": "assets",
+  "createdAt": 1792497750938,
+  "updatedAt": 1792498363789
+}
