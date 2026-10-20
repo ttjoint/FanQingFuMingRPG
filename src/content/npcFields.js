@@ -53,7 +53,20 @@ export const NPC_FIELDS = {
   },
   speed: { fromTemplate: d => orElse(d && d.speed, 45), default: 45 },
   runSpeed: { fromTemplate: d => orElse(d && d.runSpeed, 70), default: 70 },
-  drops: { fromTemplate: d => ((d && d.drops) || []).map(x => ({ name: x.name, count: x.count || 1 })), default: [] },
+  // 掉落表：**必须原样透传每条的 chance/min/max/rarity/affixes**。
+  //
+  // 这里曾经只搬 name/count，把 chance 丢没了 —— 而 engine/lootTable.js 的
+  // normalizeDrop 对缺失的 chance 默认 100%，于是每个怪都“必掉全部掉落物”，
+  // 数据里写的 55%/45%/20% 完全失效（实测：野猴连杀 21 只，21 次三件全掉）。
+  // 改用浅拷贝搬运整条定义，新增字段也不会再漏。
+  drops: {
+    fromTemplate: d => ((d && d.drops) || []).map(x => {
+      const o = Object.assign({}, x);
+      if (o.count == null && o.min == null) o.count = 1;
+      return o;
+    }),
+    default: [],
+  },
   inventory: { fromTemplate: d => (d && d.inventory) || null, default: null },
   // NPC 背包（脚本指令拾取/丢弃的目标容器）：条目数组，与玩家背包同一模型。
   // 空背包归一为 undefined（与未初始化的运行时实体一致），避免空数组与缺省值不等而误写入存档。

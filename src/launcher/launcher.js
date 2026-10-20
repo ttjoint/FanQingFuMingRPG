@@ -48,6 +48,7 @@ function close() { if (root) { root.remove(); root = null; } }
 
 async function render(opts) {
   clear(root);
+  const seq = ++fillSeq;   // 使旧 render 的异步回调全部失效
   // 先立即渲染骨架（含内置版本行），再异步拉磁盘版本列表填表。
   //
   // 旧实现先 await refreshDiskVersions() 再建 DOM —— 静态部署下
@@ -80,7 +81,12 @@ async function render(opts) {
   fillTable(tblWrap, disk, opts);
 
   // 异步探测磁盘/浏览器版本，完成后重填（快时无感，慢时用户已能看到内置版本）。
+  // fillTable 是 async 的：两个调用会在 await listAllVersions() 处交错 ——
+  // 慢网下初始渲染还没填完、探测完成又发起一次，旧结果后到就会把列表
+  // 追加/保留成两份。用序号丢弃过期结果。
+  const seq2 = fillSeq;
   refreshDiskVersions().then(() => {
+    if (seq2 !== fillSeq || !root) return;   // 已有更新的渲染在途/入口页已关闭
     const d = diskVersionsReady();
     const modeHint = root.querySelector("[data-role=mode-hint]");
     if (modeHint && d && !disk) modeHint.textContent = "本地模式：版本可直接写入 versions/ 文件夹";
@@ -92,8 +98,12 @@ async function render(opts) {
   }).catch(() => { });
 }
 
+/** fillTable 竞态保护：只有最新一次渲染允许写 DOM。 */
+let fillSeq = 0;
+
 /** 渲染版本列表（含内置版本，探测中也不至于空白）。 */
 async function fillTable(wrap, disk, opts) {
+  const seq = fillSeq;
   clear(wrap);
   const tbl = h("table", { class: "ed-table" });
   tbl.append(h("thead", null, h("tr", null,
@@ -104,6 +114,7 @@ async function fillTable(wrap, disk, opts) {
     { id: DEFAULT_VERSION, name: "默认版本（原版）", builtin: true, readonly: true, source: disk ? "disk" : "builtin", updatedAt: 0 },
     ...(await listAllVersions()),
   ];
+  if (seq !== fillSeq) return;   // await 期间已有更新的渲染，丢弃本次结果
   for (const v of all) {
     const upd = v.updatedAt ? new Date(v.updatedAt).toLocaleString() : "—";
     const src = v.source === "disk" ? "磁盘" : (v.source === "browser" ? "浏览器" : "内置");
